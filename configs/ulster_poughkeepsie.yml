@@ -1,0 +1,41 @@
+project:
+  name: ulster_county_poughkeepsie_area_pilot
+  region_key: ulster_poughkeepsie
+  description: >
+    Ulster County side of the Poughkeepsie/Hudson Valley field area. Poughkeepsie
+    itself is in Dutchess County, so this pilot focuses on nearby Ulster County
+    communities and corridors west of the Hudson River.
+
+paths:
+  boundary: configs/regions/ulster_poughkeepsie_pilot.geojson
+  roads_raw: data/raw/roads.gpkg
+  streams_raw: data/raw/streams.gpkg
+  known_culverts_raw: data/raw/known_culverts.gpkg
+  dem: data/raw/dem.tif
+  landcover: data/raw/landcover.tif
+
+  roads_region: data/interim/ulster_roads.gpkg
+  streams_region: data/interim/ulster_streams.gpkg
+  known_culverts_region: data/interim/ulster_known_culverts.gpkg
+  candidates: data/interim/ulster_candidates.gpkg
+  features: data/processed/ulster_training_features.gpkg
+  model: models/ulster_culvert_model.joblib
+  predictions: data/processed/ulster_predictions.gpkg
+  predictions_csv: data/processed/ulster_predictions.csv
+  metrics: reports/ulster_metrics.json
+
+candidate_generation:
+  snap_tolerance_m: 20
+  min_spacing_m: 25
+
+features:
+  positive_radius_m: 30
+  density_radius_m: 75
+  density_radii_m: [50, 100, 250, 500]
+
+model:
+  target_column: is_culvert
+  test_size: 0.25
+  random_state: 42
+  model_family: auto
+  spatial_block_size_m: 2500

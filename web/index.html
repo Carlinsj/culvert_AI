@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Culvert AI Field Review</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="styles.css?v=20260614-fieldfeedback" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <aside class="sidebar" aria-label="Culvert candidates">
+        <section class="brand">
+          <p class="eyebrow">Ulster County Pilot</p>
+          <h1>Culvert AI Field Review</h1>
+          <p id="backend-status" class="backend-status">Checking backend</p>
+          <div class="summary-grid" aria-label="Summary statistics">
+            <div>
+              <span id="total-count">0</span>
+              <label>candidates</label>
+            </div>
+            <div>
+              <span id="visible-count">0</span>
+              <label>visible</label>
+            </div>
+            <div>
+              <span id="max-score">0</span>
+              <label>top score</label>
+            </div>
+          </div>
+        </section>
+
+        <section class="list-section" aria-label="Ranked candidates">
+          <div class="section-title">
+            <h2>Ranked locations</h2>
+            <div class="section-actions">
+              <button id="place-point" type="button" aria-pressed="false">Place point</button>
+              <button
+                id="toggle-filters"
+                type="button"
+                aria-expanded="false"
+                aria-controls="filter-panel"
+              >
+                Filters
+              </button>
+              <button id="fit-visible" type="button">Fit map</button>
+            </div>
+          </div>
+
+          <section id="filter-panel" class="controls" aria-label="Map filters" hidden>
+            <label class="control-label" for="search-input">Search</label>
+            <input id="search-input" type="search" placeholder="Road, stream, evidence" />
+
+            <label class="control-label" for="score-range">Minimum score</label>
+            <div class="range-row">
+              <input id="score-range" type="range" min="0" max="100" value="0" />
+              <output id="score-output" for="score-range">0</output>
+            </div>
+
+            <div class="bucket-row" aria-label="Priority buckets">
+              <label><input type="checkbox" name="bucket" value="very_high" checked /> Very high</label>
+              <label><input type="checkbox" name="bucket" value="high" checked /> High</label>
+              <label><input type="checkbox" name="bucket" value="medium" checked /> Medium</label>
+              <label><input type="checkbox" name="bucket" value="low" checked /> Low</label>
+            </div>
+
+            <label class="toggle-row">
+              <input id="show-known" type="checkbox" />
+              <span>Include known culverts in list</span>
+            </label>
+          </section>
+
+          <ol id="candidate-list" class="candidate-list"></ol>
+        </section>
+      </aside>
+
+      <section class="map-area" aria-label="Candidate map">
+        <div id="map"></div>
+        <article id="detail-panel" class="detail-panel" aria-live="polite">
+          <div class="empty-state">Select a ranked location.</div>
+        </article>
+      </section>
+    </main>
+
+    <template id="candidate-template">
+      <li>
+        <button type="button" class="candidate-button">
+          <span class="rank"></span>
+          <span class="candidate-main">
+            <strong class="candidate-title"></strong>
+            <span class="candidate-subtitle"></span>
+          </span>
+          <span class="score-pill"></span>
+        </button>
+      </li>
+    </template>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="app.js?v=20260614-fieldfeedback"></script>
+  </body>
+</html>

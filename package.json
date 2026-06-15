@@ -1,0 +1,23 @@
+{
+  "name": "culvert-ai-ulster",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Ulster County culvert prediction workflow and field review dashboard.",
+  "type": "module",
+  "scripts": {
+    "postinstall": "bash scripts/bootstrap_python.sh",
+    "predev": "bash scripts/ensure_actual_predictions.sh",
+    "dev": "node server/dev-server.js",
+    "start": "node server/dev-server.js",
+    "demo": "scripts/python.sh -m culvert_ai.cli run-demo --output-dir data/ulster_demo && scripts/python.sh -m culvert_ai.cli export-web --predictions data/ulster_demo/processed/unlabeled_predictions.gpkg --output-dir web/data",
+    "import:reports": "scripts/python.sh -m culvert_ai.cli import-field-reports --input \"/Users/Carli/Downloads/Team No. 3.zip\" --output data/processed/field_report_culverts.gpkg --csv-output data/processed/field_report_culverts.csv",
+    "predict:actual": "bash scripts/run_actual_ulster_census_pipeline.sh",
+    "actual": "npm run predict:actual",
+    "pipeline:ulster": "bash scripts/run_ulster_unlabeled_pipeline.sh",
+    "test": "npm run test:python",
+    "test:python": "scripts/python.sh -m pytest tests"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -1,0 +1,35 @@
+.DS_Store
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+node_modules/
+npm-debug.log*
+
+# Local environment and project notes
+.env
+PROJECT_TRACKING.md
+
+# Local GIS/model outputs
+data/raw/*
+data/interim/*
+data/processed/*
+data/external/*
+models/*
+reports/*
+data/demo_run/
+data/ulster_demo/
+web/data/findings.geojson
+web/data/summary.json
+
+!data/raw/.gitkeep
+!data/interim/.gitkeep
+!data/processed/.gitkeep
+!data/external/.gitkeep
+!models/.gitkeep
+!reports/.gitkeep
+!web/data/.gitkeep

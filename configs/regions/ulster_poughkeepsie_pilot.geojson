@@ -1,0 +1,27 @@
+{
+  "type": "FeatureCollection",
+  "name": "ulster_poughkeepsie_pilot",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "region_key": "ulster_poughkeepsie",
+        "name": "Ulster County Poughkeepsie-Area Pilot",
+        "description": "Rough working boundary for the Ulster County side of the Poughkeepsie/Hudson Valley field area. Replace with an official Ulster County or NYSDOT project boundary for final analysis.",
+        "focus_places": "Highland; Lloyd; Esopus; New Paltz; Marlboro; Plattekill; Rosendale; Kingston south/east approach corridors"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-74.35, 41.55],
+            [-73.88, 41.55],
+            [-73.88, 42.12],
+            [-74.35, 42.12],
+            [-74.35, 41.55]
+          ]
+        ]
+      }
+    }
+  ]
+}
