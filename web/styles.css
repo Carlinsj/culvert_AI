@@ -369,12 +369,14 @@ output {
   width: min(430px, calc(100vw - 460px));
   max-height: min(58vh, 520px);
   overflow: auto;
+  z-index: 900;
   border: 1px solid rgba(255, 255, 255, 0.68);
   border-radius: 8px;
   padding: 16px;
   background: rgba(255, 255, 255, 0.94);
   box-shadow: var(--shadow);
   backdrop-filter: blur(8px);
+  pointer-events: auto;
 }
 
 .detail-panel h3 {
@@ -393,6 +395,40 @@ output {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   margin: 12px 0;
+}
+
+.location-summary {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0;
+  border: 1px solid rgba(31, 111, 87, 0.18);
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(251, 252, 250, 0.98);
+  box-shadow: 0 8px 18px rgba(28, 43, 35, 0.08);
+}
+
+.location-summary span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.location-summary strong {
+  display: block;
+  margin-top: 2px;
+  color: var(--ink);
+  font-size: 0.9rem;
+}
+
+.location-actions {
+  grid-column: 1 / -1;
+  margin-top: 2px;
 }
 
 .detail-grid div {
@@ -537,6 +573,15 @@ output {
   height: 38px;
   background: var(--known);
   font-size: 0.62rem;
+}
+
+.selected-marker .marker-dot,
+.selected-marker .known-marker-dot {
+  transform: scale(1.16);
+  box-shadow:
+    0 0 0 5px rgba(255, 255, 255, 0.92),
+    0 0 0 9px rgba(31, 111, 87, 0.38),
+    0 5px 16px rgba(0, 0, 0, 0.4);
 }
 
 .known-culvert-label {

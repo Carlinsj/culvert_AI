@@ -9,6 +9,8 @@ const OBSERVATION_STATUSES = {
   no_culvert: "No culvert found",
   uncertain: "Needs another look",
 };
+const SELECTED_POINT_ZOOM = 16;
+const SELECTION_POPUP_DELAY_MS = 460;
 
 const state = {
   features: [],
@@ -277,8 +279,8 @@ function renderMarkers() {
       icon: markerIcon(props),
       riseOnHover: true,
     });
-    marker.bindPopup(popupHtml(props));
-    marker.on("click", () => selectFeature(idOf(feature), { pan: false }));
+    marker.bindPopup(popupHtml(props), selectedPopupOptions());
+    marker.on("click", () => selectFeature(idOf(feature), { pan: true }));
     marker.addTo(state.layer);
     state.markers.set(idOf(feature), marker);
   });
@@ -298,13 +300,14 @@ function renderMarkers() {
       offset: [0, -18],
       className: "known-culvert-label",
     });
-    marker.bindPopup(popupHtml(props));
-    marker.on("click", () => selectFeature(idOf(feature), { pan: false }));
+    marker.bindPopup(popupHtml(props), selectedPopupOptions());
+    marker.on("click", () => selectFeature(idOf(feature), { pan: true }));
     marker.addTo(state.knownLayer);
     state.markers.set(idOf(feature), marker);
   });
 
   renderObservationMarkers();
+  updateSelectedMarkerClass();
 }
 
 function renderList() {
@@ -335,16 +338,52 @@ function selectFeature(candidateId, options = { pan: true }) {
   state.selectedId = candidateId;
   renderDetail(feature);
   renderList();
+  updateSelectedMarkerClass();
 
   const marker = state.markers.get(candidateId);
   const latLng = featureLatLng(feature);
-  if (options.pan && latLng) {
-    state.map.setView(latLng, Math.max(state.map.getZoom(), 15), { animate: true });
+  const shouldCenter = options.pan !== false && latLng;
+  if (shouldCenter) {
+    centerMapOnPoint(latLng);
   }
 
   if (marker) {
-    marker.openPopup();
+    openSelectedPopup(marker, shouldCenter);
   }
+}
+
+function centerMapOnPoint(latLng) {
+  const zoom = Math.max(state.map.getZoom(), SELECTED_POINT_ZOOM);
+  state.map.flyTo(latLng, zoom, {
+    animate: true,
+    duration: 0.42,
+  });
+}
+
+function openSelectedPopup(marker, delayed) {
+  if (!delayed) {
+    marker.openPopup();
+    updateSelectedMarkerClass();
+    return;
+  }
+
+  window.setTimeout(() => {
+    marker.openPopup();
+    updateSelectedMarkerClass();
+  }, SELECTION_POPUP_DELAY_MS);
+}
+
+function selectedPopupOptions() {
+  return {
+    autoPan: false,
+    keepInView: false,
+  };
+}
+
+function updateSelectedMarkerClass() {
+  state.markers.forEach((marker, markerId) => {
+    marker.getElement()?.classList.toggle("selected-marker", markerId === state.selectedId);
+  });
 }
 
 function renderDetail(feature) {
@@ -355,6 +394,7 @@ function renderDetail(feature) {
   els.detail.innerHTML = `
     <h3>${escapeHtml(title)}</h3>
     <p>${escapeHtml(props.evidence_summary || "No evidence summary available.")}</p>
+    ${locationSummaryHtml(props)}
     <div class="detail-grid">
       ${detailCell("Discovery score", Math.round(props.score))}
       ${detailCell("Status", discoveryStatusLabel(props))}
@@ -380,13 +420,32 @@ function renderDetail(feature) {
       ${detailCell("Lat", formatNumber(props.latitude, ""))}
       ${detailCell("Lon", formatNumber(props.longitude, ""))}
     </div>
-    <div class="actions">
-      ${props.google_earth_url ? `<a href="${escapeAttr(props.google_earth_url)}" target="_blank" rel="noreferrer">Open Google Earth</a>` : ""}
-      <a href="https://www.google.com/maps/search/?api=1&query=${props.latitude},${props.longitude}" target="_blank" rel="noreferrer">Open Google Maps</a>
-    </div>
     ${fieldFeedbackHtml("Field verification")}
   `;
   bindFeedbackActions((status, notes) => saveObservationForFeature(feature, status, notes));
+}
+
+function locationSummaryHtml(props) {
+  const latitude = formatNumber(props.latitude, "");
+  const longitude = formatNumber(props.longitude, "");
+  const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${props.latitude},${props.longitude}`;
+
+  return `
+    <section class="location-summary" aria-label="Selected location">
+      <div>
+        <span>Latitude</span>
+        <strong>${escapeHtml(latitude)}</strong>
+      </div>
+      <div>
+        <span>Longitude</span>
+        <strong>${escapeHtml(longitude)}</strong>
+      </div>
+      <div class="actions location-actions">
+        ${props.google_earth_url ? `<a href="${escapeAttr(props.google_earth_url)}" target="_blank" rel="noreferrer">Google Earth</a>` : ""}
+        <a href="${escapeAttr(mapsUrl)}" target="_blank" rel="noreferrer">Google Maps</a>
+      </div>
+    </section>
+  `;
 }
 
 function clearDetail() {
@@ -461,7 +520,7 @@ function renderObservationMarkers() {
       riseOnHover: true,
       zIndexOffset: 900,
     });
-    marker.bindPopup(observationPopupHtml(feature.properties));
+    marker.bindPopup(observationPopupHtml(feature.properties), selectedPopupOptions());
     marker.addTo(state.observationLayer);
   });
 }

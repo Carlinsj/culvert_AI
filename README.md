@@ -179,6 +179,24 @@ http://127.0.0.1:8080
 The dashboard uses Leaflet with OpenStreetMap tiles. It shows ranked candidates, priority filters,
 evidence summaries, Google Earth links, and Google Maps links.
 
+## Vercel Deployment
+
+This repo deploys to Vercel as a static dashboard from `web/`. The checked-in `vercel.json` skips
+the local Python bootstrap, validates the static web assets with `npm run build`, and rewrites
+`/api/findings` and `/api/summary` to the generated files in `web/data/`.
+
+Before deploying, refresh the predictions locally if needed and commit the generated dashboard data:
+
+```bash
+npm run predict:actual
+npm run build
+git add .gitignore README.md package.json vercel.json scripts/verify_web_build.js web/data/findings.geojson web/data/summary.json
+```
+
+The Vercel-hosted dashboard is read-only for shared field observations. Observation feedback still
+works in the browser through local storage, while the local dev server can write to
+`data/processed/field_observations.geojson`.
+
 If another region has verified culvert locations, use transfer learning:
 
 ```bash

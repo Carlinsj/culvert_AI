@@ -23,8 +23,8 @@ models/*
 reports/*
 data/demo_run/
 data/ulster_demo/
-web/data/findings.geojson
-web/data/summary.json
+!web/data/findings.geojson
+!web/data/summary.json
 
 !data/raw/.gitkeep
 !data/interim/.gitkeep

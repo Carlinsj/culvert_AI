@@ -5,6 +5,7 @@
   "description": "Ulster County culvert prediction workflow and field review dashboard.",
   "type": "module",
   "scripts": {
+    "build": "node scripts/verify_web_build.js",
     "postinstall": "bash scripts/bootstrap_python.sh",
     "predev": "bash scripts/ensure_actual_predictions.sh",
     "dev": "node server/dev-server.js",

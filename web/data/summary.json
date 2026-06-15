@@ -1,0 +1,20 @@
+{
+  "rows": 1038,
+  "discovery_candidates": 1000,
+  "known_field_matches": 38,
+  "score_column": "discovery_score",
+  "max_score": 59.47951374630932,
+  "mean_score": 40.251215669643514,
+  "priority_buckets": {
+    "medium": 695,
+    "low": 283,
+    "very_high": 38,
+    "high": 22
+  },
+  "bounds": [
+    -74.764928,
+    41.58787499999999,
+    -73.92809700000001,
+    42.16042010463083
+  ]
+}
