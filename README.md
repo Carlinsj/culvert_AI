@@ -181,21 +181,34 @@ evidence summaries, Google Earth links, and Google Maps links.
 
 ## Vercel Deployment
 
-This repo deploys to Vercel as a static dashboard from `web/`. The checked-in `vercel.json` skips
-the local Python bootstrap, validates the static web assets with `npm run build`, and rewrites
-`/api/findings` and `/api/summary` to the generated files in `web/data/`.
+This repo deploys to Vercel as a static dashboard from `web/` plus lightweight API functions in
+`api/`. The checked-in `vercel.json` skips the local Python bootstrap, validates the static web
+assets with `npm run build`, and lets the Vercel Functions serve feedback-adjusted findings from
+Vercel Blob.
+
+Create a Vercel Blob store for the project and set `BLOB_READ_WRITE_TOKEN` in Vercel. The defaults in
+`.env.example` store:
+
+- field observations at `culvert-ai/field_observations.geojson`
+- feedback-adjusted findings at `culvert-ai/findings.geojson`
+- feedback-adjusted summary stats at `culvert-ai/summary.json`
 
 Before deploying, refresh the predictions locally if needed and commit the generated dashboard data:
 
 ```bash
 npm run predict:actual
 npm run build
-git add .gitignore README.md package.json vercel.json scripts/verify_web_build.js web/data/findings.geojson web/data/summary.json
+git add .gitignore .env.example README.md package.json package-lock.json vercel.json api scripts/verify_web_build.js scripts/pull_vercel_observations.js web/app.js web/data/findings.geojson web/data/summary.json
 ```
 
-The Vercel-hosted dashboard is read-only for shared field observations. Observation feedback still
-works in the browser through local storage, while the local dev server can write to
-`data/processed/field_observations.geojson`.
+On Vercel, saving field feedback writes to Blob, refreshes the served `/api/findings` ranking, and
+marks confirmed/denied culverts so the dashboard reflects the update immediately. The full Python
+supervised model retrain still runs locally because it depends on the geospatial pipeline. To fold
+deployed feedback into that model and refresh the deployable `web/data` files:
+
+```bash
+BLOB_READ_WRITE_TOKEN=... npm run retrain:from-vercel
+```
 
 If another region has verified culvert locations, use transfer learning:
 

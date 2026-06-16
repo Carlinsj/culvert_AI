@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Culvert AI Field Review</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <link rel="stylesheet" href="styles.css?v=20260614-fieldfeedback" />
+    <link rel="stylesheet" href="styles.css?v=20260615-details-modal" />
   </head>
   <body>
     <main class="app-shell">
@@ -82,6 +82,14 @@
       </section>
     </main>
 
+    <dialog id="detail-modal" class="detail-modal" aria-labelledby="detail-modal-title">
+      <form method="dialog" class="detail-modal-header">
+        <h2 id="detail-modal-title">Location details</h2>
+        <button id="detail-modal-close" type="submit" aria-label="Close details">Close</button>
+      </form>
+      <div id="detail-modal-body" class="detail-modal-body"></div>
+    </dialog>
+
     <template id="candidate-template">
       <li>
         <button type="button" class="candidate-button">
@@ -96,6 +104,6 @@
     </template>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="app.js?v=20260614-fieldfeedback"></script>
+    <script src="app.js?v=20260615-details-modal"></script>
   </body>
 </html>

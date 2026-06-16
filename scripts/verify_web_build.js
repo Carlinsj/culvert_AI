@@ -10,6 +10,9 @@ const requiredFiles = [
   "web/app.js",
   "web/data/findings.geojson",
   "web/data/summary.json",
+  "api/findings.js",
+  "api/observations.js",
+  "api/summary.js",
 ];
 
 for (const relativePath of requiredFiles) {
@@ -34,3 +37,11 @@ if (!Number.isFinite(Number(summary.rows))) {
 }
 
 console.log(`Verified static Vercel build assets: ${findings.features.length} findings.`);
+
+await Promise.all([
+  import("../api/findings.js"),
+  import("../api/observations.js"),
+  import("../api/summary.js"),
+]);
+
+console.log("Verified Vercel API handlers import cleanly.");

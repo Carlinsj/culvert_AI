@@ -4,16 +4,12 @@
   "installCommand": "npm ci --ignore-scripts",
   "buildCommand": "npm run build",
   "outputDirectory": "web",
-  "rewrites": [
-    {
-      "source": "/api/findings",
-      "destination": "/data/findings.geojson"
-    },
-    {
-      "source": "/api/summary",
-      "destination": "/data/summary.json"
+  "functions": {
+    "api/**/*.js": {
+      "maxDuration": 30,
+      "includeFiles": "web/data/**"
     }
-  ],
+  },
   "headers": [
     {
       "source": "/data/(.*)",

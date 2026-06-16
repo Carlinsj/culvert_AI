@@ -40,6 +40,10 @@ const els = {
   toggleFilters: document.querySelector("#toggle-filters"),
   filterPanel: document.querySelector("#filter-panel"),
   detail: document.querySelector("#detail-panel"),
+  detailModal: document.querySelector("#detail-modal"),
+  detailModalBody: document.querySelector("#detail-modal-body"),
+  detailModalTitle: document.querySelector("#detail-modal-title"),
+  detailModalClose: document.querySelector("#detail-modal-close"),
   fitVisible: document.querySelector("#fit-visible"),
   backendStatus: document.querySelector("#backend-status"),
 };
@@ -62,15 +66,24 @@ async function init() {
       fetchFirst(SUMMARY_URLS),
       fetchObservations(),
     ]);
-    state.features = geojson.features.map(normalizeFeature);
-    state.filtered = state.features;
-    state.observations = observations;
-    renderSummary(summary);
-    render();
+    applyDashboardData(geojson, summary, observations);
   } catch (error) {
     showLoadError(`Could not load web/data/findings.geojson. Run culvert-ai export-web first.`);
     console.error(error);
   }
+}
+
+function applyDashboardData(geojson, summary, observations, options = {}) {
+  const selectedId = options.preserveSelection ? state.selectedId : null;
+  const observationFeatures = Array.isArray(observations) ? observations : observations?.features || [];
+  state.features = (geojson.features || []).map(normalizeFeature);
+  state.filtered = state.features;
+  state.observations = mergeObservations([...observationFeatures, ...loadLocalObservations()]);
+  if (selectedId && state.features.some((feature) => idOf(feature) === selectedId)) {
+    state.selectedId = selectedId;
+  }
+  renderSummary(summary);
+  render();
 }
 
 function setupMap() {
@@ -112,6 +125,11 @@ function bindControls() {
     setFilterPanelOpen(false);
   });
   els.fitVisible.addEventListener("click", fitVisibleMarkers);
+  els.detailModal?.addEventListener("click", (event) => {
+    if (event.target === els.detailModal) {
+      els.detailModal.close();
+    }
+  });
 }
 
 function toggleFilterPanel() {
@@ -388,41 +406,91 @@ function updateSelectedMarkerClass() {
 
 function renderDetail(feature) {
   const props = feature.properties;
+  const displayId = locationDisplayId(props);
   const title = props.knownFieldMatch
-    ? `Known culvert: ${knownCulvertLabel(props)}`
-    : `Rank ${formatValue(props.rank)}: ${props.road_name || "Unnamed road"}`;
+    ? `Known culvert · ${displayId}`
+    : `Rank ${formatValue(props.rank)} · ${displayId}`;
   els.detail.innerHTML = `
     <h3>${escapeHtml(title)}</h3>
-    <p>${escapeHtml(props.evidence_summary || "No evidence summary available.")}</p>
-    ${locationSummaryHtml(props)}
-    <div class="detail-grid">
-      ${detailCell("Discovery score", Math.round(props.score))}
-      ${detailCell("Status", discoveryStatusLabel(props))}
-      ${detailCell("Model rank", formatScorePartFrom100(props.model_rank_score))}
-      ${detailCell("Model probability", formatPercent(props.culvert_probability))}
-      ${detailCell("GIS evidence", formatScorePartFrom100(props.evidence_score ?? props.culvert_likelihood_score))}
+    <p>${escapeHtml(compactEvidenceSummary(props))}</p>
+    <div class="quick-detail-grid">
+      ${detailCell("Score", Math.round(props.score))}
       ${detailCell("Priority", labelBucket(props.bucket))}
-      ${detailCell("Drainage", props.stream_name || "Unknown")}
-      ${detailCell("Crossing angle", formatNumber(props.crossing_angle_degrees, "deg"))}
-      ${detailCell("Road-drainage", formatScorePart(props.road_stream_proximity_score))}
-      ${detailCell("Drainage strength", formatScorePart(props.drainage_strength_score))}
-      ${detailCell("Crossing geometry", formatScorePart(props.crossing_geometry_score))}
-      ${detailCell("Road context", formatScorePart(props.road_context_score))}
-      ${detailCell("Valley position", formatScorePart(props.valley_position_score))}
-      ${detailCell("Terrain break", formatScorePart(props.terrain_break_score))}
-      ${detailCell("Field report", formatScorePart(props.field_report_support_score))}
-      ${detailCell("Field match", props.knownFieldMatch ? "yes" : "no")}
-      ${detailCell("Report date", props.nearest_field_report_date || props.field_report_date || "n/a")}
-      ${detailCell("Culvert ID", props.nearest_field_report_culvert_id || "n/a")}
-      ${detailCell("Field distance", formatNumber(props.dist_to_known_culvert_m, "m"))}
-      ${detailCell("Valley depth", formatNumber(props.valley_depth_9x9_m, "m"))}
-      ${detailCell("Slope", formatNumber(props.slope_degrees, "deg"))}
-      ${detailCell("Lat", formatNumber(props.latitude, ""))}
-      ${detailCell("Lon", formatNumber(props.longitude, ""))}
+      ${detailCell("Road", props.road_name || "Unnamed road")}
+      ${detailCell("Drainage/source", drainageLabel(props))}
     </div>
+    ${locationSummaryHtml(props)}
+    <button id="open-detail-modal" type="button" class="secondary-action">More details</button>
     ${fieldFeedbackHtml("Field verification")}
   `;
+  els.detail.querySelector("#open-detail-modal")?.addEventListener("click", () => openDetailModal(feature));
   bindFeedbackActions((status, notes) => saveObservationForFeature(feature, status, notes));
+}
+
+function openDetailModal(feature) {
+  const props = feature.properties;
+  if (!els.detailModal || !els.detailModalBody || !els.detailModalTitle) return;
+
+  els.detailModalTitle.textContent = `${locationDisplayId(props)} details`;
+  els.detailModalBody.innerHTML = `
+    <section class="modal-section">
+      <h3>Location</h3>
+      <div class="detail-grid">
+        ${detailCell("Readable ID", locationDisplayId(props))}
+        ${detailCell("Source ID", readableSourceId(props))}
+        ${detailCell("Status", discoveryStatusLabel(props))}
+        ${detailCell("Road", props.road_name || "Unnamed road")}
+        ${detailCell("Drainage/source", drainageLabel(props))}
+        ${detailCell("Latitude", formatNumber(props.latitude, ""))}
+        ${detailCell("Longitude", formatNumber(props.longitude, ""))}
+        ${detailCell("Crossing angle", formatNumber(props.crossing_angle_degrees, "deg"))}
+      </div>
+    </section>
+
+    <section class="modal-section">
+      <h3>Scores</h3>
+      <div class="detail-grid">
+        ${detailCell("Discovery score", Math.round(props.score))}
+        ${detailCell("Model probability", formatPercent(props.culvert_probability))}
+        ${detailCell("Model rank", formatScorePartFrom100(props.model_rank_score))}
+        ${detailCell("Priority", labelBucket(props.bucket))}
+        ${detailCell("GIS evidence", formatScorePartFrom100(props.evidence_score ?? props.culvert_likelihood_score))}
+        ${detailCell("Road-drainage", formatScorePart(props.road_stream_proximity_score))}
+        ${detailCell("Drainage strength", formatScorePart(props.drainage_strength_score))}
+        ${detailCell("Crossing geometry", formatScorePart(props.crossing_geometry_score))}
+        ${detailCell("Road context", formatScorePart(props.road_context_score))}
+        ${detailCell("Valley position", formatScorePart(props.valley_position_score))}
+        ${detailCell("Terrain break", formatScorePart(props.terrain_break_score))}
+        ${detailCell("Field report", formatScorePart(props.field_report_support_score))}
+      </div>
+    </section>
+
+    <section class="modal-section">
+      <h3>Field data</h3>
+      <div class="detail-grid">
+        ${detailCell("Field match", props.knownFieldMatch ? "yes" : "no")}
+        ${detailCell("Report date", props.nearest_field_report_date || props.field_report_date || "n/a")}
+        ${detailCell("Culvert ID", formatReadableId(props.nearest_field_report_culvert_id || "n/a"))}
+        ${detailCell("Field distance", formatNumber(props.dist_to_known_culvert_m, "m"))}
+        ${detailCell("Valley depth", formatNumber(props.valley_depth_9x9_m, "m"))}
+        ${detailCell("Slope", formatNumber(props.slope_degrees, "deg"))}
+      </div>
+    </section>
+
+    <section class="modal-section">
+      <h3>How the scores are calculated</h3>
+      <dl class="score-definitions">
+        ${definitionItem("Discovery score", "Calculated in build_discovery_ranking. It blends GIS evidence with model rank when supervised predictions exist: 55% agreement signal, 25% evidence score, and 20% weighted signal using 40% evidence / 60% model rank. If no supervised model is available, it falls back to the evidence score.")}
+        ${definitionItem("Model probability", "Calculated in predict_culvert_probability from the trained scikit-learn model using numeric feature columns. It is the model's predicted probability that the candidate is a culvert.")}
+        ${definitionItem("Priority", "Bucketed from the final score: low <= 35, medium > 35, high > 55, very high > 75. The list rank sorts undiscovered candidates by discovery score before known matches.")}
+        ${definitionItem("Drainage/source", "This label is the stream or source name for the mapped drainage feature, not a numeric score.")}
+        ${definitionItem("Drainage strength", "Calculated from stream order and stream-density percentile features. Higher means stronger nearby drainage evidence.")}
+        ${definitionItem("Road-drainage", "Calculated from road-stream distance and exact intersection evidence. Distance uses 1 / (1 + distance_m / 20), plus an exact-intersection boost.")}
+        ${definitionItem("Crossing geometry", "Calculated from crossing angle as 1 - abs(90 - angle) / 90. Crossings closer to 90 degrees score higher.")}
+      </dl>
+    </section>
+  `;
+  els.detailModal.showModal();
 }
 
 function locationSummaryHtml(props) {
@@ -460,6 +528,40 @@ function listSubtitle(props) {
   }
   const stream = props.stream_name && props.stream_name !== "route sample" ? props.stream_name : props.source;
   return stream ? `undiscovered candidate · ${stream}` : "undiscovered candidate";
+}
+
+function compactEvidenceSummary(props) {
+  if (props.knownFieldMatch) {
+    return props.nearest_field_report_date
+      ? `Known field match from ${props.nearest_field_report_date}.`
+      : "Known field match.";
+  }
+  return props.evidence_summary || "No evidence summary available.";
+}
+
+function drainageLabel(props) {
+  const label = props.stream_name && props.stream_name !== "route sample" ? props.stream_name : props.source;
+  return label || "Unknown";
+}
+
+function locationDisplayId(props) {
+  return formatReadableId(
+    props.candidate_id ||
+      props.nearest_field_report_culvert_id ||
+      props.culvert_id ||
+      props.observation_id ||
+      props.road_name,
+  );
+}
+
+function readableSourceId(props) {
+  return formatReadableId(
+    props.candidate_id ||
+      props.nearest_field_report_culvert_id ||
+      props.culvert_id ||
+      props.nearest_field_report_route ||
+      "n/a",
+  );
 }
 
 function fitVisibleMarkers() {
@@ -555,18 +657,18 @@ function popupHtml(props) {
 }
 
 function knownCulvertLabel(props) {
-  return firstPresent([
+  return formatReadableId(firstPresent([
     props.nearest_field_report_culvert_id,
     props.culvert_id,
     props.nearest_field_report_route,
     props.road_name,
     "Known culvert",
-  ]);
+  ]));
 }
 
 function knownCulvertShortLabel(props) {
-  const label = knownCulvertLabel(props);
-  if (/^sc\d+/i.test(label)) return label.replace(/^sc/i, "SC").slice(0, 6);
+  const label = formatReadableId(knownCulvertLabel(props));
+  if (/^sc[-_]?\d+/i.test(label)) return label.replace(/^sc/i, "SC").slice(0, 7);
   return "K";
 }
 
@@ -597,10 +699,7 @@ function bindFeedbackActions(saveHandler) {
       if (statusOutput) statusOutput.textContent = "Saving field observation...";
       try {
         const result = await saveHandler(status, notes);
-        const storage =
-          result.storage === "file"
-            ? "Saved to data/processed/field_observations.geojson."
-            : "Saved in this browser until the server is restarted.";
+        const storage = storageMessage(result.storage);
         if (statusOutput) {
           statusOutput.textContent = `${statusLabel(status)}. ${storage}`;
         }
@@ -661,13 +760,40 @@ async function saveObservation(payload) {
     }
     const saved = await response.json();
     const savedFeature = normalizeObservationFeature(saved.feature || feature);
-    addObservation(savedFeature);
-    return { feature: savedFeature, storage: "file" };
+    if (saved.storage === "memory") {
+      storeLocalObservation(savedFeature);
+    }
+    if (saved.findings && saved.summary) {
+      applyDashboardData(saved.findings, saved.summary, saved.observations || { features: [savedFeature] }, {
+        preserveSelection: true,
+      });
+    } else {
+      addObservation(savedFeature);
+    }
+    return {
+      feature: savedFeature,
+      storage: saved.storage || "file",
+      training: saved.training,
+      warning: saved.warning,
+    };
   } catch {
     storeLocalObservation(feature);
     addObservation(feature);
     return { feature, storage: "browser" };
   }
+}
+
+function storageMessage(storage) {
+  if (storage === "vercel_blob") {
+    return "Saved to Vercel and refreshed the deployed ranking.";
+  }
+  if (storage === "file") {
+    return "Saved to data/processed/field_observations.geojson.";
+  }
+  if (storage === "memory") {
+    return "Applied to this session. Configure Vercel Blob to persist it.";
+  }
+  return "Saved in this browser only.";
 }
 
 function addObservation(feature) {
@@ -819,6 +945,30 @@ function numberOrNull(value) {
 
 function detailCell(label, value) {
   return `<div><label>${escapeHtml(label)}</label><span>${escapeHtml(formatValue(value))}</span></div>`;
+}
+
+function definitionItem(term, description) {
+  return `<div><dt>${escapeHtml(term)}</dt><dd>${escapeHtml(description)}</dd></div>`;
+}
+
+function formatReadableId(value) {
+  const text = String(value || "").trim();
+  if (!text || text === "n/a") return "n/a";
+
+  const candidateMatch = text.match(/^cand_0*(\d+)$/i);
+  if (candidateMatch) return `C-${candidateMatch[1]}`;
+
+  const observationMatch = text.match(/^obs_\d+_([a-z0-9]+)$/i);
+  if (observationMatch) return `OBS-${observationMatch[1].toUpperCase()}`;
+
+  const culvertMatch = text.match(/^sc[-_ ]?0*(\d+)$/i);
+  if (culvertMatch) return `SC-${culvertMatch[1]}`;
+
+  if (text.length > 18 && /^[a-z0-9_-]+$/i.test(text)) {
+    return text.slice(-8).toUpperCase();
+  }
+
+  return text;
 }
 
 function labelBucket(bucket) {
