@@ -5,12 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Culvert AI Field Review</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <link rel="stylesheet" href="styles.css?v=20260616-mobile-field" />
+    <link rel="stylesheet" href="styles.css?v=20260617-mobile-app" />
   </head>
   <body>
     <main class="app-shell">
-      <aside class="sidebar" aria-label="Culvert candidates">
+      <aside id="mobile-sidebar" class="sidebar" aria-label="Culvert candidates">
         <section class="brand">
+          <button id="mobile-sidebar-close" class="mobile-sidebar-close" type="button" aria-label="Close list and filters">
+            Close
+          </button>
           <p class="eyebrow">Ulster County Pilot</p>
           <h1>Culvert AI Field Review</h1>
           <p id="backend-status" class="backend-status">Checking backend</p>
@@ -73,10 +76,29 @@
           <ol id="candidate-list" class="candidate-list"></ol>
         </section>
       </aside>
+      <div id="drawer-backdrop" class="drawer-backdrop" hidden></div>
 
       <section class="map-area" aria-label="Candidate map">
+        <div class="mobile-map-bar" aria-label="Map controls">
+          <button
+            id="mobile-menu-toggle"
+            class="mobile-menu-toggle"
+            type="button"
+            aria-label="Open list and filters"
+            aria-expanded="false"
+            aria-controls="mobile-sidebar"
+          >
+            <span></span>
+            <span></span>
+            <span></span>
+          </button>
+          <button id="locate-me" class="locate-me" type="button" aria-pressed="false">
+            Locate me
+          </button>
+        </div>
+        <p id="location-status" class="location-status" role="status" aria-live="polite"></p>
         <div id="map"></div>
-        <article id="detail-panel" class="detail-panel" aria-live="polite">
+        <article id="detail-panel" class="detail-panel" aria-live="polite" hidden>
           <div class="empty-state">Select a ranked location.</div>
         </article>
       </section>
@@ -104,6 +126,6 @@
     </template>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="app.js?v=20260616-mobile-field"></script>
+    <script src="app.js?v=20260617-mobile-app"></script>
   </body>
 </html>

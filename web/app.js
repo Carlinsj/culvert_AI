@@ -9,6 +9,8 @@ const OBSERVATION_STATUSES = {
   no_culvert: "No culvert found",
   uncertain: "Needs another look",
 };
+const MOBILE_VIEWPORT_QUERY = "(max-width: 820px)";
+const NEARBY_FOCUS_LIMIT = 12;
 const SELECTED_POINT_ZOOM = 16;
 const SELECTION_POPUP_DELAY_MS = 460;
 
@@ -21,8 +23,11 @@ const state = {
   layer: null,
   knownLayer: null,
   observationLayer: null,
+  locationLayer: null,
   map: null,
   placingPoint: false,
+  locationWatchId: null,
+  userLocation: null,
 };
 
 const els = {
@@ -46,6 +51,12 @@ const els = {
   detailModalClose: document.querySelector("#detail-modal-close"),
   fitVisible: document.querySelector("#fit-visible"),
   backendStatus: document.querySelector("#backend-status"),
+  sidebar: document.querySelector("#mobile-sidebar"),
+  drawerBackdrop: document.querySelector("#drawer-backdrop"),
+  mobileMenuToggle: document.querySelector("#mobile-menu-toggle"),
+  mobileSidebarClose: document.querySelector("#mobile-sidebar-close"),
+  locateMe: document.querySelector("#locate-me"),
+  locationStatus: document.querySelector("#location-status"),
 };
 
 init();
@@ -100,6 +111,7 @@ function setupMap() {
   state.layer = L.layerGroup().addTo(state.map);
   state.knownLayer = L.layerGroup().addTo(state.map);
   state.observationLayer = L.layerGroup().addTo(state.map);
+  state.locationLayer = L.layerGroup().addTo(state.map);
   state.map.on("click", handleMapClick);
   requestAnimationFrame(() => state.map.invalidateSize());
 }
@@ -114,14 +126,26 @@ function bindControls() {
   els.showKnown?.addEventListener("change", render);
   els.placePoint?.addEventListener("click", togglePlacePointMode);
   els.toggleFilters?.addEventListener("click", toggleFilterPanel);
+  els.mobileMenuToggle?.addEventListener("click", () => setMobileDrawerOpen(true));
+  els.mobileSidebarClose?.addEventListener("click", () => setMobileDrawerOpen(false));
+  els.drawerBackdrop?.addEventListener("click", () => setMobileDrawerOpen(false));
+  els.locateMe?.addEventListener("click", toggleLocationTracking);
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
       setFilterPanelOpen(false);
+      setMobileDrawerOpen(false);
     }
   });
   document.addEventListener("click", (event) => {
     if (!els.filterPanel || els.filterPanel.hidden) return;
-    if (els.filterPanel.contains(event.target) || els.toggleFilters?.contains(event.target)) return;
+    if (
+      els.filterPanel.contains(event.target) ||
+      els.toggleFilters?.contains(event.target) ||
+      els.mobileMenuToggle?.contains(event.target) ||
+      els.sidebar?.contains(event.target)
+    ) {
+      return;
+    }
     setFilterPanelOpen(false);
   });
   els.fitVisible.addEventListener("click", fitVisibleMarkers);
@@ -141,6 +165,22 @@ function setFilterPanelOpen(open) {
   if (!els.filterPanel || !els.toggleFilters) return;
   els.filterPanel.hidden = !open;
   els.toggleFilters.setAttribute("aria-expanded", String(open));
+}
+
+function setMobileDrawerOpen(open) {
+  document.body.classList.toggle("mobile-drawer-open", open);
+  els.mobileMenuToggle?.setAttribute("aria-expanded", String(open));
+  if (els.drawerBackdrop) {
+    els.drawerBackdrop.hidden = !open;
+  }
+  if (open && isMobileViewport()) {
+    setFilterPanelOpen(true);
+  }
+  window.requestAnimationFrame(() => state.map?.invalidateSize());
+}
+
+function isMobileViewport() {
+  return window.matchMedia(MOBILE_VIEWPORT_QUERY).matches;
 }
 
 async function fetchJson(url) {
@@ -254,6 +294,7 @@ function render() {
   const minScore = Number(els.score.value);
   const buckets = new Set(els.buckets.filter((input) => input.checked).map((input) => input.value));
   const showKnown = Boolean(els.showKnown?.checked);
+  updateFeatureDistances();
 
   state.filtered = state.features
     .filter((feature) => showKnown || !feature.properties.knownFieldMatch)
@@ -268,16 +309,17 @@ function render() {
       }
       return false;
     })
-    .sort((a, b) => a.properties.rank - b.properties.rank);
+    .sort(compareFeaturesForList);
 
   updateVisibleCount();
   renderMarkers();
   renderList();
 
-  if (!state.selectedId && state.filtered.length) {
+  const shouldAutoSelect = !isMobileViewport();
+  if (!state.selectedId && state.filtered.length && shouldAutoSelect) {
     selectFeature(state.filtered[0].properties.candidate_id, { pan: false });
   } else if (state.selectedId && !state.filtered.some((feature) => idOf(feature) === state.selectedId)) {
-    if (state.filtered.length) {
+    if (state.filtered.length && shouldAutoSelect) {
       selectFeature(state.filtered[0].properties.candidate_id, { pan: false });
     } else {
       clearDetail();
@@ -354,6 +396,7 @@ function renderList() {
 function selectFeature(candidateId, options = { pan: true }) {
   const feature = state.features.find((item) => idOf(item) === candidateId);
   if (!feature) return;
+  setMobileDrawerOpen(false);
   state.selectedId = candidateId;
   renderDetail(feature);
   renderList();
@@ -377,7 +420,7 @@ function selectFeature(candidateId, options = { pan: true }) {
 
 function scrollDetailIntoViewOnMobile() {
   if (!window.matchMedia("(max-width: 820px)").matches) return;
-  els.detail?.scrollIntoView({ block: "start", behavior: "smooth" });
+  state.map?.invalidateSize();
 }
 
 function centerMapOnPoint(latLng) {
@@ -420,8 +463,12 @@ function renderDetail(feature) {
   const title = props.knownFieldMatch
     ? `Known culvert · ${displayId}`
     : `Rank ${formatValue(props.rank)} · ${displayId}`;
+  showDetailPanel();
   els.detail.innerHTML = `
-    <h3>${escapeHtml(title)}</h3>
+    <div class="detail-panel-header">
+      <h3>${escapeHtml(title)}</h3>
+      <button type="button" class="detail-close" data-close-detail aria-label="Close details">Close</button>
+    </div>
     <p>${escapeHtml(compactEvidenceSummary(props))}</p>
     <div class="quick-detail-grid">
       ${detailCell("Score", Math.round(props.score))}
@@ -433,6 +480,7 @@ function renderDetail(feature) {
     <button id="open-detail-modal" type="button" class="secondary-action">More details</button>
     ${fieldFeedbackHtml("Field verification")}
   `;
+  bindDetailCloseAction();
   els.detail.querySelector("#open-detail-modal")?.addEventListener("click", () => openDetailModal(feature));
   bindFeedbackActions((status, notes) => saveObservationForFeature(feature, status, notes));
 }
@@ -528,16 +576,65 @@ function locationSummaryHtml(props) {
 
 function clearDetail() {
   state.selectedId = null;
-  els.detail.innerHTML = `<div class="empty-state">Select a ranked location.</div>`;
+  hideDetailPanel({ clearSelection: false });
+}
+
+function showDetailPanel() {
+  if (!els.detail) return;
+  els.detail.hidden = false;
+}
+
+function hideDetailPanel(options = {}) {
+  const clearSelection = options.clearSelection !== false;
+  if (state.placingPoint) {
+    state.placingPoint = false;
+    updatePlacePointButton();
+  }
+  if (clearSelection) {
+    state.selectedId = null;
+    renderList();
+    updateSelectedMarkerClass();
+    state.map?.closePopup();
+  }
+  if (!els.detail) return;
+  els.detail.hidden = true;
+  els.detail.innerHTML = `<div class="empty-state">Select a culvert from the map or list.</div>`;
+  state.map?.invalidateSize();
+}
+
+function bindDetailCloseAction() {
+  els.detail.querySelector("[data-close-detail]")?.addEventListener("click", () => hideDetailPanel());
+}
+
+function updateFeatureDistances() {
+  state.features.forEach((feature) => {
+    const latLng = featureLatLng(feature);
+    feature.properties.distanceToUserMeters = state.userLocation && latLng
+      ? distanceMeters(state.userLocation.lat, state.userLocation.lng, latLng[0], latLng[1])
+      : null;
+  });
+}
+
+function compareFeaturesForList(a, b) {
+  const distanceA = Number(a.properties.distanceToUserMeters);
+  const distanceB = Number(b.properties.distanceToUserMeters);
+  if (Number.isFinite(distanceA) && Number.isFinite(distanceB)) {
+    return distanceA - distanceB || a.properties.rank - b.properties.rank;
+  }
+  if (Number.isFinite(distanceA)) return -1;
+  if (Number.isFinite(distanceB)) return 1;
+  return a.properties.rank - b.properties.rank;
 }
 
 function listSubtitle(props) {
+  const distance = formatDistance(props.distanceToUserMeters);
+  const prefix = distance ? `${distance} away · ` : "";
   if (props.knownFieldMatch) {
     const date = props.nearest_field_report_date || props.field_report_date;
-    return date ? `field report match · ${date}` : "field report match";
+    return date ? `${prefix}field report match · ${date}` : `${prefix}field report match`;
   }
   const stream = props.stream_name && props.stream_name !== "route sample" ? props.stream_name : props.source;
-  return stream ? `undiscovered candidate · ${stream}` : "undiscovered candidate";
+  return stream ? `${prefix}undiscovered candidate · ${stream}` : `${prefix}undiscovered candidate`;
 }
 
 function compactEvidenceSummary(props) {
@@ -583,6 +680,143 @@ function fitVisibleMarkers() {
 
   if (!latLngs.length) return;
   state.map.fitBounds(latLngs, { padding: [28, 28], maxZoom: 15 });
+}
+
+function toggleLocationTracking() {
+  if (state.locationWatchId !== null) {
+    stopLocationTracking();
+    return;
+  }
+  startLocationTracking();
+}
+
+function startLocationTracking() {
+  if (!navigator.geolocation) {
+    setLocationStatus("Location is not available in this browser.");
+    return;
+  }
+
+  if (els.locateMe) {
+    els.locateMe.disabled = true;
+    els.locateMe.textContent = "Locating...";
+  }
+  setLocationStatus("Requesting location permission...");
+
+  state.locationWatchId = navigator.geolocation.watchPosition(
+    handleLocationSuccess,
+    handleLocationError,
+    {
+      enableHighAccuracy: true,
+      timeout: 12000,
+      maximumAge: 15000,
+    },
+  );
+}
+
+function stopLocationTracking() {
+  if (state.locationWatchId !== null) {
+    navigator.geolocation.clearWatch(state.locationWatchId);
+  }
+  state.locationWatchId = null;
+  state.userLocation = null;
+  state.locationLayer?.clearLayers();
+  updateLocationButton(false);
+  setLocationStatus("");
+  render();
+}
+
+function handleLocationSuccess(position) {
+  const latitude = Number(position.coords.latitude);
+  const longitude = Number(position.coords.longitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    handleLocationError({ code: 0, message: "Invalid location returned by browser." });
+    return;
+  }
+
+  state.userLocation = {
+    lat: latitude,
+    lng: longitude,
+    accuracy: Number(position.coords.accuracy),
+  };
+  renderLocationMarker();
+  render();
+  focusNearbyCulverts();
+  updateLocationButton(true);
+  setLocationStatus("Showing nearest candidates to your current location.");
+}
+
+function handleLocationError(error) {
+  const permissionDenied = error?.code === 1;
+  const message = permissionDenied
+    ? "Location permission was denied. Enable location access for this site to use nearby culverts."
+    : `Could not get your location${error?.message ? `: ${error.message}` : "."}`;
+  if (state.locationWatchId !== null) {
+    navigator.geolocation.clearWatch(state.locationWatchId);
+  }
+  state.locationWatchId = null;
+  updateLocationButton(false);
+  setLocationStatus(message);
+}
+
+function updateLocationButton(isTracking) {
+  if (!els.locateMe) return;
+  els.locateMe.disabled = false;
+  els.locateMe.textContent = isTracking ? "Tracking" : "Locate me";
+  els.locateMe.setAttribute("aria-pressed", String(isTracking));
+}
+
+function setLocationStatus(message) {
+  if (!els.locationStatus) return;
+  els.locationStatus.textContent = message;
+  els.locationStatus.hidden = !message;
+}
+
+function renderLocationMarker() {
+  if (!state.locationLayer || !state.userLocation) return;
+  const latLng = [state.userLocation.lat, state.userLocation.lng];
+  const accuracy = Number.isFinite(state.userLocation.accuracy)
+    ? Math.min(Math.max(state.userLocation.accuracy, 12), 250)
+    : 25;
+  state.locationLayer.clearLayers();
+  L.circle(latLng, {
+    radius: accuracy,
+    color: "#1f6f57",
+    fillColor: "#1f6f57",
+    fillOpacity: 0.12,
+    weight: 1,
+    interactive: false,
+  }).addTo(state.locationLayer);
+  L.circleMarker(latLng, {
+    radius: 8,
+    color: "#ffffff",
+    fillColor: "#1f6f57",
+    fillOpacity: 1,
+    weight: 3,
+    className: "user-location-marker",
+    interactive: false,
+  }).addTo(state.locationLayer);
+}
+
+function focusNearbyCulverts() {
+  if (!state.userLocation) return;
+  const nearby = nearestCandidateFeatures(NEARBY_FOCUS_LIMIT);
+  const latLngs = [
+    [state.userLocation.lat, state.userLocation.lng],
+    ...nearby.map(featureLatLng).filter(Boolean),
+  ];
+
+  if (latLngs.length > 1) {
+    state.map.fitBounds(latLngs, { padding: [42, 42], maxZoom: 17 });
+  } else {
+    state.map.setView([state.userLocation.lat, state.userLocation.lng], 16);
+  }
+}
+
+function nearestCandidateFeatures(limit) {
+  return state.filtered
+    .filter((feature) => !feature.properties.knownFieldMatch)
+    .filter((feature) => Number.isFinite(Number(feature.properties.distanceToUserMeters)))
+    .slice(0, limit);
 }
 
 function knownFeatures() {
@@ -900,12 +1134,18 @@ function togglePlacePointMode() {
   state.placingPoint = !state.placingPoint;
   updatePlacePointButton();
   if (state.placingPoint) {
+    setMobileDrawerOpen(false);
     state.selectedId = null;
     renderList();
+    showDetailPanel();
     els.detail.innerHTML = `
-      <h3>Place field point</h3>
+      <div class="detail-panel-header">
+        <h3>Place field point</h3>
+        <button type="button" class="detail-close" data-close-detail aria-label="Close details">Close</button>
+      </div>
       <p>Click the map where you inspected or want to record a field observation.</p>
     `;
+    bindDetailCloseAction();
   }
 }
 
@@ -926,11 +1166,16 @@ function handleMapClick(event) {
 function renderManualPointDetail(latLng) {
   state.selectedId = null;
   renderList();
+  showDetailPanel();
   els.detail.innerHTML = `
-    <h3>New field point</h3>
+    <div class="detail-panel-header">
+      <h3>New field point</h3>
+      <button type="button" class="detail-close" data-close-detail aria-label="Close details">Close</button>
+    </div>
     <p>Lat ${formatNumber(latLng.lat, "")}, Lon ${formatNumber(latLng.lng, "")}</p>
     ${fieldFeedbackHtml("Record observation")}
   `;
+  bindDetailCloseAction();
   bindFeedbackActions((status, notes) => saveObservationAtPoint(latLng, status, notes));
   window.requestAnimationFrame(scrollDetailIntoViewOnMobile);
 }
@@ -996,6 +1241,28 @@ function formatNumber(value, suffix) {
   return `${number.toFixed(decimals)}${suffix ? ` ${suffix}` : ""}`;
 }
 
+function formatDistance(value) {
+  const meters = Number(value);
+  if (!Number.isFinite(meters)) return "";
+  const feet = meters * 3.28084;
+  if (feet < 900) return `${Math.round(feet)} ft`;
+  const miles = meters / 1609.344;
+  return `${miles < 10 ? miles.toFixed(1) : Math.round(miles)} mi`;
+}
+
+function distanceMeters(latA, lonA, latB, lonB) {
+  const radiusMeters = 6371008.8;
+  const toRadians = (degrees) => (degrees * Math.PI) / 180;
+  const phiA = toRadians(latA);
+  const phiB = toRadians(latB);
+  const deltaPhi = toRadians(latB - latA);
+  const deltaLambda = toRadians(lonB - lonA);
+  const haversine =
+    Math.sin(deltaPhi / 2) ** 2 +
+    Math.cos(phiA) * Math.cos(phiB) * Math.sin(deltaLambda / 2) ** 2;
+  return 2 * radiusMeters * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+}
+
 function formatScorePart(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) return "n/a";
@@ -1051,6 +1318,7 @@ function escapeAttr(value) {
 }
 
 function showLoadError(message) {
+  showDetailPanel();
   els.detail.innerHTML = `<div class="load-error">${escapeHtml(message)}</div>`;
 }
 
