@@ -28,6 +28,7 @@ const state = {
   placingPoint: false,
   locationWatchId: null,
   userLocation: null,
+  shouldFocusLocationOnNextUpdate: false,
 };
 
 const els = {
@@ -397,6 +398,7 @@ function selectFeature(candidateId, options = { pan: true }) {
   const feature = state.features.find((item) => idOf(item) === candidateId);
   if (!feature) return;
   setMobileDrawerOpen(false);
+  state.shouldFocusLocationOnNextUpdate = false;
   state.selectedId = candidateId;
   renderDetail(feature);
   renderList();
@@ -424,10 +426,12 @@ function scrollDetailIntoViewOnMobile() {
 }
 
 function centerMapOnPoint(latLng) {
+  state.map.stop();
   const zoom = Math.max(state.map.getZoom(), SELECTED_POINT_ZOOM);
   state.map.flyTo(latLng, zoom, {
     animate: true,
-    duration: 0.42,
+    duration: 0.32,
+    easeLinearity: 0.45,
   });
 }
 
@@ -679,6 +683,7 @@ function fitVisibleMarkers() {
   ].filter(Boolean);
 
   if (!latLngs.length) return;
+  state.map.stop();
   state.map.fitBounds(latLngs, { padding: [28, 28], maxZoom: 15 });
 }
 
@@ -700,6 +705,7 @@ function startLocationTracking() {
     els.locateMe.disabled = true;
     els.locateMe.textContent = "Locating...";
   }
+  state.shouldFocusLocationOnNextUpdate = true;
   setLocationStatus("Requesting location permission...");
 
   state.locationWatchId = navigator.geolocation.watchPosition(
@@ -719,6 +725,7 @@ function stopLocationTracking() {
   }
   state.locationWatchId = null;
   state.userLocation = null;
+  state.shouldFocusLocationOnNextUpdate = false;
   state.locationLayer?.clearLayers();
   updateLocationButton(false);
   setLocationStatus("");
@@ -739,10 +746,13 @@ function handleLocationSuccess(position) {
     accuracy: Number(position.coords.accuracy),
   };
   renderLocationMarker();
-  render();
-  focusNearbyCulverts();
+  updateNearbyListFromLocation();
+  if (state.shouldFocusLocationOnNextUpdate) {
+    focusNearbyCulverts();
+    state.shouldFocusLocationOnNextUpdate = false;
+  }
   updateLocationButton(true);
-  setLocationStatus("Showing nearest candidates to your current location.");
+  setLocationStatus("Tracking is on. Nearby list updates as your position changes.");
 }
 
 function handleLocationError(error) {
@@ -754,6 +764,7 @@ function handleLocationError(error) {
     navigator.geolocation.clearWatch(state.locationWatchId);
   }
   state.locationWatchId = null;
+  state.shouldFocusLocationOnNextUpdate = false;
   updateLocationButton(false);
   setLocationStatus(message);
 }
@@ -761,8 +772,9 @@ function handleLocationError(error) {
 function updateLocationButton(isTracking) {
   if (!els.locateMe) return;
   els.locateMe.disabled = false;
-  els.locateMe.textContent = isTracking ? "Tracking" : "Locate me";
+  els.locateMe.textContent = isTracking ? "Stop tracking" : "Locate me";
   els.locateMe.setAttribute("aria-pressed", String(isTracking));
+  els.locateMe.setAttribute("aria-label", isTracking ? "Stop location tracking" : "Start location tracking");
 }
 
 function setLocationStatus(message) {
@@ -805,11 +817,23 @@ function focusNearbyCulverts() {
     ...nearby.map(featureLatLng).filter(Boolean),
   ];
 
+  state.map.stop();
   if (latLngs.length > 1) {
-    state.map.fitBounds(latLngs, { padding: [42, 42], maxZoom: 17 });
+    state.map.fitBounds(latLngs, { padding: [42, 42], maxZoom: 17, animate: true, duration: 0.35 });
   } else {
-    state.map.setView([state.userLocation.lat, state.userLocation.lng], 16);
+    state.map.flyTo([state.userLocation.lat, state.userLocation.lng], 16, {
+      animate: true,
+      duration: 0.32,
+      easeLinearity: 0.45,
+    });
   }
+}
+
+function updateNearbyListFromLocation() {
+  updateFeatureDistances();
+  state.filtered.sort(compareFeaturesForList);
+  renderList();
+  updateVisibleCount();
 }
 
 function nearestCandidateFeatures(limit) {
