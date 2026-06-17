@@ -13,6 +13,8 @@ def test_merge_confirmed_observations_adds_confirmed_points(tmp_path):
                 "observed_at": "2026-06-14T12:00:00Z",
                 "status": "confirmed_culvert",
                 "candidate_id": "cand-1",
+                "field_culvert_id": "FC-20260617-ABCD",
+                "layout_source": "nearest_map_candidate",
                 "road_name": "State Rte 28",
                 "notes": "pipe visible",
                 "geometry": Point(-74.1, 42.0),
@@ -59,5 +61,6 @@ def test_merge_confirmed_observations_adds_confirmed_points(tmp_path):
     assert result["confirmed_added"] == 1
     assert result["denied_saved_for_review"] == 1
     assert len(combined) == 2
-    assert "cand-1" in set(combined["culvert_id"])
+    assert "FC-20260617-ABCD" in set(combined["culvert_id"])
+    assert "nearest_map_candidate" in set(combined["layout_source"])
     assert "cand-2" not in set(combined["culvert_id"])

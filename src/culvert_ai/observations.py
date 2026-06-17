@@ -29,6 +29,8 @@ def merge_confirmed_observations(
                 "label",
                 "label_confidence",
                 "observation_id",
+                "field_culvert_id",
+                "layout_source",
                 "notes",
                 "geometry",
             ],
@@ -91,6 +93,8 @@ def _confirmed_observations_as_known(
             "label": "confirmed_field_observation",
             "label_confidence": 1.0,
             "observation_id": _string_series(confirmed, "observation_id"),
+            "field_culvert_id": _string_series(confirmed, "field_culvert_id"),
+            "layout_source": _string_series(confirmed, "layout_source"),
             "notes": _string_series(confirmed, "notes"),
         },
         geometry=confirmed.geometry,
@@ -111,6 +115,7 @@ def _date_part(value) -> str:
 
 
 def _observation_culvert_id(row) -> str:
+    field_culvert_id = str(row.get("field_culvert_id") or "").strip()
     candidate_id = str(row.get("candidate_id") or "").strip()
     observation_id = str(row.get("observation_id") or "").strip()
-    return candidate_id or observation_id or "field_observation"
+    return field_culvert_id or candidate_id or observation_id or "field_observation"

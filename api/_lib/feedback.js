@@ -181,6 +181,12 @@ function observationFeature(payload) {
       prediction_score: numberOrNull(props.prediction_score),
       priority_rank: numberOrNull(props.priority_rank),
       priority_bucket: safeString(props.priority_bucket, 40),
+      field_culvert_id: safeString(props.field_culvert_id, 80),
+      layout_source: safeString(props.layout_source, 80),
+      layout_scan_summary: safeString(props.layout_scan_summary, 600),
+      nearest_candidate_id: safeString(props.nearest_candidate_id, 120),
+      nearest_candidate_distance_m: numberOrNull(props.nearest_candidate_distance_m),
+      inferred_from_candidate: numberOrNull(props.inferred_from_candidate),
       latitude,
       longitude,
     },
@@ -306,9 +312,11 @@ function applyObservationToFeature(feature, observation) {
       props.evidence_summary,
       "confirmed field observation; retraining label collected",
     );
-    props.nearest_field_report_culvert_id = obs.candidate_id || obs.observation_id;
+    props.nearest_field_report_culvert_id = obs.field_culvert_id || obs.candidate_id || obs.observation_id;
     props.nearest_field_report_source_file = "vercel_field_observations";
     props.nearest_field_report_date = safeString(obs.observed_at, 10);
+    props.field_added_culvert_id = obs.field_culvert_id || "";
+    props.field_layout_source = obs.layout_source || "";
     return;
   }
 
@@ -331,7 +339,7 @@ function applyObservationToFeature(feature, observation) {
 
 function featureFromConfirmedObservation(observation) {
   const obs = observation.properties || {};
-  const candidateId = obs.candidate_id || obs.observation_id;
+  const candidateId = obs.field_culvert_id || obs.candidate_id || obs.observation_id;
   const latitude = Number(obs.latitude);
   const longitude = Number(obs.longitude);
 
@@ -360,8 +368,10 @@ function featureFromConfirmedObservation(observation) {
       field_report_support_score: 1,
       is_culvert: 1,
       nearest_field_report_date: safeString(obs.observed_at, 10),
-      nearest_field_report_culvert_id: obs.observation_id,
+      nearest_field_report_culvert_id: candidateId,
       nearest_field_report_source_file: "vercel_field_observations",
+      field_added_culvert_id: obs.field_culvert_id || "",
+      field_layout_source: obs.layout_source || "",
       field_feedback_status: "confirmed_culvert",
       field_feedback_observation_id: obs.observation_id,
       field_feedback_at: obs.observed_at,

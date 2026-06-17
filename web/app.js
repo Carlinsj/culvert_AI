@@ -11,6 +11,7 @@ const OBSERVATION_STATUSES = {
 };
 const MOBILE_VIEWPORT_QUERY = "(max-width: 820px)";
 const NEARBY_FOCUS_LIMIT = 12;
+const FIELD_CONTEXT_RADIUS_M = 100;
 const SELECTED_POINT_ZOOM = 16;
 const SELECTION_POPUP_DELAY_MS = 460;
 
@@ -950,9 +951,9 @@ function fieldFeedbackHtml(title) {
         <textarea id="field-notes" rows="2" placeholder="Optional notes from inspection"></textarea>
       </details>
       <div class="feedback-buttons">
-        <button type="button" data-feedback-status="confirmed_culvert">Confirm culvert</button>
-        <button type="button" data-feedback-status="no_culvert">Deny culvert</button>
-        <button type="button" data-feedback-status="uncertain">Uncertain</button>
+        <button type="button" data-feedback-status="confirmed_culvert">Save culvert</button>
+        <button type="button" data-feedback-status="no_culvert">No culvert</button>
+        <button type="button" data-feedback-status="uncertain">Needs review</button>
       </div>
       <p id="feedback-status" class="feedback-status"></p>
     </section>
@@ -972,7 +973,8 @@ function bindFeedbackActions(saveHandler) {
         const result = await saveHandler(status, notes);
         const storage = storageMessage(result.storage);
         if (statusOutput) {
-          statusOutput.textContent = `${statusLabel(status)}. ${storage}`;
+          const training = status === "confirmed_culvert" ? " Saved as a positive training label." : "";
+          statusOutput.textContent = `${statusLabel(status)}. ${storage}${training}`;
         }
       } catch (error) {
         if (statusOutput) {
@@ -1004,16 +1006,28 @@ async function saveObservationForFeature(feature, status, notes) {
   });
 }
 
-async function saveObservationAtPoint(latLng, status, notes) {
+async function saveObservationAtPoint(latLng, status, notes, options = {}) {
+  const context = options.context || {};
+  const fieldId = options.fieldId || makeFieldCulvertId();
+  const matched = context.matchedFeature?.properties || {};
   return saveObservation({
     status,
     notes,
     latitude: latLng.lat,
     longitude: latLng.lng,
-    candidate_id: "",
-    road_name: "",
-    stream_name: "",
-    source: "manual_field_point",
+    candidate_id: fieldId,
+    field_culvert_id: fieldId,
+    road_name: context.roadName || "",
+    stream_name: context.streamName || "",
+    source: "field_added_culvert",
+    layout_source: context.layoutSource || "manual_map_point",
+    layout_scan_summary: context.summary || "",
+    nearest_candidate_id: matched.candidate_id || "",
+    nearest_candidate_distance_m: context.distanceMeters,
+    inferred_from_candidate: context.withinRadius ? 1 : 0,
+    prediction_score: matched.score,
+    priority_rank: matched.rank,
+    priority_bucket: matched.bucket || "",
   });
 }
 
@@ -1108,6 +1122,12 @@ function observationFeatureFromPayload(payload) {
       prediction_score: numberOrNull(payload.prediction_score),
       priority_rank: numberOrNull(payload.priority_rank),
       priority_bucket: payload.priority_bucket || "",
+      field_culvert_id: payload.field_culvert_id || "",
+      layout_source: payload.layout_source || "",
+      layout_scan_summary: payload.layout_scan_summary || "",
+      nearest_candidate_id: payload.nearest_candidate_id || "",
+      nearest_candidate_distance_m: numberOrNull(payload.nearest_candidate_distance_m),
+      inferred_from_candidate: numberOrNull(payload.inferred_from_candidate),
       latitude,
       longitude,
     },
@@ -1145,13 +1165,78 @@ function observationLatLng(feature) {
 
 function observationPopupHtml(props) {
   const title = statusLabel(props.status);
-  const road = props.road_name || props.candidate_id || "Manual field point";
+  const road = props.field_culvert_id || props.road_name || props.candidate_id || "Manual field point";
   return `
     <div class="popup-title">${escapeHtml(title)}</div>
     <div class="popup-meta">${escapeHtml(road)}</div>
     <div class="popup-meta">${escapeHtml(props.observed_at || "")}</div>
     ${props.notes ? `<div class="popup-meta">${escapeHtml(props.notes)}</div>` : ""}
   `;
+}
+
+function fieldCulvertContextHtml(fieldId, context) {
+  return `
+    <section class="field-context" aria-label="Field culvert context">
+      <div class="detail-grid">
+        ${detailCell("Assigned ID", fieldId)}
+        ${detailCell("Context source", context.withinRadius ? "nearest map candidate" : "manual point")}
+        ${detailCell("Road", context.roadName || "unknown")}
+        ${detailCell("Drainage/source", context.streamName || "unknown")}
+        ${detailCell("Nearest candidate", context.nearestDisplayId || "none nearby")}
+        ${detailCell("Distance", formatNumber(context.distanceMeters, "m"))}
+      </div>
+      <p class="context-note">${escapeHtml(context.summary)}</p>
+    </section>
+  `;
+}
+
+function mapContextForPoint(latLng) {
+  const nearest = nearestFeatureToPoint(latLng);
+  if (!nearest) {
+    return {
+      withinRadius: false,
+      layoutSource: "manual_map_point",
+      summary: "No current map candidate was close enough, so only the clicked coordinates and your field label will be used.",
+    };
+  }
+
+  const props = nearest.feature.properties;
+  const withinRadius = nearest.distanceMeters <= FIELD_CONTEXT_RADIUS_M;
+  const roadName = props.road_name || "";
+  const streamName = drainageLabel(props);
+  const nearestDisplayId = locationDisplayId(props);
+  return {
+    matchedFeature: nearest.feature,
+    withinRadius,
+    distanceMeters: nearest.distanceMeters,
+    roadName: withinRadius ? roadName : "",
+    streamName: withinRadius ? streamName : "",
+    nearestDisplayId,
+    layoutSource: withinRadius ? "nearest_map_candidate" : "manual_map_point",
+    summary: withinRadius
+      ? `Copied road, drainage, rank, and score context from ${nearestDisplayId}, ${formatNumber(nearest.distanceMeters, "m")} from the clicked point.`
+      : `Nearest map candidate is ${formatNumber(nearest.distanceMeters, "m")} away, outside the ${FIELD_CONTEXT_RADIUS_M} m context radius, so the point will be saved without inferred road/drainage context.`,
+  };
+}
+
+function nearestFeatureToPoint(latLng) {
+  const latitude = Number(latLng.lat);
+  const longitude = Number(latLng.lng);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+
+  let best = null;
+  let bestDistance = Infinity;
+  for (const feature of state.features) {
+    const featurePoint = featureLatLng(feature);
+    if (!featurePoint) continue;
+    const distance = distanceMeters(latitude, longitude, featurePoint[0], featurePoint[1]);
+    if (distance < bestDistance) {
+      best = feature;
+      bestDistance = distance;
+    }
+  }
+
+  return best ? { feature: best, distanceMeters: bestDistance } : null;
 }
 
 function togglePlacePointMode() {
@@ -1164,10 +1249,10 @@ function togglePlacePointMode() {
     showDetailPanel();
     els.detail.innerHTML = `
       <div class="detail-panel-header">
-        <h3>Place field point</h3>
+        <h3>Add culvert point</h3>
         <button type="button" class="detail-close" data-close-detail aria-label="Close details">Close</button>
       </div>
-      <p>Click the map where you inspected or want to record a field observation.</p>
+      <p>Click the map at the culvert location. The app will assign an ID and use nearby map context for the training record.</p>
     `;
     bindDetailCloseAction();
   }
@@ -1190,17 +1275,20 @@ function handleMapClick(event) {
 function renderManualPointDetail(latLng) {
   state.selectedId = null;
   renderList();
+  const fieldId = makeFieldCulvertId();
+  const context = mapContextForPoint(latLng);
   showDetailPanel();
   els.detail.innerHTML = `
     <div class="detail-panel-header">
-      <h3>New field point</h3>
+      <h3>New culvert ${escapeHtml(fieldId)}</h3>
       <button type="button" class="detail-close" data-close-detail aria-label="Close details">Close</button>
     </div>
     <p>Lat ${formatNumber(latLng.lat, "")}, Lon ${formatNumber(latLng.lng, "")}</p>
-    ${fieldFeedbackHtml("Record observation")}
+    ${fieldCulvertContextHtml(fieldId, context)}
+    ${fieldFeedbackHtml("Save field training label")}
   `;
   bindDetailCloseAction();
-  bindFeedbackActions((status, notes) => saveObservationAtPoint(latLng, status, notes));
+  bindFeedbackActions((status, notes) => saveObservationAtPoint(latLng, status, notes, { fieldId, context }));
   window.requestAnimationFrame(scrollDetailIntoViewOnMobile);
 }
 
@@ -1214,6 +1302,16 @@ function statusLabel(status) {
 
 function makeObservationId() {
   return `obs_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function makeFieldCulvertId() {
+  const now = new Date();
+  const date = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    String(now.getDate()).padStart(2, "0"),
+  ].join("");
+  return `FC-${date}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 }
 
 function firstPresent(values) {
