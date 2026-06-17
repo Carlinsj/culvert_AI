@@ -125,6 +125,7 @@ function bindControls() {
     setFilterPanelOpen(false);
   });
   els.fitVisible.addEventListener("click", fitVisibleMarkers);
+  window.addEventListener("resize", () => state.map?.invalidateSize());
   els.detailModal?.addEventListener("click", (event) => {
     if (event.target === els.detailModal) {
       els.detailModal.close();
@@ -368,6 +369,15 @@ function selectFeature(candidateId, options = { pan: true }) {
   if (marker) {
     openSelectedPopup(marker, shouldCenter);
   }
+
+  if (options.pan !== false) {
+    window.requestAnimationFrame(scrollDetailIntoViewOnMobile);
+  }
+}
+
+function scrollDetailIntoViewOnMobile() {
+  if (!window.matchMedia("(max-width: 820px)").matches) return;
+  els.detail?.scrollIntoView({ block: "start", behavior: "smooth" });
 }
 
 function centerMapOnPoint(latLng) {
@@ -676,8 +686,11 @@ function fieldFeedbackHtml(title) {
   return `
     <section class="field-feedback" aria-label="${escapeAttr(title)}">
       <h4>${escapeHtml(title)}</h4>
-      <label for="field-notes">Field notes</label>
-      <textarea id="field-notes" rows="3" placeholder="Optional notes from inspection"></textarea>
+      <details class="notes-disclosure">
+        <summary>Add optional notes</summary>
+        <label for="field-notes">Field notes</label>
+        <textarea id="field-notes" rows="2" placeholder="Optional notes from inspection"></textarea>
+      </details>
       <div class="feedback-buttons">
         <button type="button" data-feedback-status="confirmed_culvert">Confirm culvert</button>
         <button type="button" data-feedback-status="no_culvert">Deny culvert</button>
@@ -919,6 +932,7 @@ function renderManualPointDetail(latLng) {
     ${fieldFeedbackHtml("Record observation")}
   `;
   bindFeedbackActions((status, notes) => saveObservationAtPoint(latLng, status, notes));
+  window.requestAnimationFrame(scrollDetailIntoViewOnMobile);
 }
 
 function observationStatus(status) {
