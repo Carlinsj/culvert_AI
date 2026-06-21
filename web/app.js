@@ -188,9 +188,6 @@ function setMobileDrawerOpen(open) {
   if (els.drawerBackdrop) {
     els.drawerBackdrop.hidden = !open;
   }
-  if (open && isMobileViewport()) {
-    setFilterPanelOpen(true);
-  }
   window.requestAnimationFrame(() => state.map?.invalidateSize());
 }
 
