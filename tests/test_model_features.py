@@ -12,6 +12,11 @@ def test_select_feature_columns_excludes_labels_and_coordinates():
             "latitude": [41.1, 41.2],
             "road_stream_distance_m": [0.0, 12.0],
             "stream_density_m_per_sqkm": [100.0, 20.0],
+            "source_route_interval_sample": [1, 0],
+            "source_exact_intersection": [0, 1],
+            "has_matched_route": [1, 0],
+            "route_sample_distance_m": [37.5, 0.0],
+            "priority_seed": [0.0, 1.0],
             "road_id": [10, 11],
         }
     )

@@ -29,6 +29,23 @@ POINT_COLUMNS = [
     "cluster_id",
 ]
 
+DEFAULT_TRAINING_FLAGS = ("matched_existing_candidate",)
+TRAINING_POINT_COLUMNS = [
+    "point_id",
+    "latitude",
+    "longitude",
+    "nearest_road_distance_m",
+    "nearest_road_name",
+    "nearest_stream_distance_m",
+    "nearest_stream_name",
+    "nearest_candidate_distance_m",
+    "nearest_candidate_id",
+    "analysis_flag",
+    "training_label",
+    "label_source",
+    "label_confidence",
+]
+
 
 def write_point_only_layer(
     points_path: str | Path,
@@ -120,6 +137,54 @@ def analyze_extracted_points(
         "matched_existing_candidates": int(analyzed["matched_existing_candidate"].sum()),
         "outside_analysis_extent": int((~analyzed["inside_analysis_extent"]).sum()),
     }
+
+
+def write_high_confidence_training_points(
+    analysis_path: str | Path,
+    output_path: str | Path,
+    csv_output: str | Path | None = None,
+    accepted_flags: tuple[str, ...] = DEFAULT_TRAINING_FLAGS,
+) -> dict:
+    points = read_vector(analysis_path)
+    missing = [column for column in ("analysis_flag", "inside_analysis_extent") if column not in points.columns]
+    if missing:
+        raise ValueError(f"Analysis layer is missing required columns: {', '.join(missing)}")
+
+    inside = points["inside_analysis_extent"].map(_truthy)
+    accepted = points["analysis_flag"].astype(str).isin(accepted_flags)
+    training = points[inside & accepted].copy()
+    if training.empty:
+        raise ValueError(
+            "No extracted points passed the high-confidence training filter. "
+            "Inspect the point analysis report before training."
+        )
+
+    training["training_label"] = "culvert"
+    training["label_source"] = "field_report_coordinate_geospatial_qc"
+    training["label_confidence"] = np.where(
+        training["analysis_flag"].astype(str) == "matched_existing_candidate",
+        0.95,
+        0.85,
+    )
+    selected = [column for column in TRAINING_POINT_COLUMNS if column in training.columns]
+    training = training[[*selected, "geometry"]].to_crs("EPSG:4326")
+
+    write_vector(training, output_path)
+    result = {
+        "training_points": Path(output_path),
+        "rows": int(len(training)),
+        "accepted_flags": list(accepted_flags),
+        "rejected_rows": int(len(points) - len(training)),
+        "analysis_flags": {
+            str(flag): int(count)
+            for flag, count in points["analysis_flag"].astype(str).value_counts().items()
+        },
+    }
+    if csv_output:
+        ensure_parent_dir(csv_output)
+        training.drop(columns="geometry").to_csv(csv_output, index=False)
+        result["training_points_csv"] = Path(csv_output)
+    return result
 
 
 def _point_only(points: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
@@ -320,3 +385,9 @@ def _candidate_score(row: pd.Series) -> float | None:
         if column in row.index and pd.notna(row[column]):
             return float(row[column])
     return None
+
+
+def _truthy(value: object) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y"}
+    return bool(value)

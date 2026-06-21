@@ -1,5 +1,6 @@
 const DATA_URLS = ["/api/findings", "data/findings.geojson"];
 const SUMMARY_URLS = ["/api/summary", "data/summary.json"];
+const MODEL_SUMMARY_URLS = ["data/model_summary.json"];
 const HEALTH_URL = "/api/health";
 const OBSERVATIONS_URL = "/api/observations";
 const LOCAL_OBSERVATIONS_KEY = "culvert-ai-field-observations";
@@ -30,6 +31,7 @@ const state = {
   locationWatchId: null,
   userLocation: null,
   shouldFocusLocationOnNextUpdate: false,
+  modelSummary: null,
 };
 
 const els = {
@@ -37,6 +39,7 @@ const els = {
   visible: document.querySelector("#visible-count"),
   maxScore: document.querySelector("#max-score"),
   fieldLabels: document.querySelector("#field-label-count"),
+  modelQuality: document.querySelector("#model-quality"),
   list: document.querySelector("#candidate-list"),
   template: document.querySelector("#candidate-template"),
   search: document.querySelector("#search-input"),
@@ -75,11 +78,13 @@ async function init() {
   updateBackendStatus();
 
   try {
-    const [geojson, summary, observations] = await Promise.all([
+    const [geojson, summary, observations, modelSummary] = await Promise.all([
       fetchFirst(DATA_URLS),
       fetchFirst(SUMMARY_URLS),
       fetchObservations(),
+      fetchFirstOptional(MODEL_SUMMARY_URLS),
     ]);
+    state.modelSummary = modelSummary;
     applyDashboardData(geojson, summary, observations);
   } catch (error) {
     showLoadError(`Could not load web/data/findings.geojson. Run culvert-ai export-web first.`);
@@ -140,6 +145,13 @@ function bindControls() {
     }
   });
   document.addEventListener("click", (event) => {
+    const deleteButton = event.target.closest("[data-observation-delete]");
+    if (deleteButton) {
+      event.preventDefault();
+      deleteObservationById(deleteButton.dataset.observationDelete, deleteButton);
+      return;
+    }
+
     if (!els.filterPanel || els.filterPanel.hidden) return;
     if (
       els.filterPanel.contains(event.target) ||
@@ -206,6 +218,14 @@ async function fetchFirst(urls) {
   throw lastError;
 }
 
+async function fetchFirstOptional(urls) {
+  try {
+    return await fetchFirst(urls);
+  } catch {
+    return null;
+  }
+}
+
 async function fetchObservations() {
   let remote = [];
   try {
@@ -236,6 +256,19 @@ function storeLocalObservation(feature) {
     window.localStorage?.setItem(
       LOCAL_OBSERVATIONS_KEY,
       JSON.stringify({ type: "FeatureCollection", features: merged }),
+    );
+  } catch {
+    // Local storage is only a fallback when the dev server has not been restarted.
+  }
+}
+
+function removeLocalObservation(observationId) {
+  try {
+    const current = loadLocalObservations();
+    const filtered = current.filter((feature) => feature.properties?.observation_id !== observationId);
+    window.localStorage?.setItem(
+      LOCAL_OBSERVATIONS_KEY,
+      JSON.stringify({ type: "FeatureCollection", features: filtered }),
     );
   } catch {
     // Local storage is only a fallback when the dev server has not been restarted.
@@ -292,6 +325,36 @@ function renderSummary(summary) {
   if (els.fieldLabels) {
     els.fieldLabels.textContent = summary.known_field_matches ?? 0;
   }
+  renderModelQuality();
+}
+
+function renderModelQuality() {
+  if (!els.modelQuality) return;
+  const summary = state.modelSummary;
+  if (!summary?.available) {
+    els.modelQuality.textContent = "Model quality unavailable";
+    return;
+  }
+
+  const modelName = formatModelName(summary.selected_model);
+  const spatialAp = formatMetric(summary.spatial_holdout_average_precision);
+  const precisionAt10 = formatMetric(summary.spatial_holdout_top10_precision);
+  const labels = Number(summary.training_points ?? summary.positive_labels ?? 0);
+  els.modelQuality.textContent =
+    `${modelName} · spatial AP ${spatialAp} · P@10 ${precisionAt10} · ${labels} QC labels`;
+}
+
+function formatModelName(value) {
+  return String(value || "model")
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function formatMetric(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toFixed(3) : "n/a";
 }
 
 function render() {
@@ -480,7 +543,7 @@ function renderDetail(feature) {
     </div>
     <p>${escapeHtml(compactEvidenceSummary(props))}</p>
     <div class="quick-detail-grid">
-      ${detailCell("Score", Math.round(props.score))}
+      ${detailCell("Estimate", Math.round(props.score))}
       ${detailCell("Priority", labelBucket(props.bucket))}
       ${detailCell("Road", props.road_name || "Unnamed road")}
       ${detailCell("Drainage/source", drainageLabel(props))}
@@ -515,9 +578,9 @@ function openDetailModal(feature) {
     </section>
 
     <section class="modal-section">
-      <h3>Scores</h3>
+      <h3>Model estimates</h3>
       <div class="detail-grid">
-        ${detailCell("Discovery score", Math.round(props.score))}
+        ${detailCell("Discovery estimate", Math.round(props.score))}
         ${detailCell("Model probability", formatPercent(props.culvert_probability))}
         ${detailCell("Model rank", formatScorePartFrom100(props.model_rank_score))}
         ${detailCell("Priority", labelBucket(props.bucket))}
@@ -545,12 +608,12 @@ function openDetailModal(feature) {
     </section>
 
     <section class="modal-section">
-      <h3>How the scores are calculated</h3>
+      <h3>How the estimates are calculated</h3>
       <dl class="score-definitions">
-        ${definitionItem("Discovery score", "Calculated in build_discovery_ranking. It blends GIS evidence with model rank when supervised predictions exist: 55% agreement signal, 25% evidence score, and 20% weighted signal using 40% evidence / 60% model rank. If no supervised model is available, it falls back to the evidence score.")}
-        ${definitionItem("Model probability", "Calculated in predict_culvert_probability from the trained scikit-learn model using numeric feature columns. It is the model's predicted probability that the candidate is a culvert.")}
-        ${definitionItem("Priority", "Bucketed from the final score: low <= 35, medium > 35, high > 55, very high > 75. The list rank sorts undiscovered candidates by discovery score before known matches.")}
-        ${definitionItem("Drainage/source", "This label is the stream or source name for the mapped drainage feature, not a numeric score.")}
+        ${definitionItem("Discovery estimate", "Calculated in build_discovery_ranking from local GIS evidence and, when available, the supervised model rank. It is a prioritization estimate for field review, not a confirmed culvert label.")}
+        ${definitionItem("Model probability", "Calculated in predict_culvert_probability from the trained scikit-learn model using numeric feature columns. It is the model's estimated probability that the candidate is a culvert.")}
+        ${definitionItem("Priority", "Bucketed from the final estimate: low <= 35, medium > 35, high > 55, very high > 75. The list rank sorts undiscovered candidates by discovery estimate before known matches.")}
+        ${definitionItem("Drainage/source", "This label is the stream or source name for the mapped drainage feature, not a numeric estimate.")}
         ${definitionItem("Drainage strength", "Calculated from stream order and stream-density percentile features. Higher means stronger nearby drainage evidence.")}
         ${definitionItem("Road-drainage", "Calculated from road-stream distance and exact intersection evidence. Distance uses 1 / (1 + distance_m / 20), plus an exact-intersection boost.")}
         ${definitionItem("Crossing geometry", "Calculated from crossing angle as 1 - abs(90 - angle) / 90. Crossings closer to 90 degrees score higher.")}
@@ -891,7 +954,7 @@ function renderObservationMarkers() {
     if (!latLng) return;
 
     const marker = L.marker(latLng, {
-      icon: observationIcon(feature.properties.status),
+      icon: observationIcon(feature.properties),
       riseOnHover: true,
       zIndexOffset: 900,
     });
@@ -900,14 +963,14 @@ function renderObservationMarkers() {
   });
 }
 
-function observationIcon(status) {
-  const normalized = observationStatus(status);
-  const text = normalized === "confirmed_culvert" ? "OK" : normalized === "no_culvert" ? "NO" : "?";
+function observationIcon(props) {
+  const normalized = observationStatus(props?.status);
+  const text = normalized === "confirmed_culvert" ? "ABU" : normalized === "no_culvert" ? "NO" : "?";
   return L.divIcon({
     className: `observation-marker observation-${normalized}`,
     html: `<span class="observation-dot">${text}</span>`,
-    iconSize: [34, 34],
-    iconAnchor: [17, 17],
+    iconSize: [40, 40],
+    iconAnchor: [20, 20],
     popupAnchor: [0, -16],
   });
 }
@@ -925,7 +988,7 @@ function popupHtml(props) {
   return `
     <div class="popup-title">Rank ${formatValue(props.rank)}: ${escapeHtml(props.road_name || "Unnamed road")}</div>
     <div class="popup-meta">${escapeHtml(props.stream_name || "Unnamed drainage")}</div>
-    <div class="popup-meta">Discovery ${Math.round(props.score)} · ${labelBucket(props.bucket)}</div>
+    <div class="popup-meta">Estimate ${Math.round(props.score)} · ${labelBucket(props.bucket)}</div>
   `;
 }
 
@@ -1072,6 +1135,37 @@ async function saveObservation(payload) {
   }
 }
 
+async function deleteObservationById(observationId, button) {
+  const id = String(observationId || "").trim();
+  if (!id) return;
+
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Deleting...";
+  }
+
+  try {
+    const response = await fetch(`${OBSERVATIONS_URL}?id=${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+    if (!response.ok) {
+      throw new Error(`server returned ${response.status}`);
+    }
+    const deleted = await response.json();
+    removeLocalObservation(id);
+    if (deleted.findings && deleted.summary) {
+      applyDashboardData(deleted.findings, deleted.summary, deleted.observations || { features: [] }, {
+        preserveSelection: true,
+      });
+    } else {
+      removeObservation(id);
+    }
+  } catch {
+    removeLocalObservation(id);
+    removeObservation(id);
+  }
+}
+
 function storageMessage(storage) {
   if (storage === "vercel_blob") {
     return "Saved to Vercel and refreshed the deployed ranking.";
@@ -1096,6 +1190,15 @@ function addObservation(feature) {
   } else {
     state.observations.unshift(normalized);
   }
+  renderObservationMarkers();
+  updateVisibleCount();
+}
+
+function removeObservation(observationId) {
+  state.observations = state.observations.filter(
+    (feature) => feature.properties?.observation_id !== observationId,
+  );
+  state.map?.closePopup();
   renderObservationMarkers();
   updateVisibleCount();
 }
@@ -1168,14 +1271,22 @@ function observationLatLng(feature) {
 }
 
 function observationPopupHtml(props) {
-  const title = statusLabel(props.status);
+  const title = observationTitle(props);
   const road = props.field_culvert_id || props.road_name || props.candidate_id || "Manual field point";
   return `
     <div class="popup-title">${escapeHtml(title)}</div>
     <div class="popup-meta">${escapeHtml(road)}</div>
     <div class="popup-meta">${escapeHtml(props.observed_at || "")}</div>
     ${props.notes ? `<div class="popup-meta">${escapeHtml(props.notes)}</div>` : ""}
+    <button type="button" class="popup-delete-observation" data-observation-delete="${escapeAttr(props.observation_id || "")}">Delete user point</button>
   `;
+}
+
+function observationTitle(props) {
+  if (observationStatus(props?.status) === "confirmed_culvert" && props?.source === "field_added_culvert") {
+    return "Added by user";
+  }
+  return statusLabel(props?.status);
 }
 
 function fieldCulvertContextHtml(fieldId, context) {
@@ -1218,7 +1329,7 @@ function mapContextForPoint(latLng) {
     nearestDisplayId,
     layoutSource: withinRadius ? "nearest_map_candidate" : "manual_map_point",
     summary: withinRadius
-      ? `Copied road, drainage, rank, and score context from ${nearestDisplayId}, ${formatNumber(nearest.distanceMeters, "m")} from the clicked point.`
+      ? `Copied road, drainage, rank, and estimate context from ${nearestDisplayId}, ${formatNumber(nearest.distanceMeters, "m")} from the clicked point.`
       : `Nearest map candidate is ${formatNumber(nearest.distanceMeters, "m")} away, outside the ${FIELD_CONTEXT_RADIUS_M} m context radius, so the point will be saved without inferred road/drainage context.`,
   };
 }

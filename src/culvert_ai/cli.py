@@ -28,7 +28,11 @@ from culvert_ai.osm import (
     DEFAULT_OVERPASS_URL,
     download_ulster_osm_inputs,
 )
-from culvert_ai.point_analysis import analyze_extracted_points, write_point_only_layer
+from culvert_ai.point_analysis import (
+    analyze_extracted_points,
+    write_high_confidence_training_points,
+    write_point_only_layer,
+)
 from culvert_ai.region import filter_to_region, get_region, write_region_boundary
 from culvert_ai.scoring import (
     build_discovery_ranking,
@@ -197,6 +201,33 @@ def build_parser() -> argparse.ArgumentParser:
     analyze_points.add_argument("--match-radius-m", type=float, default=75.0)
     analyze_points.add_argument("--cluster-radius-m", type=float, default=750.0)
     analyze_points.set_defaults(func=_analyze_extracted_points)
+
+    training_points = subparsers.add_parser(
+        "build-high-confidence-training-points",
+        help="Filter extracted point analysis into a high-confidence training point layer.",
+    )
+    training_points.add_argument(
+        "--analysis",
+        default="data/processed/extracted_points_analysis.geojson",
+        help="Input extracted point analysis layer.",
+    )
+    training_points.add_argument(
+        "--output",
+        default="data/processed/high_confidence_training_points.gpkg",
+        help="Output point layer for supervised training.",
+    )
+    training_points.add_argument(
+        "--csv-output",
+        default="data/processed/high_confidence_training_points.csv",
+        help="Optional CSV output.",
+    )
+    training_points.add_argument(
+        "--accepted-flag",
+        action="append",
+        dest="accepted_flags",
+        help="Analysis flag to accept for training. Repeat to accept multiple flags.",
+    )
+    training_points.set_defaults(func=_build_high_confidence_training_points)
 
     merge_observations = subparsers.add_parser(
         "merge-field-observations",
@@ -492,6 +523,15 @@ def _analyze_extracted_points(args) -> dict:
         candidates_path=args.candidates,
         match_radius_m=args.match_radius_m,
         cluster_radius_m=args.cluster_radius_m,
+    )
+
+
+def _build_high_confidence_training_points(args) -> dict:
+    return write_high_confidence_training_points(
+        analysis_path=args.analysis,
+        output_path=args.output,
+        csv_output=args.csv_output,
+        accepted_flags=tuple(args.accepted_flags or ["matched_existing_candidate"]),
     )
 
 

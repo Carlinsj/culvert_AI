@@ -10,6 +10,7 @@ const requiredFiles = [
   "web/app.js",
   "web/data/findings.geojson",
   "web/data/summary.json",
+  "web/data/model_summary.json",
   "api/findings.js",
   "api/observations.js",
   "api/summary.js",
@@ -34,6 +35,11 @@ if (findings.type !== "FeatureCollection" || !Array.isArray(findings.features)) 
 const summary = JSON.parse(readFileSync(path.join(root, "web/data/summary.json"), "utf8"));
 if (!Number.isFinite(Number(summary.rows))) {
   throw new Error("web/data/summary.json must include a numeric rows value.");
+}
+
+const modelSummary = JSON.parse(readFileSync(path.join(root, "web/data/model_summary.json"), "utf8"));
+if (typeof modelSummary.available !== "boolean") {
+  throw new Error("web/data/model_summary.json must include an available boolean.");
 }
 
 console.log(`Verified static Vercel build assets: ${findings.features.length} findings.`);

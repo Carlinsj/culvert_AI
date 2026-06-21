@@ -53,9 +53,22 @@ DEFAULT_EXCLUDED_FEATURES = {
     "culvert_probability",
     "priority_rank",
     "priority_percentile",
+    "priority_seed",
+    "culvert_likelihood_score",
+    "discovery_score",
+    "evidence_score",
+    "model_probability_score",
+    "model_rank_score",
     "label_confidence",
     "nearest_field_report_label_confidence",
     "spatial_block_id",
+    "route_sample_distance_m",
+    "route_part_index",
+    "source_exact_intersection",
+    "source_nearest_approach",
+    "source_route_interval_sample",
+    "source_field_report_observed",
+    "has_matched_route",
 }
 
 

@@ -2,7 +2,7 @@ import geopandas as gpd
 from shapely.geometry import LineString, Point
 
 from culvert_ai.io import write_vector
-from culvert_ai.point_analysis import analyze_extracted_points
+from culvert_ai.point_analysis import analyze_extracted_points, write_high_confidence_training_points
 
 
 def test_analyze_extracted_points_matches_nearby_candidate(tmp_path):
@@ -57,3 +57,56 @@ def test_analyze_extracted_points_matches_nearby_candidate(tmp_path):
     assert result["matched_existing_candidates"] == 1
     assert result["outside_analysis_extent"] == 0
     assert (tmp_path / "analysis.md").exists()
+
+
+def test_write_high_confidence_training_points_filters_ambiguous_points(tmp_path):
+    analysis = gpd.GeoDataFrame(
+        [
+            {
+                "point_id": "pt_0001",
+                "latitude": 42.0,
+                "longitude": -74.0,
+                "inside_analysis_extent": True,
+                "analysis_flag": "matched_existing_candidate",
+                "nearest_candidate_distance_m": 12.0,
+                "geometry": Point(-74.0, 42.0),
+            },
+            {
+                "point_id": "pt_0002",
+                "latitude": 42.1,
+                "longitude": -74.1,
+                "inside_analysis_extent": False,
+                "analysis_flag": "matched_existing_candidate",
+                "nearest_candidate_distance_m": 10.0,
+                "geometry": Point(-74.1, 42.1),
+            },
+            {
+                "point_id": "pt_0003",
+                "latitude": 42.2,
+                "longitude": -74.2,
+                "inside_analysis_extent": True,
+                "analysis_flag": "needs_manual_review",
+                "nearest_candidate_distance_m": 250.0,
+                "geometry": Point(-74.2, 42.2),
+            },
+        ],
+        geometry="geometry",
+        crs="EPSG:4326",
+    )
+    analysis_path = tmp_path / "analysis.geojson"
+    output_path = tmp_path / "training.gpkg"
+    csv_path = tmp_path / "training.csv"
+    write_vector(analysis, analysis_path)
+
+    result = write_high_confidence_training_points(
+        analysis_path=analysis_path,
+        output_path=output_path,
+        csv_output=csv_path,
+    )
+
+    training = gpd.read_file(output_path)
+    assert result["rows"] == 1
+    assert result["rejected_rows"] == 2
+    assert training["point_id"].tolist() == ["pt_0001"]
+    assert training["label_source"].tolist() == ["field_report_coordinate_geospatial_qc"]
+    assert csv_path.exists()

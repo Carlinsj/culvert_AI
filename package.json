@@ -15,6 +15,7 @@
     "prepare:llm-label-review": "scripts/python.sh -m culvert_ai.cli prepare-llm-label-review --input \"/Users/Carli/Downloads/Team No. 2-selected (1)\" --output data/processed/field_report_llm_review_queue.jsonl",
     "extract:points": "scripts/python.sh -m culvert_ai.cli extract-points-only",
     "analyze:points": "scripts/python.sh -m culvert_ai.cli analyze-extracted-points",
+    "build:training-points": "scripts/python.sh -m culvert_ai.cli build-high-confidence-training-points",
     "pull:observations": "node scripts/pull_vercel_observations.js",
     "predict:actual": "bash scripts/run_actual_ulster_census_pipeline.sh",
     "retrain:from-vercel": "npm run pull:observations && npm run predict:actual && npm run build",

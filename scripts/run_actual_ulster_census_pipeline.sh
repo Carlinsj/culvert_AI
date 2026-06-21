@@ -17,17 +17,82 @@ fi
 
 FIELD_REPORTS_PATH="${FIELD_REPORTS_PATH:-/Users/Carli/Downloads/Team No. 2-selected (1)}"
 LLM_REVIEWED_CULVERTS_PATH="${LLM_REVIEWED_CULVERTS_PATH:-data/processed/field_report_llm_reviewed_culverts.gpkg}"
+EXTRACTED_POINTS_PATH=""
 KNOWN_CULVERTS_PATH=""
-if [ -e "$FIELD_REPORTS_PATH" ]; then
-  scripts/python.sh -m culvert_ai.cli import-field-reports \
+if [ -e "$FIELD_REPORTS_PATH" ] && [ -r "$FIELD_REPORTS_PATH" ]; then
+  if scripts/python.sh -m culvert_ai.cli import-field-reports \
     --input "$FIELD_REPORTS_PATH" \
     --output data/processed/field_report_culverts.gpkg \
-    --csv-output data/processed/field_report_culverts.csv
-  KNOWN_CULVERTS_PATH="data/processed/field_report_culverts.gpkg"
+    --csv-output data/processed/field_report_culverts.csv; then
+    EXTRACTED_POINTS_PATH="data/processed/field_report_culverts.gpkg"
+  elif [ -f data/processed/field_report_culverts.gpkg ]; then
+    echo "Field report import failed; using existing extracted points in data/processed/field_report_culverts.gpkg."
+    EXTRACTED_POINTS_PATH="data/processed/field_report_culverts.gpkg"
+  else
+    exit 1
+  fi
+elif [ -f data/processed/field_report_culverts.gpkg ]; then
+  echo "Using existing extracted points in data/processed/field_report_culverts.gpkg."
+  EXTRACTED_POINTS_PATH="data/processed/field_report_culverts.gpkg"
+elif [ -e "$FIELD_REPORTS_PATH" ]; then
+  echo "Field report path is not readable from this environment: $FIELD_REPORTS_PATH"
+  exit 1
 fi
 if [ -f "$LLM_REVIEWED_CULVERTS_PATH" ]; then
   echo "Using LLM-reviewed field labels from $LLM_REVIEWED_CULVERTS_PATH."
-  KNOWN_CULVERTS_PATH="$LLM_REVIEWED_CULVERTS_PATH"
+  EXTRACTED_POINTS_PATH="$LLM_REVIEWED_CULVERTS_PATH"
+fi
+
+scripts/python.sh -m culvert_ai.cli build-candidates \
+  --roads data/raw/roads.gpkg \
+  --streams data/raw/streams.gpkg \
+  --output data/interim/actual_ulster_candidates.gpkg \
+  --snap-tolerance-m 35 \
+  --min-spacing-m 20
+
+CANDIDATES_PATH="data/interim/actual_ulster_candidates.gpkg"
+if [ -n "$EXTRACTED_POINTS_PATH" ] && [ -f "$EXTRACTED_POINTS_PATH" ]; then
+  ROUTE_COUNT="$(POINTS_PATH="$EXTRACTED_POINTS_PATH" scripts/python.sh - <<'PY'
+import os
+import geopandas as gpd
+
+path = os.environ["POINTS_PATH"]
+points = gpd.read_file(path)
+if "route" not in points:
+    print(0)
+else:
+    print(int(points["route"].fillna("").astype(str).str.strip().ne("").sum()))
+PY
+)"
+fi
+if [ -n "$EXTRACTED_POINTS_PATH" ] && [ -f "$EXTRACTED_POINTS_PATH" ] && [ "${ROUTE_COUNT:-0}" -gt 0 ]; then
+  scripts/python.sh -m culvert_ai.cli build-road-candidates \
+    --roads data/raw/roads.gpkg \
+    --routes-from "$EXTRACTED_POINTS_PATH" \
+    --interval-m 75 \
+    --output data/interim/actual_ulster_route_candidates.gpkg
+
+  scripts/python.sh -m culvert_ai.cli merge-candidates \
+    --inputs data/interim/actual_ulster_candidates.gpkg data/interim/actual_ulster_route_candidates.gpkg \
+    --output data/interim/actual_ulster_candidates_with_route_samples.gpkg
+  CANDIDATES_PATH="data/interim/actual_ulster_candidates_with_route_samples.gpkg"
+fi
+if [ -n "$EXTRACTED_POINTS_PATH" ] && [ -f "$EXTRACTED_POINTS_PATH" ]; then
+  scripts/python.sh -m culvert_ai.cli analyze-extracted-points \
+    --points "$EXTRACTED_POINTS_PATH" \
+    --roads data/raw/roads.gpkg \
+    --streams data/raw/streams.gpkg \
+    --candidates "$CANDIDATES_PATH" \
+    --output-geojson data/processed/extracted_points_analysis.geojson \
+    --output-csv data/processed/extracted_points_analysis.csv \
+    --output-json reports/extracted_points_analysis.json \
+    --output-markdown reports/extracted_points_analysis.md
+
+  scripts/python.sh -m culvert_ai.cli build-high-confidence-training-points \
+    --analysis data/processed/extracted_points_analysis.geojson \
+    --output data/processed/high_confidence_training_points.gpkg \
+    --csv-output data/processed/high_confidence_training_points.csv
+  KNOWN_CULVERTS_PATH="data/processed/high_confidence_training_points.gpkg"
 fi
 
 if [ -f data/processed/field_observations.geojson ]; then
@@ -53,27 +118,6 @@ PY
     scripts/python.sh -m culvert_ai.cli merge-field-observations "${MERGE_OBSERVATIONS_ARGS[@]}"
     KNOWN_CULVERTS_PATH="data/processed/training_known_culverts.gpkg"
   fi
-fi
-
-scripts/python.sh -m culvert_ai.cli build-candidates \
-  --roads data/raw/roads.gpkg \
-  --streams data/raw/streams.gpkg \
-  --output data/interim/actual_ulster_candidates.gpkg \
-  --snap-tolerance-m 35 \
-  --min-spacing-m 20
-
-CANDIDATES_PATH="data/interim/actual_ulster_candidates.gpkg"
-if [ -n "$KNOWN_CULVERTS_PATH" ] && [ -f "$KNOWN_CULVERTS_PATH" ]; then
-  scripts/python.sh -m culvert_ai.cli build-road-candidates \
-    --roads data/raw/roads.gpkg \
-    --routes-from "$KNOWN_CULVERTS_PATH" \
-    --interval-m 75 \
-    --output data/interim/actual_ulster_route_candidates.gpkg
-
-  scripts/python.sh -m culvert_ai.cli merge-candidates \
-    --inputs data/interim/actual_ulster_candidates.gpkg data/interim/actual_ulster_route_candidates.gpkg \
-    --output data/interim/actual_ulster_candidates_with_route_samples.gpkg
-  CANDIDATES_PATH="data/interim/actual_ulster_candidates_with_route_samples.gpkg"
 fi
 
 FEATURE_ARGS=(
@@ -154,3 +198,9 @@ scripts/python.sh -m culvert_ai.cli export-web \
   --predictions data/processed/actual_ulster_discovery_predictions.gpkg \
   --output-dir web/data \
   --limit 1000
+
+scripts/python.sh scripts/write_model_summary.py \
+  --metrics reports/actual_ulster_field_report_metrics.json \
+  --point-analysis reports/extracted_points_analysis.json \
+  --training-points data/processed/high_confidence_training_points.csv \
+  --output web/data/model_summary.json

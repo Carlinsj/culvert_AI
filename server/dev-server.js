@@ -57,6 +57,17 @@ async function handleRequest(request, response) {
       return;
     }
 
+    if (url.pathname === "/api/observations" && request.method === "DELETE") {
+      try {
+        const observationId = safeString(url.searchParams.get("id"), 80);
+        const result = await deleteObservation(observationId);
+        await sendJson(response, result);
+      } catch (error) {
+        await sendJson(response, { error: error.message || "Invalid observation" }, 400);
+      }
+      return;
+    }
+
     if (url.pathname === "/api/observations" && request.method === "POST") {
       try {
         const payload = await readJsonBody(request);
@@ -242,6 +253,31 @@ async function appendObservation(payload) {
   await mkdir(path.dirname(OBSERVATIONS_PATH), { recursive: true });
   await writeFile(OBSERVATIONS_PATH, `${JSON.stringify(collection, null, 2)}\n`);
   return feature;
+}
+
+async function deleteObservation(observationId) {
+  if (!observationId) {
+    throw new Error("Observation id is required.");
+  }
+
+  const collection = await readObservations();
+  const before = collection.features.length;
+  collection.features = collection.features.filter(
+    (item) => item.properties?.observation_id !== observationId,
+  );
+
+  if (collection.features.length === before) {
+    throw new Error(`Observation not found: ${observationId}`);
+  }
+
+  await mkdir(path.dirname(OBSERVATIONS_PATH), { recursive: true });
+  await writeFile(OBSERVATIONS_PATH, `${JSON.stringify(collection, null, 2)}\n`);
+  return {
+    status: "deleted",
+    observation_id: observationId,
+    observations: collection,
+    storage: "file",
+  };
 }
 
 function emptyFeatureCollection() {

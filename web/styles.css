@@ -136,6 +136,14 @@ h2 {
   font-size: 0.72rem;
 }
 
+.model-quality {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
 .controls {
   display: grid;
   gap: 10px;
@@ -840,9 +848,9 @@ output {
 }
 
 .observation-dot {
-  width: 34px;
-  height: 34px;
-  font-size: 0.66rem;
+  width: 40px;
+  height: 40px;
+  font-size: 0.62rem;
 }
 
 .observation-confirmed_culvert .observation-dot {
@@ -874,6 +882,30 @@ output {
 .popup-meta {
   color: #58645e;
   font-size: 0.82rem;
+}
+
+.popup-delete-observation {
+  width: 100%;
+  margin-top: 10px;
+  border: 1px solid rgba(180, 35, 24, 0.36);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: var(--denied);
+  background: #fff;
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
+.popup-delete-observation:hover,
+.popup-delete-observation:focus-visible {
+  border-color: var(--denied);
+  background: rgba(180, 35, 24, 0.08);
+}
+
+.popup-delete-observation:disabled {
+  cursor: wait;
+  opacity: 0.72;
 }
 
 @media (max-width: 820px) {

@@ -1,5 +1,6 @@
 import {
   blobConfigured,
+  deleteObservation,
   readObservations,
   refreshPublishedData,
   saveObservation,
@@ -7,13 +8,30 @@ import {
 import { readJsonBody, requireMethod, sendError, sendJson } from "./_lib/http.js";
 
 export default async function handler(request, response) {
-  if (!requireMethod(request, response, ["GET", "POST"])) return;
+  if (!requireMethod(request, response, ["GET", "POST", "DELETE"])) return;
 
   try {
     if (request.method === "GET") {
       const observations = await readObservations();
       sendJson(response, observations, 200, {
         "x-culvert-feedback-storage": blobConfigured() ? "vercel_blob" : "static",
+      });
+      return;
+    }
+
+    if (request.method === "DELETE") {
+      const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
+      const deleted = await deleteObservation(url.searchParams.get("id"));
+      const { findings, summary } = await refreshPublishedData(deleted.observations);
+
+      sendJson(response, {
+        status: "deleted",
+        observation_id: deleted.observation_id,
+        observations: deleted.observations,
+        findings,
+        summary,
+        storage: deleted.storage,
+        warning: deleted.warning,
       });
       return;
     }

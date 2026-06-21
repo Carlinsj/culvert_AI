@@ -3,16 +3,15 @@
   "discovery_candidates": 1000,
   "known_field_matches": 83,
   "score_column": "discovery_score",
-  "max_score": 62.378950644233555,
-  "mean_score": 38.66608855512052,
+  "max_score": 53.8414936787317,
+  "mean_score": 37.30559952013068,
   "priority_buckets": {
-    "medium": 593,
-    "low": 402,
-    "very_high": 83,
-    "high": 5
+    "medium": 513,
+    "low": 487,
+    "very_high": 83
   },
   "bounds": [
-    -74.764617,
+    -74.762622,
     41.58787499999999,
     -73.943669,
     42.16166
