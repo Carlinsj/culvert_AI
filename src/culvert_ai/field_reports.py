@@ -4,8 +4,10 @@ import re
 import shutil
 import subprocess
 import tempfile
+import unicodedata
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -24,8 +26,8 @@ from culvert_ai.io import (
 
 
 COORDINATE_RE = re.compile(
-    r"(?P<a>\d{1,3}\.\d+)\s*°?\s*(?P<adir>[NSEW])?\s*[,;\s]+"
-    r"(?P<b>\d{1,3}\.\d+)\s*°?\s*(?P<bdir>[NSEW])?",
+    r"(?P<a>[+-]?\d{1,3}\.\d+)\s*°?\s*(?P<adir>[NSEW])?\s*[,;\s]+"
+    r"(?P<b>[+-]?\d{1,3}\.\d+)\s*°?\s*(?P<bdir>[NSEW])?",
     re.IGNORECASE,
 )
 ROUTE_RE = re.compile(
@@ -37,8 +39,45 @@ REGION_ROUTE_RE = re.compile(
     r"\b(?P<region>[1-9])\s+(?P<route>(?:NY|US|I|CR)\s*-?\s*\d+[A-Za-z]?)\b",
     re.IGNORECASE,
 )
-CULVERT_ID_RE = re.compile(r"\bSC(?:\d+|-)\b", re.IGNORECASE)
-DATE_RE = re.compile(r"(\d{2})-(\d{2})-(\d{4})")
+CULVERT_ID_RE = re.compile(
+    r"\b(?P<prefix>SC|CID)\s*[-:]?\s*(?P<value>\d+|NOT\s+ASSIGNED)\b",
+    re.IGNORECASE,
+)
+NUMERIC_DATE_RE = re.compile(r"\b(\d{1,2})[._/-](\d{1,2})[._/-](\d{2}|\d{4})\b")
+MONTH_DATE_RE = re.compile(
+    r"\b(?P<month>"
+    r"Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
+    r"Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|"
+    r"Dec(?:ember)?"
+    r")\.?\s+(?P<day>\d{1,2})(?:st|nd|rd|th)?[,]?\s+(?P<year>\d{2}|\d{4})\b",
+    re.IGNORECASE,
+)
+MONTH_LOOKUP = {
+    "jan": 1,
+    "january": 1,
+    "feb": 2,
+    "february": 2,
+    "mar": 3,
+    "march": 3,
+    "apr": 4,
+    "april": 4,
+    "may": 5,
+    "jun": 6,
+    "june": 6,
+    "jul": 7,
+    "july": 7,
+    "aug": 8,
+    "august": 8,
+    "sep": 9,
+    "sept": 9,
+    "september": 9,
+    "oct": 10,
+    "october": 10,
+    "nov": 11,
+    "november": 11,
+    "dec": 12,
+    "december": 12,
+}
 
 
 @dataclass(frozen=True)
@@ -51,6 +90,7 @@ class CoordinateRecord:
     longitude: float
     raw_coordinate_text: str
     culvert_id: str
+    context_text: str = ""
     label: str = "field_observed_culvert"
     label_confidence: float = 0.85
 
@@ -182,7 +222,7 @@ def _report_files(root: Path) -> list[Path]:
 def _extract_from_files(paths: list[Path]) -> list[CoordinateRecord]:
     records: list[CoordinateRecord] = []
     for path in paths:
-        text = _extract_text(path)
+        text = _normalize_extracted_text(_extract_text(path))
         culvert_ids = _culvert_ids(text)
         file_records = _records_from_text(path, text)
         for index, record in enumerate(file_records):
@@ -247,7 +287,7 @@ def _records_from_text(path: Path, text: str) -> list[CoordinateRecord]:
     records: list[CoordinateRecord] = []
 
     for line in text.splitlines():
-        line = re.sub(r"\s+", " ", line).strip()
+        line = _clean_text_line(line)
         if not line:
             continue
 
@@ -269,6 +309,7 @@ def _records_from_text(path: Path, text: str) -> list[CoordinateRecord]:
                     longitude=longitude,
                     raw_coordinate_text=match.group(0),
                     culvert_id="",
+                    context_text=line,
                 )
             )
 
@@ -308,6 +349,10 @@ def _region_for_line(line: str, route: str) -> str:
     if match:
         return match.group("region")
 
+    route_region = re.search(r"\bR\s*[-:]?\s*(?P<region>[1-9])\b", line, re.IGNORECASE)
+    if route_region:
+        return route_region.group("region")
+
     if route:
         prefix = route.split()[0]
         loose = re.search(rf"\b(?P<region>[1-9])\s+{re.escape(prefix)}\b", line, re.IGNORECASE)
@@ -324,19 +369,64 @@ def _normalize_route(route: str) -> str:
     normalized = normalized.replace("COUNTY ROUTE", "CR")
     normalized = normalized.replace("CO RD", "CR")
     normalized = normalized.replace(" ", "")
+    normalized = normalized.replace("-", "")
     return normalized
 
 
 def _culvert_ids(text: str) -> list[str]:
-    return [match.group(0).upper() for match in CULVERT_ID_RE.finditer(text)]
+    ids = []
+    for match in CULVERT_ID_RE.finditer(text):
+        prefix = match.group("prefix").upper()
+        value = re.sub(r"\s+", "", match.group("value").upper())
+        ids.append(f"{prefix}-{value}" if value == "NOTASSIGNED" else f"{prefix}{value}")
+    return ids
 
 
 def _report_date(path: Path) -> str:
-    match = DATE_RE.search(path.name)
-    if not match:
+    numeric_match = NUMERIC_DATE_RE.search(path.name)
+    if numeric_match:
+        month, day, year = numeric_match.groups()
+        return _format_date(month=int(month), day=int(day), year=int(year))
+
+    month_match = MONTH_DATE_RE.search(path.name)
+    if month_match:
+        month_name = month_match.group("month").lower().rstrip(".")
+        month = MONTH_LOOKUP.get(month_name)
+        if month:
+            return _format_date(
+                month=month,
+                day=int(month_match.group("day")),
+                year=int(month_match.group("year")),
+            )
+
+    return ""
+
+
+def _normalize_extracted_text(text: str) -> str:
+    normalized = unicodedata.normalize("NFKC", text)
+    cleaned = []
+    for character in normalized:
+        if character in "\r\n":
+            cleaned.append(character)
+        elif unicodedata.category(character) == "Cf":
+            cleaned.append(" ")
+        else:
+            cleaned.append(character)
+    return "".join(cleaned).replace("\xa0", " ")
+
+
+def _clean_text_line(line: str) -> str:
+    return re.sub(r"\s+", " ", _normalize_extracted_text(line)).strip()
+
+
+def _format_date(month: int, day: int, year: int) -> str:
+    if year < 100:
+        year += 2000
+    try:
+        parsed = date(year, month, day)
+    except ValueError:
         return ""
-    month, day, year = match.groups()
-    return f"{year}-{month}-{day}"
+    return parsed.isoformat()
 
 
 def _deduplicate_records(table: pd.DataFrame, precision: int) -> pd.DataFrame:
@@ -357,6 +447,7 @@ def _deduplicate_records(table: pd.DataFrame, precision: int) -> pd.DataFrame:
                 "longitude": "first",
                 "raw_coordinate_text": "first",
                 "culvert_id": "first",
+                "context_text": "first",
                 "label": "first",
                 "label_confidence": "max",
             }

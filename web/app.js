@@ -36,6 +36,7 @@ const els = {
   total: document.querySelector("#total-count"),
   visible: document.querySelector("#visible-count"),
   maxScore: document.querySelector("#max-score"),
+  fieldLabels: document.querySelector("#field-label-count"),
   list: document.querySelector("#candidate-list"),
   template: document.querySelector("#candidate-template"),
   search: document.querySelector("#search-input"),
@@ -288,6 +289,9 @@ function renderSummary(summary) {
   els.total.textContent = summary.discovery_candidates ?? summary.rows ?? state.features.length;
   const score = Number(summary.max_score ?? 0);
   els.maxScore.textContent = Number.isFinite(score) ? Math.round(score) : "0";
+  if (els.fieldLabels) {
+    els.fieldLabels.textContent = summary.known_field_matches ?? 0;
+  }
 }
 
 function render() {

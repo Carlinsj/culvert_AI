@@ -11,7 +11,12 @@ import numpy as np
 import pandas as pd
 from sklearn.base import clone
 from sklearn.dummy import DummyClassifier
-from sklearn.ensemble import ExtraTreesClassifier, HistGradientBoostingClassifier, RandomForestClassifier
+from sklearn.ensemble import (
+    ExtraTreesClassifier,
+    GradientBoostingClassifier,
+    HistGradientBoostingClassifier,
+    RandomForestClassifier,
+)
 from sklearn.inspection import permutation_importance
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
@@ -47,6 +52,9 @@ DEFAULT_EXCLUDED_FEATURES = {
     "y_m",
     "culvert_probability",
     "priority_rank",
+    "priority_percentile",
+    "label_confidence",
+    "nearest_field_report_label_confidence",
     "spatial_block_id",
 }
 
@@ -106,11 +114,20 @@ def train_model(
     metrics = {
         "feature_columns": feature_columns,
         "rows": int(len(features)),
-        "selection_metric": "cross_validated_average_precision",
+        "selection_metric": "spatial_holdout_average_precision_then_cross_validated_average_precision",
     }
     class_counts = y.value_counts().to_dict()
     metrics["class_counts"] = {str(k): int(v) for k, v in class_counts.items()}
-    metrics["model_comparison"] = _compare_models(model_candidates, x, y)
+    metrics["model_comparison"] = _compare_models(
+        model_candidates,
+        x,
+        y,
+        features=features,
+        spatial_cv=spatial_cv,
+        spatial_block_size_m=spatial_block_size_m,
+        test_size=test_size,
+        random_state=random_state,
+    )
 
     can_split = len(features) >= 8 and y.value_counts().min() >= 2
     selected_name = _select_model(metrics["model_comparison"])
@@ -227,6 +244,22 @@ def _candidate_models(random_state: int) -> dict:
             random_state=random_state,
             n_jobs=1,
         ),
+        "spatial_regularized_extra_trees": ExtraTreesClassifier(
+            n_estimators=600,
+            min_samples_leaf=6,
+            max_features=0.7,
+            class_weight="balanced",
+            random_state=random_state,
+            n_jobs=1,
+        ),
+        "gradient_boosting": GradientBoostingClassifier(
+            n_estimators=350,
+            learning_rate=0.035,
+            max_depth=2,
+            min_samples_leaf=8,
+            subsample=0.8,
+            random_state=random_state,
+        ),
         "hist_gradient_boosting": HistGradientBoostingClassifier(
             learning_rate=0.05,
             max_iter=300,
@@ -234,10 +267,28 @@ def _candidate_models(random_state: int) -> dict:
             l2_regularization=0.1,
             random_state=random_state,
         ),
+        "balanced_hist_gradient_boosting": HistGradientBoostingClassifier(
+            learning_rate=0.035,
+            max_iter=450,
+            max_leaf_nodes=12,
+            min_samples_leaf=12,
+            l2_regularization=0.25,
+            class_weight="balanced",
+            random_state=random_state,
+        ),
     }
 
 
-def _compare_models(models: dict, x: pd.DataFrame, y: pd.Series) -> dict:
+def _compare_models(
+    models: dict,
+    x: pd.DataFrame,
+    y: pd.Series,
+    features: gpd.GeoDataFrame | None = None,
+    spatial_cv: bool = True,
+    spatial_block_size_m: float = 2_500.0,
+    test_size: float = 0.25,
+    random_state: int = 42,
+) -> dict:
     min_class_count = int(y.value_counts().min())
     if len(x) < 8 or min_class_count < 2:
         return {
@@ -278,6 +329,24 @@ def _compare_models(models: dict, x: pd.DataFrame, y: pd.Series) -> dict:
                 "mean_precision": _nan_mean(scores["test_precision"]),
                 "mean_recall": _nan_mean(scores["test_recall"]),
             }
+            if spatial_cv and features is not None:
+                spatial = _spatial_holdout_score(
+                    estimator,
+                    features,
+                    x,
+                    y,
+                    test_size=test_size,
+                    random_state=random_state,
+                    block_size_m=spatial_block_size_m,
+                )
+                if spatial:
+                    comparison[name]["spatial_holdout_average_precision"] = spatial.get(
+                        "average_precision"
+                    )
+                    comparison[name]["spatial_holdout_f1"] = spatial.get("f1")
+                    comparison[name]["spatial_holdout_roc_auc"] = spatial.get("roc_auc")
+                    if "note" in spatial:
+                        comparison[name]["spatial_holdout_note"] = spatial["note"]
         except Exception as exc:
             comparison[name] = {
                 "error": str(exc),
@@ -294,11 +363,15 @@ def _select_model(comparison: dict) -> str:
     }
     candidates = non_baseline or comparison
 
-    def score(item) -> tuple[float, float]:
+    def score(item) -> tuple[float, float, float]:
         _name, result = item
+        spatial_avg_precision = result.get("spatial_holdout_average_precision")
         avg_precision = result.get("mean_average_precision")
         f1 = result.get("mean_f1")
         return (
+            float(spatial_avg_precision)
+            if spatial_avg_precision is not None and not np.isnan(spatial_avg_precision)
+            else -1.0,
             float(avg_precision) if avg_precision is not None and not np.isnan(avg_precision) else -1.0,
             float(f1) if f1 is not None and not np.isnan(f1) else -1.0,
         )

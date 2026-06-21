@@ -52,7 +52,8 @@ Useful npm commands:
 ```bash
 npm run predict:actual    # download actual Ulster TIGER roads/linear-water and refresh web/data
 npm run dev               # ensure actual predictions exist, then start backend/frontend
-npm run import:reports    # extract field-report culvert coordinates from the Team 3 ZIP
+npm run import:reports    # extract field-report culvert coordinates from the Team 2 folder
+npm run prepare:llm-label-review # write JSONL for optional LLM validation of extracted labels
 npm run pipeline:ulster   # run the real no-inventory Ulster workflow after data/raw is populated
 npm test                  # run Python tests
 ```
@@ -90,8 +91,12 @@ The actual Census TIGER/Line prediction workflow writes:
 - `web/data/findings.geojson`
 - `web/data/summary.json`
 
+The predictor is a geospatial model, not an LLM. An LLM can help validate extracted report labels,
+but the location ranking is learned from road/drainage geometry, field labels, and terrain evidence.
 If you add a real DEM at `data/raw/dem.tif`, the same command includes slope, terrain roughness,
-local relief, topographic position, and valley-depth features automatically.
+local relief, topographic position, valley-depth, and wetness/valley proxy features automatically.
+If you add `data/raw/flow_accumulation.tif` or `data/raw/drainage_area.tif`, those hydrology rasters
+are sampled automatically too.
 
 The synthetic demo writes:
 
@@ -228,6 +233,8 @@ data/raw/
   streams.gpkg            # streams, drainage lines, or hydrography
   known_culverts.gpkg     # existing culvert inventory with point locations
   dem.tif                 # optional USGS 3DEP or LiDAR-derived DEM
+  flow_accumulation.tif   # optional DEM-derived flow accumulation raster
+  drainage_area.tif       # optional DEM-derived drainage area raster
   landcover.tif           # optional land cover raster
 ```
 
@@ -270,6 +277,8 @@ culvert-ai build-features \
   --roads data/interim/ulster_roads.gpkg \
   --streams data/interim/ulster_streams.gpkg \
   --dem data/raw/dem.tif \
+  --flow-accumulation data/raw/flow_accumulation.tif \
+  --drainage-area data/raw/drainage_area.tif \
   --landcover data/raw/landcover.tif \
   --output data/processed/ulster_training_features.gpkg
 
@@ -312,8 +321,9 @@ What is built:
 - A live Census TIGER/Line-based actual prediction workflow: `npm run predict:actual`.
 - A no-known-culvert ranking workflow for when the team does not have local inventory labels.
 - Candidate generation from road-stream crossings and near crossings.
-- Topographic/terrain features from DEMs.
-- Optional supervised training when verified culvert labels become available.
+- Topographic/terrain/hydrology proxy features from DEMs and optional flow rasters.
+- Optional LLM-assisted review queue for cleaning extracted field-report labels.
+- Optional supervised training with spatial-holdout model selection when verified culvert labels exist.
 - KML export for Google Earth review.
 - A Leaflet web dashboard served by `npm run dev`.
 - A local ignored `PROJECT_TRACKING.md` for scratch progress notes.
@@ -324,6 +334,7 @@ What remains:
 
 - Run `npm run predict:actual` for a first-pass actual map from Census TIGER/Line data.
 - Add a real DEM at `data/raw/dem.tif` to improve topographic ranking.
+- Add DEM-derived `flow_accumulation.tif` or `drainage_area.tif` for stronger hydrology signal.
 - Replace Census roads/linear-water with NYSDOT or county GIS files when the team provides them.
 - Review top-ranked points in Google Earth before field visits.
 - Record field-confirmed culverts and false positives.

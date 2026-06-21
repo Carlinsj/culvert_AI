@@ -214,6 +214,10 @@ def _drainage_strength_score(table: pd.DataFrame) -> pd.Series:
     if "stream_order" in table.columns:
         pieces.append(_percentile(table["stream_order"]))
     for column in (
+        "flow_accumulation_log",
+        "flow_accumulation_rank_pct",
+        "drainage_area_log",
+        "drainage_area_rank_pct",
         "stream_density_100m_m_per_sqkm",
         "stream_density_250m_m_per_sqkm",
         "stream_density_500m_m_per_sqkm",
@@ -230,10 +234,18 @@ def _valley_position_score(table: pd.DataFrame) -> pd.Series:
         pieces.append(_percentile(table["valley_depth_9x9_m"]))
     if "topographic_position_9x9_m" in table.columns:
         pieces.append(_inverse_percentile(table["topographic_position_9x9_m"]))
+    if "topographic_wetness_proxy_9x9" in table.columns:
+        pieces.append(_percentile(table["topographic_wetness_proxy_9x9"]))
+    if "low_slope_valley_score_9x9" in table.columns:
+        pieces.append(table["low_slope_valley_score_9x9"].fillna(0).clip(0, 1))
     if "valley_depth_15x15_m" in table.columns:
         pieces.append(_percentile(table["valley_depth_15x15_m"]))
     if "topographic_position_15x15_m" in table.columns:
         pieces.append(_inverse_percentile(table["topographic_position_15x15_m"]))
+    if "topographic_wetness_proxy_15x15" in table.columns:
+        pieces.append(_percentile(table["topographic_wetness_proxy_15x15"]))
+    if "negative_tpi_31x31_m" in table.columns:
+        pieces.append(_percentile(table["negative_tpi_31x31_m"]))
     return _mean_score(table, pieces)
 
 
@@ -252,8 +264,13 @@ def _terrain_break_score(table: pd.DataFrame) -> pd.Series:
         "terrain_roughness_3x3_m",
         "elevation_relief_9x9_m",
         "terrain_roughness_9x9_m",
+        "terrain_break_score_proxy_9x9",
         "elevation_relief_15x15_m",
         "terrain_roughness_15x15_m",
+        "terrain_break_score_proxy_15x15",
+        "elevation_relief_31x31_m",
+        "terrain_roughness_31x31_m",
+        "terrain_break_score_proxy_31x31",
     ):
         if column in table.columns:
             pieces.append(_percentile(table[column]))

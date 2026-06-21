@@ -6,12 +6,17 @@ set -euo pipefail
 # predicts likely culvert locations, and refreshes the web dashboard data.
 # If data/raw/dem.tif exists, it is used automatically.
 
-scripts/python.sh -m culvert_ai.cli download-census \
-  --output-dir data/raw \
-  --statefp "36" \
-  --countyfp "111"
+if [ "${REFRESH_CENSUS_INPUTS:-0}" = "1" ] || [ ! -f data/raw/roads.gpkg ] || [ ! -f data/raw/streams.gpkg ]; then
+  scripts/python.sh -m culvert_ai.cli download-census \
+    --output-dir data/raw \
+    --statefp "36" \
+    --countyfp "111"
+else
+  echo "Using existing Census inputs in data/raw. Set REFRESH_CENSUS_INPUTS=1 to download fresh copies."
+fi
 
-FIELD_REPORTS_PATH="${FIELD_REPORTS_PATH:-/Users/Carli/Downloads/Team No. 3.zip}"
+FIELD_REPORTS_PATH="${FIELD_REPORTS_PATH:-/Users/Carli/Downloads/Team No. 2-selected (1)}"
+LLM_REVIEWED_CULVERTS_PATH="${LLM_REVIEWED_CULVERTS_PATH:-data/processed/field_report_llm_reviewed_culverts.gpkg}"
 KNOWN_CULVERTS_PATH=""
 if [ -e "$FIELD_REPORTS_PATH" ]; then
   scripts/python.sh -m culvert_ai.cli import-field-reports \
@@ -19,6 +24,10 @@ if [ -e "$FIELD_REPORTS_PATH" ]; then
     --output data/processed/field_report_culverts.gpkg \
     --csv-output data/processed/field_report_culverts.csv
   KNOWN_CULVERTS_PATH="data/processed/field_report_culverts.gpkg"
+fi
+if [ -f "$LLM_REVIEWED_CULVERTS_PATH" ]; then
+  echo "Using LLM-reviewed field labels from $LLM_REVIEWED_CULVERTS_PATH."
+  KNOWN_CULVERTS_PATH="$LLM_REVIEWED_CULVERTS_PATH"
 fi
 
 if [ -f data/processed/field_observations.geojson ]; then
@@ -67,45 +76,28 @@ if [ -n "$KNOWN_CULVERTS_PATH" ] && [ -f "$KNOWN_CULVERTS_PATH" ]; then
   CANDIDATES_PATH="data/interim/actual_ulster_candidates_with_route_samples.gpkg"
 fi
 
-if [ -f data/raw/dem.tif ]; then
-  if [ -n "$KNOWN_CULVERTS_PATH" ] && [ -f "$KNOWN_CULVERTS_PATH" ]; then
-    scripts/python.sh -m culvert_ai.cli build-features \
-      --candidates "$CANDIDATES_PATH" \
-      --known-culverts "$KNOWN_CULVERTS_PATH" \
-      --positive-radius-m 75 \
-      --roads data/raw/roads.gpkg \
-      --streams data/raw/streams.gpkg \
-      --dem data/raw/dem.tif \
-      --density-radii-m 50 100 250 500 \
-      --output data/processed/actual_ulster_unlabeled_features.gpkg
-  else
-    scripts/python.sh -m culvert_ai.cli build-features \
-      --candidates "$CANDIDATES_PATH" \
-      --roads data/raw/roads.gpkg \
-      --streams data/raw/streams.gpkg \
-      --dem data/raw/dem.tif \
-      --density-radii-m 50 100 250 500 \
-      --output data/processed/actual_ulster_unlabeled_features.gpkg
-  fi
-else
-  if [ -n "$KNOWN_CULVERTS_PATH" ] && [ -f "$KNOWN_CULVERTS_PATH" ]; then
-    scripts/python.sh -m culvert_ai.cli build-features \
-      --candidates "$CANDIDATES_PATH" \
-      --known-culverts "$KNOWN_CULVERTS_PATH" \
-      --positive-radius-m 75 \
-      --roads data/raw/roads.gpkg \
-      --streams data/raw/streams.gpkg \
-      --density-radii-m 50 100 250 500 \
-      --output data/processed/actual_ulster_unlabeled_features.gpkg
-  else
-    scripts/python.sh -m culvert_ai.cli build-features \
-      --candidates "$CANDIDATES_PATH" \
-      --roads data/raw/roads.gpkg \
-      --streams data/raw/streams.gpkg \
-      --density-radii-m 50 100 250 500 \
-      --output data/processed/actual_ulster_unlabeled_features.gpkg
-  fi
+FEATURE_ARGS=(
+  --candidates "$CANDIDATES_PATH"
+  --roads data/raw/roads.gpkg
+  --streams data/raw/streams.gpkg
+  --density-radii-m 50 100 250 500
+  --output data/processed/actual_ulster_unlabeled_features.gpkg
+)
+
+if [ -n "$KNOWN_CULVERTS_PATH" ] && [ -f "$KNOWN_CULVERTS_PATH" ]; then
+  FEATURE_ARGS+=(--known-culverts "$KNOWN_CULVERTS_PATH" --positive-radius-m 75)
 fi
+if [ -f data/raw/dem.tif ]; then
+  FEATURE_ARGS+=(--dem data/raw/dem.tif)
+fi
+if [ -f data/raw/flow_accumulation.tif ]; then
+  FEATURE_ARGS+=(--flow-accumulation data/raw/flow_accumulation.tif)
+fi
+if [ -f data/raw/drainage_area.tif ]; then
+  FEATURE_ARGS+=(--drainage-area data/raw/drainage_area.tif)
+fi
+
+scripts/python.sh -m culvert_ai.cli build-features "${FEATURE_ARGS[@]}"
 
 scripts/python.sh -m culvert_ai.cli score-unlabeled \
   --features data/processed/actual_ulster_unlabeled_features.gpkg \

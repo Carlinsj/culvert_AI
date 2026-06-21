@@ -17,6 +17,8 @@ def build_feature_table(
     roads: gpd.GeoDataFrame | None = None,
     streams: gpd.GeoDataFrame | None = None,
     dem_path: str | Path | None = None,
+    flow_accumulation_path: str | Path | None = None,
+    drainage_area_path: str | Path | None = None,
     landcover_path: str | Path | None = None,
     positive_radius_m: float = 30.0,
     density_radius_m: float = 75.0,
@@ -52,6 +54,15 @@ def build_feature_table(
 
     if dem_path:
         features = add_raster_samples(features, dem_path, prefix="dem")
+        features = add_dem_hydrology_proxies(features)
+
+    if flow_accumulation_path:
+        features = add_raster_samples(features, flow_accumulation_path, prefix="flow_accumulation")
+        features = add_hydrology_raster_features(features, "flow_accumulation")
+
+    if drainage_area_path:
+        features = add_raster_samples(features, drainage_area_path, prefix="drainage_area")
+        features = add_hydrology_raster_features(features, "drainage_area")
 
     if landcover_path:
         features = add_raster_samples(features, landcover_path, prefix="landcover")
@@ -66,10 +77,36 @@ def add_candidate_derived_features(candidates: gpd.GeoDataFrame) -> gpd.GeoDataF
         distances = pd.to_numeric(features["road_stream_distance_m"], errors="coerce").clip(lower=0)
         features["log_road_stream_distance_m"] = np.log1p(distances)
         features["is_exact_road_stream_intersection"] = (distances <= 0.01).astype(int)
+        features["road_stream_proximity_signal"] = (1.0 / (1.0 + distances / 20.0)).fillna(0.0)
 
     if "crossing_angle_degrees" in features.columns:
         angle = pd.to_numeric(features["crossing_angle_degrees"], errors="coerce")
         features["crossing_angle_abs_from_90"] = (90 - angle).abs()
+        features["crossing_angle_perpendicularity"] = (
+            1.0 - (features["crossing_angle_abs_from_90"] / 90.0)
+        ).clip(0, 1)
+
+    if {"road_stream_proximity_signal", "crossing_angle_perpendicularity"}.issubset(features.columns):
+        features["crossing_geometry_signal"] = (
+            0.65 * features["road_stream_proximity_signal"].fillna(0.0)
+            + 0.35 * features["crossing_angle_perpendicularity"].fillna(0.0)
+        ).clip(0, 1)
+
+    if "source" in features.columns:
+        source = features["source"].fillna("").astype(str).str.lower()
+        features["source_exact_intersection"] = source.eq("exact_road_stream_intersection").astype(int)
+        features["source_nearest_approach"] = source.eq("nearest_road_stream_approach").astype(int)
+        features["source_route_interval_sample"] = source.eq("route_interval_sample").astype(int)
+        features["source_field_report_observed"] = source.eq("field_report_observed_culvert").astype(int)
+
+    for column in ("road_name", "stream_name", "matched_route"):
+        if column in features.columns:
+            text = features[column].fillna("").astype(str).str.strip()
+            features[f"has_{column}"] = (text != "").astype(int)
+
+    for column in ("road_bridge", "road_tunnel", "stream_culvert", "stream_tunnel"):
+        if column in features.columns:
+            features[f"{column}_flag"] = _boolean_score(features[column])
 
     return features
 
@@ -148,6 +185,7 @@ def add_raster_samples(
             3: {"slope": [], "mean": [], "relief": [], "std": [], "tpi": [], "valley_depth": []},
             9: {"slope": [], "mean": [], "relief": [], "std": [], "tpi": [], "valley_depth": []},
             15: {"slope": [], "mean": [], "relief": [], "std": [], "tpi": [], "valley_depth": []},
+            31: {"slope": [], "mean": [], "relief": [], "std": [], "tpi": [], "valley_depth": []},
         }
 
         for point in sample_points.geometry:
@@ -172,6 +210,55 @@ def add_raster_samples(
                 enriched[f"topographic_position_{window_size}x{window_size}_m"] = output["tpi"]
                 enriched[f"valley_depth_{window_size}x{window_size}_m"] = output["valley_depth"]
 
+    return enriched
+
+
+def add_dem_hydrology_proxies(points: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    enriched = points.copy()
+    if "slope_degrees" not in enriched.columns:
+        return enriched
+
+    slope = pd.to_numeric(enriched["slope_degrees"], errors="coerce").clip(lower=0)
+    slope_damping = 1.0 / (1.0 + slope)
+    for window_size in (3, 9, 15, 31):
+        relief_col = f"elevation_relief_{window_size}x{window_size}_m"
+        roughness_col = f"terrain_roughness_{window_size}x{window_size}_m"
+        tpi_col = f"topographic_position_{window_size}x{window_size}_m"
+        valley_col = f"valley_depth_{window_size}x{window_size}_m"
+        if not {relief_col, roughness_col, tpi_col, valley_col}.issubset(enriched.columns):
+            continue
+
+        relief = pd.to_numeric(enriched[relief_col], errors="coerce").clip(lower=0)
+        roughness = pd.to_numeric(enriched[roughness_col], errors="coerce").clip(lower=0)
+        tpi = pd.to_numeric(enriched[tpi_col], errors="coerce")
+        valley_depth = pd.to_numeric(enriched[valley_col], errors="coerce").clip(lower=0)
+
+        enriched[f"valley_depth_relief_ratio_{window_size}x{window_size}"] = (
+            valley_depth / relief.replace(0, np.nan)
+        ).replace([np.inf, -np.inf], np.nan)
+        enriched[f"topographic_wetness_proxy_{window_size}x{window_size}"] = (
+            np.log1p(valley_depth) * slope_damping
+        )
+        enriched[f"low_slope_valley_score_{window_size}x{window_size}"] = (
+            _robust_0_to_1(valley_depth) * slope_damping
+        )
+        enriched[f"terrain_break_score_proxy_{window_size}x{window_size}"] = (
+            np.log1p(relief) * np.log1p(roughness)
+        )
+        enriched[f"negative_tpi_{window_size}x{window_size}_m"] = (-tpi).clip(lower=0)
+
+    return enriched
+
+
+def add_hydrology_raster_features(points: gpd.GeoDataFrame, prefix: str) -> gpd.GeoDataFrame:
+    enriched = points.copy()
+    value_col = f"{prefix}_value"
+    if value_col not in enriched.columns:
+        return enriched
+
+    values = pd.to_numeric(enriched[value_col], errors="coerce").clip(lower=0)
+    enriched[f"{prefix}_log"] = np.log1p(values)
+    enriched[f"{prefix}_rank_pct"] = values.rank(pct=True).fillna(0.0)
     return enriched
 
 
@@ -215,6 +302,25 @@ def _query_positions(gdf: gpd.GeoDataFrame, geometry) -> list[int]:
         return list(gdf.sindex.query(geometry, predicate="intersects"))
     except Exception:
         return list(range(len(gdf)))
+
+
+def _boolean_score(values: pd.Series) -> pd.Series:
+    return (
+        values.fillna("")
+        .astype(str)
+        .str.lower()
+        .isin({"1", "true", "yes", "y", "bridge", "tunnel", "culvert", "covered"})
+        .astype(int)
+    )
+
+
+def _robust_0_to_1(values: pd.Series) -> pd.Series:
+    numeric = pd.to_numeric(values, errors="coerce")
+    low = numeric.quantile(0.05)
+    high = numeric.quantile(0.95)
+    if pd.isna(low) or pd.isna(high) or high <= low:
+        return pd.Series(0.0, index=values.index)
+    return ((numeric - low) / (high - low)).clip(0, 1).fillna(0.0)
 
 
 def _sample_value(src, x: float, y: float) -> float:

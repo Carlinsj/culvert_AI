@@ -8,22 +8,30 @@ field-validated classifier because we do not have confirmed local culvert and no
 1. Add a DEM at `data/raw/dem.tif`.
    - Use LiDAR-derived DEM if NYSDOT, county GIS, or USGS 3DEP data is available.
    - This activates slope, terrain roughness, local relief, topographic position, and valley-depth
-     features.
+     features, plus wetness/valley-position proxy features.
 
-2. Replace Census roads/water lines with project-grade layers.
+2. Add DEM-derived hydrology rasters when available.
+   - Put flow accumulation at `data/raw/flow_accumulation.tif`.
+   - Put drainage area at `data/raw/drainage_area.tif`.
+   - These are sampled automatically by `npm run predict:actual` and become model/ranking features.
+
+3. Replace Census roads/water lines with project-grade layers.
    - Prefer NYSDOT road centerlines and official hydrography/drainage layers.
    - Census TIGER is reliable for a first pass, but it is not as detailed as engineering GIS.
 
-3. Collect labels during field work.
+4. Collect and QA labels during field work.
    - Confirmed culvert: point found in field.
    - False positive: high-ranked candidate inspected but no culvert found.
    - Unknown: not yet inspected.
    - False positives are as valuable as positives because they teach the model what not to rank.
-   - Use `npm run import:reports` to extract field report coordinates from the Team 3 ZIP.
+   - Use `npm run import:reports` to extract Team 2 field report coordinates.
+   - Use `npm run prepare:llm-label-review` to create a JSONL queue for optional LLM validation of
+     messy report rows. The LLM is for label QA, not location prediction.
 
-4. Retrain with verified labels.
+5. Retrain with verified labels.
    - Once labels exist, use `npm run pipeline:ulster` or the supervised `culvert-ai train` command.
    - Compare average precision, top-k hit rate, and spatial holdout performance.
+   - Treat spatial holdout as the primary selection metric because labels are route-clustered.
 
 ## Scoring Features To Add Next
 

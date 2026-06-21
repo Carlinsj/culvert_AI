@@ -20,6 +20,7 @@ from culvert_ai.evaluate import evaluate_predictions
 from culvert_ai.features import build_feature_table
 from culvert_ai.field_reports import append_field_report_candidates, import_field_reports
 from culvert_ai.io import read_vector, write_vector
+from culvert_ai.llm_review import import_llm_reviewed_labels, write_llm_label_review_queue
 from culvert_ai.model import predict_culvert_probability, train_model
 from culvert_ai.observations import merge_confirmed_observations
 from culvert_ai.osm import (
@@ -27,6 +28,7 @@ from culvert_ai.osm import (
     DEFAULT_OVERPASS_URL,
     download_ulster_osm_inputs,
 )
+from culvert_ai.point_analysis import analyze_extracted_points, write_point_only_layer
 from culvert_ai.region import filter_to_region, get_region, write_region_boundary
 from culvert_ai.scoring import (
     build_discovery_ranking,
@@ -109,6 +111,92 @@ def build_parser() -> argparse.ArgumentParser:
     )
     import_reports.add_argument("--dedupe-precision", type=int, default=6)
     import_reports.set_defaults(func=_import_field_reports)
+
+    llm_review_queue = subparsers.add_parser(
+        "prepare-llm-label-review",
+        help="Write a JSONL queue for LLM-assisted validation of extracted field-report labels.",
+    )
+    llm_review_queue.add_argument("--input", required=True, help="Field report ZIP, folder, PDF, or DOCX.")
+    llm_review_queue.add_argument(
+        "--output",
+        default="data/processed/field_report_llm_review_queue.jsonl",
+        help="Output JSONL review queue.",
+    )
+    llm_review_queue.add_argument("--dedupe-precision", type=int, default=6)
+    llm_review_queue.set_defaults(func=_prepare_llm_label_review)
+
+    import_llm_review = subparsers.add_parser(
+        "import-llm-reviewed-labels",
+        help="Convert accepted LLM-reviewed JSONL labels into a known culvert point layer.",
+    )
+    import_llm_review.add_argument("--input", required=True, help="Reviewed JSONL file.")
+    import_llm_review.add_argument(
+        "--output",
+        default="data/processed/field_report_llm_reviewed_culverts.gpkg",
+        help="Output point layer.",
+    )
+    import_llm_review.add_argument(
+        "--csv-output",
+        default="data/processed/field_report_llm_reviewed_culverts.csv",
+        help="Optional CSV output.",
+    )
+    import_llm_review.set_defaults(func=_import_llm_reviewed_labels)
+
+    point_only = subparsers.add_parser(
+        "extract-points-only",
+        help="Write a point-only layer from extracted coordinate records.",
+    )
+    point_only.add_argument(
+        "--points",
+        default="data/processed/field_report_culverts.gpkg",
+        help="Input extracted coordinate point layer.",
+    )
+    point_only.add_argument(
+        "--output",
+        default="data/processed/extracted_points_only.geojson",
+        help="Output point-only GeoJSON or GPKG.",
+    )
+    point_only.add_argument(
+        "--csv-output",
+        default="data/processed/extracted_points_only.csv",
+        help="Optional point-only CSV output.",
+    )
+    point_only.set_defaults(func=_extract_points_only)
+
+    analyze_points = subparsers.add_parser(
+        "analyze-extracted-points",
+        help="Analyze extracted coordinates against roads, streams, and model candidates.",
+    )
+    analyze_points.add_argument(
+        "--points",
+        default="data/processed/field_report_culverts.gpkg",
+        help="Input extracted coordinate point layer.",
+    )
+    analyze_points.add_argument("--roads", default="data/raw/roads.gpkg")
+    analyze_points.add_argument("--streams", default="data/raw/streams.gpkg")
+    analyze_points.add_argument(
+        "--candidates",
+        default="data/processed/actual_ulster_discovery_predictions.gpkg",
+    )
+    analyze_points.add_argument(
+        "--output-geojson",
+        default="data/processed/extracted_points_analysis.geojson",
+    )
+    analyze_points.add_argument(
+        "--output-csv",
+        default="data/processed/extracted_points_analysis.csv",
+    )
+    analyze_points.add_argument(
+        "--output-json",
+        default="reports/extracted_points_analysis.json",
+    )
+    analyze_points.add_argument(
+        "--output-markdown",
+        default="reports/extracted_points_analysis.md",
+    )
+    analyze_points.add_argument("--match-radius-m", type=float, default=75.0)
+    analyze_points.add_argument("--cluster-radius-m", type=float, default=750.0)
+    analyze_points.set_defaults(func=_analyze_extracted_points)
 
     merge_observations = subparsers.add_parser(
         "merge-field-observations",
@@ -215,6 +303,8 @@ def build_parser() -> argparse.ArgumentParser:
     features.add_argument("--roads", help="Road centerline vector file.")
     features.add_argument("--streams", help="Stream/drainage vector file.")
     features.add_argument("--dem", help="DEM raster path.")
+    features.add_argument("--flow-accumulation", help="Optional flow accumulation raster path.")
+    features.add_argument("--drainage-area", help="Optional drainage area raster path.")
     features.add_argument("--landcover", help="Land cover raster path.")
     features.add_argument("--positive-radius-m", type=float, default=30.0)
     features.add_argument("--density-radius-m", type=float, default=75.0)
@@ -242,7 +332,10 @@ def build_parser() -> argparse.ArgumentParser:
             "regularized_logistic",
             "random_forest",
             "extra_trees",
+            "spatial_regularized_extra_trees",
+            "gradient_boosting",
             "hist_gradient_boosting",
+            "balanced_hist_gradient_boosting",
         ],
         help="Use auto to compare models, or force a specific model family.",
     )
@@ -363,6 +456,45 @@ def _import_field_reports(args) -> dict:
     )
 
 
+def _prepare_llm_label_review(args) -> dict:
+    return write_llm_label_review_queue(
+        input_path=args.input,
+        output_path=args.output,
+        dedupe_precision=args.dedupe_precision,
+    )
+
+
+def _import_llm_reviewed_labels(args) -> dict:
+    return import_llm_reviewed_labels(
+        review_path=args.input,
+        output_path=args.output,
+        csv_output=args.csv_output,
+    )
+
+
+def _extract_points_only(args) -> dict:
+    return write_point_only_layer(
+        points_path=args.points,
+        output_path=args.output,
+        csv_output=args.csv_output,
+    )
+
+
+def _analyze_extracted_points(args) -> dict:
+    return analyze_extracted_points(
+        points_path=args.points,
+        output_geojson=args.output_geojson,
+        output_csv=args.output_csv,
+        output_json=args.output_json,
+        output_markdown=args.output_markdown,
+        roads_path=args.roads,
+        streams_path=args.streams,
+        candidates_path=args.candidates,
+        match_radius_m=args.match_radius_m,
+        cluster_radius_m=args.cluster_radius_m,
+    )
+
+
 def _merge_field_observations(args) -> dict:
     return merge_confirmed_observations(
         observations_path=args.observations,
@@ -452,6 +584,8 @@ def _build_features(args) -> dict:
         roads=roads,
         streams=streams,
         dem_path=args.dem,
+        flow_accumulation_path=args.flow_accumulation,
+        drainage_area_path=args.drainage_area,
         landcover_path=args.landcover,
         positive_radius_m=args.positive_radius_m,
         density_radius_m=args.density_radius_m,
