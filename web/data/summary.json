@@ -1,19 +1,20 @@
 {
-  "rows": 1083,
+  "rows": 1327,
   "discovery_candidates": 1000,
-  "known_field_matches": 83,
+  "known_field_matches": 327,
   "score_column": "discovery_score",
-  "max_score": 53.8414936787317,
-  "mean_score": 37.30559952013068,
+  "max_score": 55.001077681517295,
+  "mean_score": 36.07677106222251,
   "priority_buckets": {
-    "medium": 513,
-    "low": 487,
-    "very_high": 83
+    "low": 512,
+    "medium": 487,
+    "very_high": 327,
+    "high": 1
   },
   "bounds": [
-    -74.762622,
+    -74.764928,
     41.58787499999999,
-    -73.943669,
-    42.16166
+    -73.926788,
+    42.16042010463083
   ]
 }

@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 import unicodedata
 import xml.etree.ElementTree as ET
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -26,7 +27,7 @@ from culvert_ai.io import (
 
 
 COORDINATE_RE = re.compile(
-    r"(?P<a>[+-]?\d{1,3}\.\d+)\s*°?\s*(?P<adir>[NSEW])?\s*[,;\s]+"
+    r"(?P<a>[+-]?\d{1,3}\.\d+)\s*°?\s*(?P<adir>[NSEW])?\s*[,;/\s]+"
     r"(?P<b>[+-]?\d{1,3}\.\d+)\s*°?\s*(?P<bdir>[NSEW])?",
     re.IGNORECASE,
 )
@@ -50,6 +51,18 @@ MONTH_DATE_RE = re.compile(
     r"Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|"
     r"Dec(?:ember)?"
     r")\.?\s+(?P<day>\d{1,2})(?:st|nd|rd|th)?[,]?\s+(?P<year>\d{2}|\d{4})\b",
+    re.IGNORECASE,
+)
+DAY_MONTH_DATE_RE = re.compile(
+    r"\b(?P<day>\d{1,2})(?:st|nd|rd|th)?\s+(?P<month>"
+    r"Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
+    r"Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|"
+    r"Dec(?:ember)?"
+    r")\.?[,]?\s+(?P<year>\d{2}|\d{4})\b",
+    re.IGNORECASE,
+)
+BARE_ROUTE_TABLE_RE = re.compile(
+    r"^\s*(?:\d+\s+)?R?\s*(?P<region>[1-9])\s+(?P<route>\d{1,3}[A-Za-z]?)\b",
     re.IGNORECASE,
 )
 MONTH_LOOKUP = {
@@ -96,7 +109,7 @@ class CoordinateRecord:
 
 
 def import_field_reports(
-    input_path: str | Path,
+    input_path: str | Path | Sequence[str | Path],
     output_path: str | Path,
     csv_output: str | Path | None = None,
     dedupe_precision: int = 6,
@@ -194,7 +207,13 @@ def append_field_report_candidates(
     }
 
 
-def extract_field_report_records(input_path: str | Path) -> list[CoordinateRecord]:
+def extract_field_report_records(input_path: str | Path | Sequence[str | Path]) -> list[CoordinateRecord]:
+    if not isinstance(input_path, (str, Path)):
+        records: list[CoordinateRecord] = []
+        for path in input_path:
+            records.extend(extract_field_report_records(path))
+        return records
+
     input_path = Path(input_path).expanduser()
     if not input_path.exists():
         raise FileNotFoundError(f"Field report path not found: {input_path}")
@@ -223,15 +242,7 @@ def _extract_from_files(paths: list[Path]) -> list[CoordinateRecord]:
     records: list[CoordinateRecord] = []
     for path in paths:
         text = _normalize_extracted_text(_extract_text(path))
-        culvert_ids = _culvert_ids(text)
-        file_records = _records_from_text(path, text)
-        for index, record in enumerate(file_records):
-            culvert_id = culvert_ids[index] if index < len(culvert_ids) else ""
-            records.append(
-                CoordinateRecord(
-                    **{**record.__dict__, "culvert_id": culvert_id},
-                )
-            )
+        records.extend(_records_from_text(path, text))
     return records
 
 
@@ -285,11 +296,18 @@ def _pdf_text(path: Path) -> str:
 def _records_from_text(path: Path, text: str) -> list[CoordinateRecord]:
     report_date = _report_date(path)
     records: list[CoordinateRecord] = []
+    nearby_culvert_id = ""
+    nearby_culvert_lines = 0
 
     for line in text.splitlines():
         line = _clean_text_line(line)
         if not line:
             continue
+
+        line_culvert_ids = _culvert_ids(line)
+        if line_culvert_ids:
+            nearby_culvert_id = line_culvert_ids[0]
+            nearby_culvert_lines = 3
 
         for match in COORDINATE_RE.finditer(line):
             lat_lon = _infer_lat_lon(match)
@@ -299,6 +317,7 @@ def _records_from_text(path: Path, text: str) -> list[CoordinateRecord]:
             latitude, longitude = lat_lon
             route = _route_for_line(line, match.start())
             region = _region_for_line(line, route)
+            culvert_id = line_culvert_ids[0] if line_culvert_ids else nearby_culvert_id
             records.append(
                 CoordinateRecord(
                     source_file=path.name,
@@ -308,10 +327,15 @@ def _records_from_text(path: Path, text: str) -> list[CoordinateRecord]:
                     latitude=latitude,
                     longitude=longitude,
                     raw_coordinate_text=match.group(0),
-                    culvert_id="",
+                    culvert_id=culvert_id,
                     context_text=line,
                 )
             )
+
+        if not line_culvert_ids and nearby_culvert_lines > 0:
+            nearby_culvert_lines -= 1
+            if nearby_culvert_lines == 0:
+                nearby_culvert_id = ""
 
     return records
 
@@ -341,7 +365,14 @@ def _valid_new_york_lat_lon(latitude: float, longitude: float) -> bool:
 def _route_for_line(line: str, coordinate_start: int) -> str:
     before_coordinate = line[:coordinate_start]
     match = ROUTE_RE.search(before_coordinate) or ROUTE_RE.search(line)
-    return _normalize_route(match.group(0)) if match else ""
+    if match:
+        return _normalize_route(match.group(0))
+
+    bare_match = BARE_ROUTE_TABLE_RE.search(before_coordinate)
+    if bare_match:
+        return _normalize_route(f"NY{bare_match.group('route')}")
+
+    return ""
 
 
 def _region_for_line(line: str, route: str) -> str:
@@ -352,6 +383,10 @@ def _region_for_line(line: str, route: str) -> str:
     route_region = re.search(r"\bR\s*[-:]?\s*(?P<region>[1-9])\b", line, re.IGNORECASE)
     if route_region:
         return route_region.group("region")
+
+    bare_route = BARE_ROUTE_TABLE_RE.search(line)
+    if bare_route:
+        return bare_route.group("region")
 
     if route:
         prefix = route.split()[0]
@@ -399,6 +434,17 @@ def _report_date(path: Path) -> str:
                 year=int(month_match.group("year")),
             )
 
+    day_month_match = DAY_MONTH_DATE_RE.search(path.name)
+    if day_month_match:
+        month_name = day_month_match.group("month").lower().rstrip(".")
+        month = MONTH_LOOKUP.get(month_name)
+        if month:
+            return _format_date(
+                month=month,
+                day=int(day_month_match.group("day")),
+                year=int(day_month_match.group("year")),
+            )
+
     return ""
 
 
@@ -433,20 +479,34 @@ def _deduplicate_records(table: pd.DataFrame, precision: int) -> pd.DataFrame:
     deduped = table.copy()
     deduped["_lat_key"] = deduped["latitude"].round(precision)
     deduped["_lon_key"] = deduped["longitude"].round(precision)
+    deduped["_has_culvert_id"] = deduped["culvert_id"].fillna("").astype(str).str.strip().ne("")
+    deduped["_has_route"] = deduped["route"].fillna("").astype(str).str.strip().ne("")
+    deduped["_context_len"] = deduped["context_text"].fillna("").astype(str).str.len()
 
     grouped = (
-        deduped.sort_values(["report_date", "source_file"])
+        deduped.sort_values(
+            [
+                "_lat_key",
+                "_lon_key",
+                "_has_culvert_id",
+                "_has_route",
+                "_context_len",
+                "report_date",
+                "source_file",
+            ],
+            ascending=[True, True, False, False, False, True, True],
+        )
         .groupby(["_lat_key", "_lon_key"], as_index=False)
         .agg(
             {
                 "source_file": lambda values: "; ".join(dict.fromkeys(values)),
-                "report_date": "first",
-                "nysdot_region": "first",
-                "route": "first",
+                "report_date": _first_non_empty,
+                "nysdot_region": _first_non_empty,
+                "route": _first_non_empty,
                 "latitude": "first",
                 "longitude": "first",
                 "raw_coordinate_text": "first",
-                "culvert_id": "first",
+                "culvert_id": _first_non_empty,
                 "context_text": "first",
                 "label": "first",
                 "label_confidence": "max",
@@ -454,3 +514,11 @@ def _deduplicate_records(table: pd.DataFrame, precision: int) -> pd.DataFrame:
         )
     )
     return grouped.drop(columns=["_lat_key", "_lon_key"])
+
+
+def _first_non_empty(values: pd.Series) -> str:
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""

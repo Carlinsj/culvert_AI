@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Culvert AI Field Review</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <link rel="stylesheet" href="styles.css?v=20260621-mobile-field" />
+    <link rel="stylesheet" href="styles.css?v=20260622-mobile-field" />
   </head>
   <body>
     <main class="app-shell">
@@ -40,7 +40,17 @@
 
         <section class="list-section" aria-label="Ranked candidates">
           <div class="section-title">
-            <h2>Ranked locations</h2>
+            <div class="section-heading">
+              <h2 id="list-heading">Ranked locations</h2>
+              <div class="list-tabs" role="tablist" aria-label="Location list views">
+                <button id="ranked-tab" type="button" data-list-view="ranked" aria-selected="true">
+                  Ranked
+                </button>
+                <button id="abu-tab" type="button" data-list-view="abu" aria-selected="false">
+                  ABU
+                </button>
+              </div>
+            </div>
             <div class="section-actions">
               <button id="place-point" type="button" aria-pressed="false">Add culvert</button>
               <button
@@ -97,8 +107,11 @@
             <span></span>
             <span></span>
           </button>
+          <button id="mobile-add-point" class="mobile-add-point" type="button" aria-pressed="false">
+            Add
+          </button>
           <button id="locate-me" class="locate-me" type="button" aria-pressed="false">
-            Locate me
+            Locate
           </button>
         </div>
         <p id="location-status" class="location-status" role="status" aria-live="polite"></p>
@@ -131,6 +144,6 @@
     </template>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="app.js?v=20260621-mobile-field"></script>
+    <script src="app.js?v=20260622-mobile-field"></script>
   </body>
 </html>

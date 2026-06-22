@@ -1,5 +1,5 @@
 import geopandas as gpd
-from shapely.geometry import LineString, Point
+from shapely.geometry import LineString, Point, Polygon
 
 from culvert_ai.io import write_vector
 from culvert_ai.point_analysis import analyze_extracted_points, write_high_confidence_training_points
@@ -110,3 +110,37 @@ def test_write_high_confidence_training_points_filters_ambiguous_points(tmp_path
     assert training["point_id"].tolist() == ["pt_0001"]
     assert training["label_source"].tolist() == ["field_report_coordinate_geospatial_qc"]
     assert csv_path.exists()
+
+
+def test_analyze_extracted_points_uses_boundary_for_extent(tmp_path):
+    points = gpd.GeoDataFrame(
+        [
+            {"latitude": 42.0, "longitude": -74.0, "geometry": Point(-74.0, 42.0)},
+            {"latitude": 42.2, "longitude": -74.2, "geometry": Point(-74.2, 42.2)},
+        ],
+        geometry="geometry",
+        crs="EPSG:4326",
+    )
+    boundary = gpd.GeoDataFrame(
+        [{"geometry": Polygon([(-74.05, 41.95), (-73.95, 41.95), (-73.95, 42.05), (-74.05, 42.05)])}],
+        geometry="geometry",
+        crs="EPSG:4326",
+    )
+    points_path = tmp_path / "points.gpkg"
+    boundary_path = tmp_path / "boundary.gpkg"
+    analysis_path = tmp_path / "analysis.geojson"
+    write_vector(points, points_path)
+    write_vector(boundary, boundary_path)
+
+    result = analyze_extracted_points(
+        points_path=points_path,
+        boundary_path=boundary_path,
+        output_geojson=analysis_path,
+        output_csv=tmp_path / "analysis.csv",
+        output_json=tmp_path / "analysis.json",
+        output_markdown=tmp_path / "analysis.md",
+    )
+
+    analysis = gpd.read_file(analysis_path).sort_values("latitude").reset_index(drop=True)
+    assert result["outside_analysis_extent"] == 1
+    assert analysis["inside_analysis_extent"].tolist() == [True, False]

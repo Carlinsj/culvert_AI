@@ -21,7 +21,10 @@ const state = {
   filtered: [],
   observations: [],
   markers: new Map(),
+  observationMarkers: new Map(),
   selectedId: null,
+  selectedObservationId: null,
+  listView: "ranked",
   layer: null,
   knownLayer: null,
   observationLayer: null,
@@ -41,6 +44,9 @@ const els = {
   fieldLabels: document.querySelector("#field-label-count"),
   modelQuality: document.querySelector("#model-quality"),
   list: document.querySelector("#candidate-list"),
+  listHeading: document.querySelector("#list-heading"),
+  listViewButtons: [...document.querySelectorAll("[data-list-view]")],
+  abuTab: document.querySelector("#abu-tab"),
   template: document.querySelector("#candidate-template"),
   search: document.querySelector("#search-input"),
   score: document.querySelector("#score-range"),
@@ -48,6 +54,7 @@ const els = {
   buckets: [...document.querySelectorAll('input[name="bucket"]')],
   showKnown: document.querySelector("#show-known"),
   placePoint: document.querySelector("#place-point"),
+  mobileAddPoint: document.querySelector("#mobile-add-point"),
   toggleFilters: document.querySelector("#toggle-filters"),
   filterPanel: document.querySelector("#filter-panel"),
   detail: document.querySelector("#detail-panel"),
@@ -94,13 +101,16 @@ async function init() {
 
 function applyDashboardData(geojson, summary, observations, options = {}) {
   const selectedId = options.preserveSelection ? state.selectedId : null;
+  const selectedObservationId = options.preserveSelection ? state.selectedObservationId : null;
   const observationFeatures = Array.isArray(observations) ? observations : observations?.features || [];
   state.features = (geojson.features || []).map(normalizeFeature);
   state.filtered = state.features;
   state.observations = mergeObservations([...observationFeatures, ...loadLocalObservations()]);
-  if (selectedId && state.features.some((feature) => idOf(feature) === selectedId)) {
-    state.selectedId = selectedId;
-  }
+  state.selectedId = selectedId && state.features.some((feature) => idOf(feature) === selectedId) ? selectedId : null;
+  state.selectedObservationId =
+    selectedObservationId && state.observations.some((feature) => observationIdOf(feature) === selectedObservationId)
+      ? selectedObservationId
+      : null;
   renderSummary(summary);
   render();
 }
@@ -132,7 +142,11 @@ function bindControls() {
   });
   els.buckets.forEach((input) => input.addEventListener("change", render));
   els.showKnown?.addEventListener("change", render);
+  els.listViewButtons.forEach((button) => {
+    button.addEventListener("click", () => setListView(button.dataset.listView || "ranked"));
+  });
   els.placePoint?.addEventListener("click", togglePlacePointMode);
+  els.mobileAddPoint?.addEventListener("click", togglePlacePointMode);
   els.toggleFilters?.addEventListener("click", toggleFilterPanel);
   els.mobileMenuToggle?.addEventListener("click", () => setMobileDrawerOpen(true));
   els.mobileSidebarClose?.addEventListener("click", () => setMobileDrawerOpen(false));
@@ -189,6 +203,15 @@ function setMobileDrawerOpen(open) {
     els.drawerBackdrop.hidden = !open;
   }
   window.requestAnimationFrame(() => state.map?.invalidateSize());
+}
+
+function setListView(view) {
+  state.listView = view === "abu" ? "abu" : "ranked";
+  if (state.listView === "abu") {
+    setFilterPanelOpen(false);
+  }
+  updateListViewControls();
+  renderList();
 }
 
 function isMobileViewport() {
@@ -439,6 +462,13 @@ function renderMarkers() {
 
 function renderList() {
   els.list.replaceChildren();
+  updateListViewControls();
+
+  if (state.listView === "abu") {
+    renderAbuList();
+    return;
+  }
+
   const fragment = document.createDocumentFragment();
 
   state.filtered.forEach((feature) => {
@@ -459,12 +489,63 @@ function renderList() {
   els.list.append(fragment);
 }
 
+function renderAbuList() {
+  const fragment = document.createDocumentFragment();
+  const observations = abuObservations();
+
+  if (!observations.length) {
+    const empty = document.createElement("li");
+    empty.className = "list-empty";
+    empty.textContent = "No ABU points saved yet.";
+    fragment.append(empty);
+    els.list.append(fragment);
+    return;
+  }
+
+  observations.forEach((feature, index) => {
+    const props = feature.properties || {};
+    const observationId = observationIdOf(feature);
+    const item = document.createElement("li");
+    item.className = "abu-list-item";
+    item.innerHTML = `
+      <div class="abu-card">
+        <button type="button" class="abu-select${observationId === state.selectedObservationId ? " active" : ""}">
+          <span class="rank">ABU</span>
+          <span class="candidate-main">
+            <strong class="candidate-title">${escapeHtml(observationTitle(props))} ${escapeHtml(String(index + 1))}</strong>
+            <span class="candidate-subtitle">${escapeHtml(observationSubtitle(props))}</span>
+          </span>
+        </button>
+        <button type="button" class="abu-delete" data-observation-delete="${escapeAttr(observationId)}">Delete</button>
+      </div>
+    `;
+    item.querySelector(".abu-select")?.addEventListener("click", () => selectObservation(observationId, { pan: true }));
+    fragment.append(item);
+  });
+
+  els.list.append(fragment);
+}
+
+function updateListViewControls() {
+  if (els.listHeading) {
+    els.listHeading.textContent = state.listView === "abu" ? "ABU points" : "Ranked locations";
+  }
+  els.listViewButtons.forEach((button) => {
+    button.setAttribute("aria-selected", String(button.dataset.listView === state.listView));
+  });
+  if (els.abuTab) {
+    const count = abuObservations().length;
+    els.abuTab.textContent = count ? `ABU (${count})` : "ABU";
+  }
+}
+
 function selectFeature(candidateId, options = { pan: true }) {
   const feature = state.features.find((item) => idOf(item) === candidateId);
   if (!feature) return;
   setMobileDrawerOpen(false);
   state.shouldFocusLocationOnNextUpdate = false;
   state.selectedId = candidateId;
+  state.selectedObservationId = null;
   renderDetail(feature);
   renderList();
   updateSelectedMarkerClass();
@@ -476,7 +557,34 @@ function selectFeature(candidateId, options = { pan: true }) {
     centerMapOnPoint(latLng);
   }
 
-  if (marker) {
+  if (marker && options.openPopup !== false && !isMobileViewport()) {
+    openSelectedPopup(marker, shouldCenter);
+  }
+
+  if (options.pan !== false) {
+    window.requestAnimationFrame(scrollDetailIntoViewOnMobile);
+  }
+}
+
+function selectObservation(observationId, options = { pan: true }) {
+  const feature = state.observations.find((item) => observationIdOf(item) === observationId);
+  if (!feature) return;
+  setMobileDrawerOpen(false);
+  state.shouldFocusLocationOnNextUpdate = false;
+  state.selectedId = null;
+  state.selectedObservationId = observationId;
+  renderObservationDetail(feature);
+  renderList();
+  updateSelectedMarkerClass();
+
+  const marker = state.observationMarkers.get(observationId);
+  const latLng = observationLatLng(feature);
+  const shouldCenter = options.pan !== false && latLng;
+  if (shouldCenter) {
+    centerMapOnPoint(latLng);
+  }
+
+  if (marker && options.openPopup !== false && !isMobileViewport()) {
     openSelectedPopup(marker, shouldCenter);
   }
 
@@ -523,6 +631,9 @@ function selectedPopupOptions() {
 function updateSelectedMarkerClass() {
   state.markers.forEach((marker, markerId) => {
     marker.getElement()?.classList.toggle("selected-marker", markerId === state.selectedId);
+  });
+  state.observationMarkers.forEach((marker, markerId) => {
+    marker.getElement()?.classList.toggle("selected-marker", markerId === state.selectedObservationId);
   });
 }
 
@@ -645,6 +756,7 @@ function locationSummaryHtml(props) {
 
 function clearDetail() {
   state.selectedId = null;
+  state.selectedObservationId = null;
   hideDetailPanel({ clearSelection: false });
 }
 
@@ -661,6 +773,7 @@ function hideDetailPanel(options = {}) {
   }
   if (clearSelection) {
     state.selectedId = null;
+    state.selectedObservationId = null;
     renderList();
     updateSelectedMarkerClass();
     state.map?.closePopup();
@@ -768,7 +881,7 @@ function startLocationTracking() {
 
   if (els.locateMe) {
     els.locateMe.disabled = true;
-    els.locateMe.textContent = "Locating...";
+    els.locateMe.textContent = "Locating";
   }
   state.shouldFocusLocationOnNextUpdate = true;
   setLocationStatus("Requesting location permission...");
@@ -837,7 +950,7 @@ function handleLocationError(error) {
 function updateLocationButton(isTracking) {
   if (!els.locateMe) return;
   els.locateMe.disabled = false;
-  els.locateMe.textContent = isTracking ? "Stop tracking" : "Locate me";
+  els.locateMe.textContent = isTracking ? "Tracking" : "Locate";
   els.locateMe.setAttribute("aria-pressed", String(isTracking));
   els.locateMe.setAttribute("aria-label", isTracking ? "Stop location tracking" : "Start location tracking");
 }
@@ -945,10 +1058,12 @@ function knownMarkerIcon(props) {
 function renderObservationMarkers() {
   if (!state.observationLayer) return;
   state.observationLayer.clearLayers();
+  state.observationMarkers.clear();
 
   state.observations.forEach((feature) => {
     const latLng = observationLatLng(feature);
     if (!latLng) return;
+    const observationId = observationIdOf(feature);
 
     const marker = L.marker(latLng, {
       icon: observationIcon(feature.properties),
@@ -956,7 +1071,9 @@ function renderObservationMarkers() {
       zIndexOffset: 900,
     });
     marker.bindPopup(observationPopupHtml(feature.properties), selectedPopupOptions());
+    marker.on("click", () => selectObservation(observationId, { pan: true }));
     marker.addTo(state.observationLayer);
+    state.observationMarkers.set(observationId, marker);
   });
 }
 
@@ -1188,6 +1305,7 @@ function addObservation(feature) {
     state.observations.unshift(normalized);
   }
   renderObservationMarkers();
+  renderList();
   updateVisibleCount();
 }
 
@@ -1195,8 +1313,13 @@ function removeObservation(observationId) {
   state.observations = state.observations.filter(
     (feature) => feature.properties?.observation_id !== observationId,
   );
+  if (state.selectedObservationId === observationId) {
+    state.selectedObservationId = null;
+    hideDetailPanel({ clearSelection: false });
+  }
   state.map?.closePopup();
   renderObservationMarkers();
+  renderList();
   updateVisibleCount();
 }
 
@@ -1267,6 +1390,46 @@ function observationLatLng(feature) {
   return [lat, lon];
 }
 
+function observationIdOf(feature) {
+  return String(feature?.properties?.observation_id || "");
+}
+
+function abuObservations() {
+  return state.observations.filter((feature) => observationStatus(feature.properties?.status) === "confirmed_culvert");
+}
+
+function observationSubtitle(props) {
+  const coordinates = `${formatNumber(props.latitude, "")}, ${formatNumber(props.longitude, "")}`;
+  const date = props.observed_at ? shortDateTime(props.observed_at) : "unknown time";
+  const label = props.field_culvert_id || props.road_name || props.candidate_id || coordinates;
+  return `${label} · ${date}`;
+}
+
+function renderObservationDetail(feature) {
+  const props = feature.properties || {};
+  const title = observationTitle(props);
+  const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${props.latitude},${props.longitude}`;
+  showDetailPanel();
+  els.detail.innerHTML = `
+    <div class="detail-panel-header">
+      <h3>${escapeHtml(title)}</h3>
+      <button type="button" class="detail-close" data-close-detail aria-label="Close details">Close</button>
+    </div>
+    <p>${escapeHtml(props.notes || "User-added training point.")}</p>
+    <div class="quick-detail-grid">
+      ${detailCell("Status", statusLabel(props.status))}
+      ${detailCell("Source", sourceLabel(props.source))}
+      ${detailCell("Latitude", formatNumber(props.latitude, ""))}
+      ${detailCell("Longitude", formatNumber(props.longitude, ""))}
+    </div>
+    <div class="actions location-actions">
+      <a href="${escapeAttr(mapsUrl)}" target="_blank" rel="noreferrer">Google Maps</a>
+      <button type="button" class="danger-action" data-observation-delete="${escapeAttr(props.observation_id || "")}">Delete ABU</button>
+    </div>
+  `;
+  bindDetailCloseAction();
+}
+
 function observationPopupHtml(props) {
   const title = observationTitle(props);
   const road = props.field_culvert_id || props.road_name || props.candidate_id || "Manual field point";
@@ -1284,6 +1447,13 @@ function observationTitle(props) {
     return "Added by user";
   }
   return statusLabel(props?.status);
+}
+
+function sourceLabel(source) {
+  if (source === "field_added_culvert") return "Added on map";
+  if (source === "prediction_review") return "Prediction review";
+  if (source === "known_culvert_review") return "Known culvert review";
+  return source || "Field review";
 }
 
 function fieldCulvertContextHtml(fieldId, context) {
@@ -1371,9 +1541,10 @@ function togglePlacePointMode() {
 }
 
 function updatePlacePointButton() {
-  if (!els.placePoint) return;
-  els.placePoint.setAttribute("aria-pressed", String(state.placingPoint));
-  els.placePoint.classList.toggle("active", state.placingPoint);
+  [els.placePoint, els.mobileAddPoint].filter(Boolean).forEach((button) => {
+    button.setAttribute("aria-pressed", String(state.placingPoint));
+    button.classList.toggle("active", state.placingPoint);
+  });
   document.body.classList.toggle("placing-point", state.placingPoint);
 }
 
@@ -1482,6 +1653,17 @@ function formatDistance(value) {
   if (feet < 900) return `${Math.round(feet)} ft`;
   const miles = meters / 1609.344;
   return `${miles < 10 ? miles.toFixed(1) : Math.round(miles)} mi`;
+}
+
+function shortDateTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value || "");
+  return date.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 function distanceMeters(latA, lonA, latB, lonB) {

@@ -71,6 +71,7 @@ def analyze_extracted_points(
     roads_path: str | Path | None = None,
     streams_path: str | Path | None = None,
     candidates_path: str | Path | None = None,
+    boundary_path: str | Path | None = None,
     match_radius_m: float = 75.0,
     cluster_radius_m: float = 750.0,
 ) -> dict:
@@ -83,13 +84,17 @@ def analyze_extracted_points(
     candidates = (
         read_vector(candidates_path) if candidates_path and Path(candidates_path).exists() else None
     )
+    boundary = read_vector(boundary_path) if boundary_path and Path(boundary_path).exists() else None
 
     analyzed = points.copy()
-    analysis_layers = [layer for layer in (roads, streams, candidates) if layer is not None and not layer.empty]
-    if analysis_layers:
-        analyzed["inside_analysis_extent"] = _inside_combined_extent(points, analysis_layers)
+    if boundary is not None and not boundary.empty:
+        analyzed["inside_analysis_extent"] = _inside_boundary(points, boundary)
     else:
-        analyzed["inside_analysis_extent"] = True
+        analysis_layers = [layer for layer in (roads, streams, candidates) if layer is not None and not layer.empty]
+        if not analysis_layers:
+            analyzed["inside_analysis_extent"] = True
+        else:
+            analyzed["inside_analysis_extent"] = _inside_combined_extent(points, analysis_layers)
 
     if roads is not None and not roads.empty:
         analyzed = _attach_nearest_line(analyzed, roads, prefix="road")
@@ -213,6 +218,16 @@ def _inside_combined_extent(points: gpd.GeoDataFrame, layers: list[gpd.GeoDataFr
         & (wgs84.geometry.y >= miny)
         & (wgs84.geometry.y <= maxy)
     )
+
+
+def _inside_boundary(points: gpd.GeoDataFrame, boundary: gpd.GeoDataFrame) -> pd.Series:
+    wgs84_points = points.to_crs("EPSG:4326")
+    wgs84_boundary = boundary.to_crs("EPSG:4326")
+    if hasattr(wgs84_boundary.geometry, "union_all"):
+        boundary_union = wgs84_boundary.geometry.union_all()
+    else:
+        boundary_union = wgs84_boundary.geometry.unary_union
+    return wgs84_points.geometry.apply(boundary_union.covers)
 
 
 def _attach_nearest_line(points: gpd.GeoDataFrame, lines: gpd.GeoDataFrame, prefix: str) -> gpd.GeoDataFrame:

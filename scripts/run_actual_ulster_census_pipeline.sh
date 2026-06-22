@@ -15,13 +15,27 @@ else
   echo "Using existing Census inputs in data/raw. Set REFRESH_CENSUS_INPUTS=1 to download fresh copies."
 fi
 
-FIELD_REPORTS_PATH="${FIELD_REPORTS_PATH:-/Users/Carli/Downloads/Team No. 2-selected (1)}"
+DEFAULT_FIELD_REPORTS_PATH="/Users/Carli/Downloads/Team No. 2-selected (1)"
+FIELD_REPORTS_PATHS="${FIELD_REPORTS_PATHS:-${FIELD_REPORTS_PATH:-$DEFAULT_FIELD_REPORTS_PATH}}"
 LLM_REVIEWED_CULVERTS_PATH="${LLM_REVIEWED_CULVERTS_PATH:-data/processed/field_report_llm_reviewed_culverts.gpkg}"
+BOUNDARY_PATH="${BOUNDARY_PATH:-data/raw/ulster_county_boundary.gpkg}"
 EXTRACTED_POINTS_PATH=""
 KNOWN_CULVERTS_PATH=""
-if [ -e "$FIELD_REPORTS_PATH" ] && [ -r "$FIELD_REPORTS_PATH" ]; then
+
+IFS=":" read -r -a FIELD_REPORT_INPUTS <<< "$FIELD_REPORTS_PATHS"
+READABLE_FIELD_REPORT_INPUTS=()
+UNREADABLE_FIELD_REPORT_INPUTS=()
+for FIELD_REPORT_INPUT in "${FIELD_REPORT_INPUTS[@]}"; do
+  if [ -e "$FIELD_REPORT_INPUT" ] && [ -r "$FIELD_REPORT_INPUT" ]; then
+    READABLE_FIELD_REPORT_INPUTS+=("$FIELD_REPORT_INPUT")
+  elif [ -e "$FIELD_REPORT_INPUT" ]; then
+    UNREADABLE_FIELD_REPORT_INPUTS+=("$FIELD_REPORT_INPUT")
+  fi
+done
+
+if [ "${#READABLE_FIELD_REPORT_INPUTS[@]}" -gt 0 ]; then
   if scripts/python.sh -m culvert_ai.cli import-field-reports \
-    --input "$FIELD_REPORTS_PATH" \
+    --input "${READABLE_FIELD_REPORT_INPUTS[@]}" \
     --output data/processed/field_report_culverts.gpkg \
     --csv-output data/processed/field_report_culverts.csv; then
     EXTRACTED_POINTS_PATH="data/processed/field_report_culverts.gpkg"
@@ -34,8 +48,8 @@ if [ -e "$FIELD_REPORTS_PATH" ] && [ -r "$FIELD_REPORTS_PATH" ]; then
 elif [ -f data/processed/field_report_culverts.gpkg ]; then
   echo "Using existing extracted points in data/processed/field_report_culverts.gpkg."
   EXTRACTED_POINTS_PATH="data/processed/field_report_culverts.gpkg"
-elif [ -e "$FIELD_REPORTS_PATH" ]; then
-  echo "Field report path is not readable from this environment: $FIELD_REPORTS_PATH"
+elif [ "${#UNREADABLE_FIELD_REPORT_INPUTS[@]}" -gt 0 ]; then
+  echo "Field report path is not readable from this environment: ${UNREADABLE_FIELD_REPORT_INPUTS[*]}"
   exit 1
 fi
 if [ -f "$LLM_REVIEWED_CULVERTS_PATH" ]; then
@@ -78,15 +92,31 @@ if [ -n "$EXTRACTED_POINTS_PATH" ] && [ -f "$EXTRACTED_POINTS_PATH" ] && [ "${RO
   CANDIDATES_PATH="data/interim/actual_ulster_candidates_with_route_samples.gpkg"
 fi
 if [ -n "$EXTRACTED_POINTS_PATH" ] && [ -f "$EXTRACTED_POINTS_PATH" ]; then
-  scripts/python.sh -m culvert_ai.cli analyze-extracted-points \
-    --points "$EXTRACTED_POINTS_PATH" \
-    --roads data/raw/roads.gpkg \
-    --streams data/raw/streams.gpkg \
-    --candidates "$CANDIDATES_PATH" \
-    --output-geojson data/processed/extracted_points_analysis.geojson \
-    --output-csv data/processed/extracted_points_analysis.csv \
-    --output-json reports/extracted_points_analysis.json \
-    --output-markdown reports/extracted_points_analysis.md
+  ADD_FIELD_CANDIDATE_ARGS=(
+    --candidates "$CANDIDATES_PATH"
+    --field-reports "$EXTRACTED_POINTS_PATH"
+    --output data/interim/actual_ulster_candidates_with_field_reports.gpkg
+  )
+  if [ -f "$BOUNDARY_PATH" ]; then
+    ADD_FIELD_CANDIDATE_ARGS+=(--boundary "$BOUNDARY_PATH")
+  fi
+  scripts/python.sh -m culvert_ai.cli add-field-report-candidates "${ADD_FIELD_CANDIDATE_ARGS[@]}"
+  CANDIDATES_PATH="data/interim/actual_ulster_candidates_with_field_reports.gpkg"
+
+  ANALYZE_POINTS_ARGS=(
+    --points "$EXTRACTED_POINTS_PATH"
+    --roads data/raw/roads.gpkg
+    --streams data/raw/streams.gpkg
+    --candidates "$CANDIDATES_PATH"
+    --output-geojson data/processed/extracted_points_analysis.geojson
+    --output-csv data/processed/extracted_points_analysis.csv
+    --output-json reports/extracted_points_analysis.json
+    --output-markdown /private/tmp/culvert_extracted_points_analysis.md
+  )
+  if [ -f "$BOUNDARY_PATH" ]; then
+    ANALYZE_POINTS_ARGS+=(--boundary "$BOUNDARY_PATH")
+  fi
+  scripts/python.sh -m culvert_ai.cli analyze-extracted-points "${ANALYZE_POINTS_ARGS[@]}"
 
   scripts/python.sh -m culvert_ai.cli build-high-confidence-training-points \
     --analysis data/processed/extracted_points_analysis.geojson \

@@ -102,7 +102,12 @@ def build_parser() -> argparse.ArgumentParser:
         "import-field-reports",
         help="Extract field-observed culvert coordinates from DOCX/PDF daily reports.",
     )
-    import_reports.add_argument("--input", required=True, help="Field report ZIP, folder, PDF, or DOCX.")
+    import_reports.add_argument(
+        "--input",
+        required=True,
+        nargs="+",
+        help="One or more field report ZIPs, folders, PDFs, or DOCX files.",
+    )
     import_reports.add_argument(
         "--output",
         default="data/processed/field_report_culverts.gpkg",
@@ -120,7 +125,12 @@ def build_parser() -> argparse.ArgumentParser:
         "prepare-llm-label-review",
         help="Write a JSONL queue for LLM-assisted validation of extracted field-report labels.",
     )
-    llm_review_queue.add_argument("--input", required=True, help="Field report ZIP, folder, PDF, or DOCX.")
+    llm_review_queue.add_argument(
+        "--input",
+        required=True,
+        nargs="+",
+        help="One or more field report ZIPs, folders, PDFs, or DOCX files.",
+    )
     llm_review_queue.add_argument(
         "--output",
         default="data/processed/field_report_llm_review_queue.jsonl",
@@ -182,6 +192,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--candidates",
         default="data/processed/actual_ulster_discovery_predictions.gpkg",
     )
+    analyze_points.add_argument("--boundary", help="Optional boundary used to accept/reject points.")
     analyze_points.add_argument(
         "--output-geojson",
         default="data/processed/extracted_points_analysis.geojson",
@@ -196,7 +207,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     analyze_points.add_argument(
         "--output-markdown",
-        default="reports/extracted_points_analysis.md",
+        default="/private/tmp/culvert_extracted_points_analysis.md",
     )
     analyze_points.add_argument("--match-radius-m", type=float, default=75.0)
     analyze_points.add_argument("--cluster-radius-m", type=float, default=750.0)
@@ -521,6 +532,7 @@ def _analyze_extracted_points(args) -> dict:
         roads_path=args.roads,
         streams_path=args.streams,
         candidates_path=args.candidates,
+        boundary_path=args.boundary,
         match_radius_m=args.match_radius_m,
         cluster_radius_m=args.cluster_radius_m,
     )
