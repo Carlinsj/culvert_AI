@@ -48,6 +48,8 @@ def test_merge_confirmed_observations_adds_confirmed_points(tmp_path):
     observations_path = tmp_path / "field_observations.geojson"
     base_path = tmp_path / "base_known.gpkg"
     output_path = tmp_path / "combined_known.gpkg"
+    confirmed_path = tmp_path / "confirmed.gpkg"
+    denied_path = tmp_path / "denied.gpkg"
     write_vector(observations, observations_path)
     write_vector(base_known, base_path)
 
@@ -55,12 +57,78 @@ def test_merge_confirmed_observations_adds_confirmed_points(tmp_path):
         observations_path=observations_path,
         base_known_path=base_path,
         output_path=output_path,
+        confirmed_output_path=confirmed_path,
+        denied_output_path=denied_path,
     )
     combined = read_vector(output_path)
+    confirmed = read_vector(confirmed_path)
+    denied = read_vector(denied_path)
 
     assert result["confirmed_added"] == 1
     assert result["denied_saved_for_review"] == 1
     assert len(combined) == 2
+    assert len(confirmed) == 1
+    assert len(denied) == 1
     assert "FC-20260617-ABCD" in set(combined["culvert_id"])
     assert "nearest_map_candidate" in set(combined["layout_source"])
     assert "cand-2" not in set(combined["culvert_id"])
+    assert denied.iloc[0]["label"] == "no_culvert"
+    assert denied.iloc[0]["candidate_id"] == "cand-2"
+
+
+def test_merge_observations_can_exclude_confirmed_user_points(tmp_path):
+    observations = gpd.GeoDataFrame(
+        [
+            {
+                "observation_id": "obs-confirmed",
+                "observed_at": "2026-06-14T12:00:00Z",
+                "status": "confirmed_culvert",
+                "candidate_id": "user-added",
+                "road_name": "State Rte 28",
+                "geometry": Point(-74.1, 42.0),
+            },
+            {
+                "observation_id": "obs-denied",
+                "observed_at": "2026-06-14T12:05:00Z",
+                "status": "no_culvert",
+                "candidate_id": "bad-prediction",
+                "road_name": "State Rte 28",
+                "geometry": Point(-74.2, 42.1),
+            },
+        ],
+        geometry="geometry",
+        crs="EPSG:4326",
+    )
+    base_known = gpd.GeoDataFrame(
+        [
+            {
+                "culvert_id": "report-point",
+                "source_file": "team_report.pdf",
+                "geometry": Point(-74.3, 42.2),
+            }
+        ],
+        geometry="geometry",
+        crs="EPSG:4326",
+    )
+
+    observations_path = tmp_path / "field_observations.geojson"
+    base_path = tmp_path / "base_known.gpkg"
+    output_path = tmp_path / "combined_known.gpkg"
+    denied_path = tmp_path / "denied.gpkg"
+    write_vector(observations, observations_path)
+    write_vector(base_known, base_path)
+
+    result = merge_confirmed_observations(
+        observations_path=observations_path,
+        base_known_path=base_path,
+        output_path=output_path,
+        denied_output_path=denied_path,
+        include_confirmed=False,
+    )
+    combined = read_vector(output_path)
+    denied = read_vector(denied_path)
+
+    assert result["confirmed_added"] == 0
+    assert result["denied_saved_for_review"] == 1
+    assert combined["culvert_id"].tolist() == ["report-point"]
+    assert denied["candidate_id"].tolist() == ["bad-prediction"]

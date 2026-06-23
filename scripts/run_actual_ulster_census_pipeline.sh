@@ -16,13 +16,30 @@ else
 fi
 
 DEFAULT_FIELD_REPORTS_PATH="/Users/Carli/Downloads/Team No. 2-selected (1)"
-FIELD_REPORTS_PATHS="${FIELD_REPORTS_PATHS:-${FIELD_REPORTS_PATH:-$DEFAULT_FIELD_REPORTS_PATH}}"
+FIELD_REPORTS_MANIFEST="${FIELD_REPORTS_MANIFEST:-configs/field_report_inputs.txt}"
 LLM_REVIEWED_CULVERTS_PATH="${LLM_REVIEWED_CULVERTS_PATH:-data/processed/field_report_llm_reviewed_culverts.gpkg}"
 BOUNDARY_PATH="${BOUNDARY_PATH:-data/raw/ulster_county_boundary.gpkg}"
 EXTRACTED_POINTS_PATH=""
 KNOWN_CULVERTS_PATH=""
+DENIED_CULVERTS_PATH=""
+INCLUDE_FIELD_OBSERVATIONS_AS_POSITIVES="${INCLUDE_FIELD_OBSERVATIONS_AS_POSITIVES:-0}"
 
-IFS=":" read -r -a FIELD_REPORT_INPUTS <<< "$FIELD_REPORTS_PATHS"
+FIELD_REPORT_INPUTS=()
+if [ -n "${FIELD_REPORTS_PATHS:-}" ]; then
+  IFS=":" read -r -a FIELD_REPORT_INPUTS <<< "$FIELD_REPORTS_PATHS"
+elif [ -n "${FIELD_REPORT_PATH:-}" ]; then
+  FIELD_REPORT_INPUTS=("$FIELD_REPORT_PATH")
+elif [ -f "$FIELD_REPORTS_MANIFEST" ]; then
+  while IFS= read -r FIELD_REPORT_INPUT || [ -n "$FIELD_REPORT_INPUT" ]; do
+    FIELD_REPORT_INPUT="${FIELD_REPORT_INPUT#"${FIELD_REPORT_INPUT%%[![:space:]]*}"}"
+    FIELD_REPORT_INPUT="${FIELD_REPORT_INPUT%"${FIELD_REPORT_INPUT##*[![:space:]]}"}"
+    if [ -n "$FIELD_REPORT_INPUT" ] && [[ "$FIELD_REPORT_INPUT" != \#* ]]; then
+      FIELD_REPORT_INPUTS+=("$FIELD_REPORT_INPUT")
+    fi
+  done < "$FIELD_REPORTS_MANIFEST"
+else
+  FIELD_REPORT_INPUTS=("$DEFAULT_FIELD_REPORTS_PATH")
+fi
 READABLE_FIELD_REPORT_INPUTS=()
 UNREADABLE_FIELD_REPORT_INPUTS=()
 for FIELD_REPORT_INPUT in "${FIELD_REPORT_INPUTS[@]}"; do
@@ -61,7 +78,7 @@ scripts/python.sh -m culvert_ai.cli build-candidates \
   --roads data/raw/roads.gpkg \
   --streams data/raw/streams.gpkg \
   --output data/interim/actual_ulster_candidates.gpkg \
-  --snap-tolerance-m 35 \
+  --snap-tolerance-m 20 \
   --min-spacing-m 20
 
 CANDIDATES_PATH="data/interim/actual_ulster_candidates.gpkg"
@@ -83,7 +100,7 @@ if [ -n "$EXTRACTED_POINTS_PATH" ] && [ -f "$EXTRACTED_POINTS_PATH" ] && [ "${RO
   scripts/python.sh -m culvert_ai.cli build-road-candidates \
     --roads data/raw/roads.gpkg \
     --routes-from "$EXTRACTED_POINTS_PATH" \
-    --interval-m 75 \
+    --interval-m 20 \
     --output data/interim/actual_ulster_route_candidates.gpkg
 
   scripts/python.sh -m culvert_ai.cli merge-candidates \
@@ -112,6 +129,7 @@ if [ -n "$EXTRACTED_POINTS_PATH" ] && [ -f "$EXTRACTED_POINTS_PATH" ]; then
     --output-csv data/processed/extracted_points_analysis.csv
     --output-json reports/extracted_points_analysis.json
     --output-markdown /private/tmp/culvert_extracted_points_analysis.md
+    --match-radius-m 20
   )
   if [ -f "$BOUNDARY_PATH" ]; then
     ANALYZE_POINTS_ARGS+=(--boundary "$BOUNDARY_PATH")
@@ -126,27 +144,50 @@ if [ -n "$EXTRACTED_POINTS_PATH" ] && [ -f "$EXTRACTED_POINTS_PATH" ]; then
 fi
 
 if [ -f data/processed/field_observations.geojson ]; then
-  CONFIRMED_OBSERVATIONS="$(scripts/python.sh - <<'PY'
+  read -r CONFIRMED_OBSERVATIONS DENIED_OBSERVATIONS TOTAL_OBSERVATIONS < <(scripts/python.sh - <<'PY'
 import json
 from pathlib import Path
 
 path = Path("data/processed/field_observations.geojson")
 data = json.loads(path.read_text())
 features = data.get("features", [])
-print(sum(1 for feature in features if feature.get("properties", {}).get("status") == "confirmed_culvert"))
+confirmed = sum(1 for feature in features if feature.get("properties", {}).get("status") == "confirmed_culvert")
+denied = sum(1 for feature in features if feature.get("properties", {}).get("status") == "no_culvert")
+print(confirmed, denied, len(features))
 PY
-)"
-  if [ "$CONFIRMED_OBSERVATIONS" -gt 0 ] || { [ -n "$KNOWN_CULVERTS_PATH" ] && [ -f "$KNOWN_CULVERTS_PATH" ]; }; then
+)
+  if [ "$TOTAL_OBSERVATIONS" -gt 0 ] || { [ -n "$KNOWN_CULVERTS_PATH" ] && [ -f "$KNOWN_CULVERTS_PATH" ]; }; then
     MERGE_OBSERVATIONS_ARGS=(
       --observations data/processed/field_observations.geojson
       --output data/processed/training_known_culverts.gpkg
       --csv-output data/processed/training_known_culverts.csv
+      --confirmed-output data/processed/confirmed_field_observations.gpkg
+      --denied-output data/processed/no_culvert_observations.gpkg
+      --denied-csv-output data/processed/no_culvert_observations.csv
     )
     if [ -n "$KNOWN_CULVERTS_PATH" ] && [ -f "$KNOWN_CULVERTS_PATH" ]; then
       MERGE_OBSERVATIONS_ARGS+=(--base-known "$KNOWN_CULVERTS_PATH")
     fi
+    if [ "$INCLUDE_FIELD_OBSERVATIONS_AS_POSITIVES" != "1" ]; then
+      MERGE_OBSERVATIONS_ARGS+=(--exclude-confirmed)
+    fi
     scripts/python.sh -m culvert_ai.cli merge-field-observations "${MERGE_OBSERVATIONS_ARGS[@]}"
     KNOWN_CULVERTS_PATH="data/processed/training_known_culverts.gpkg"
+    if [ "$INCLUDE_FIELD_OBSERVATIONS_AS_POSITIVES" = "1" ] && [ "$CONFIRMED_OBSERVATIONS" -gt 0 ] && [ -f data/processed/confirmed_field_observations.gpkg ]; then
+      ADD_OBSERVATION_CANDIDATE_ARGS=(
+        --candidates "$CANDIDATES_PATH"
+        --field-reports data/processed/confirmed_field_observations.gpkg
+        --output data/interim/actual_ulster_candidates_with_field_observations.gpkg
+      )
+      if [ -f "$BOUNDARY_PATH" ]; then
+        ADD_OBSERVATION_CANDIDATE_ARGS+=(--boundary "$BOUNDARY_PATH")
+      fi
+      scripts/python.sh -m culvert_ai.cli add-field-report-candidates "${ADD_OBSERVATION_CANDIDATE_ARGS[@]}"
+      CANDIDATES_PATH="data/interim/actual_ulster_candidates_with_field_observations.gpkg"
+    fi
+    if [ "$DENIED_OBSERVATIONS" -gt 0 ] && [ -f data/processed/no_culvert_observations.gpkg ]; then
+      DENIED_CULVERTS_PATH="data/processed/no_culvert_observations.gpkg"
+    fi
   fi
 fi
 
@@ -159,7 +200,10 @@ FEATURE_ARGS=(
 )
 
 if [ -n "$KNOWN_CULVERTS_PATH" ] && [ -f "$KNOWN_CULVERTS_PATH" ]; then
-  FEATURE_ARGS+=(--known-culverts "$KNOWN_CULVERTS_PATH" --positive-radius-m 75)
+  FEATURE_ARGS+=(--known-culverts "$KNOWN_CULVERTS_PATH" --positive-radius-m 20)
+fi
+if [ -n "$DENIED_CULVERTS_PATH" ] && [ -f "$DENIED_CULVERTS_PATH" ]; then
+  FEATURE_ARGS+=(--negative-culverts "$DENIED_CULVERTS_PATH" --negative-radius-m 20)
 fi
 if [ -f data/raw/dem.tif ]; then
   FEATURE_ARGS+=(--dem data/raw/dem.tif)
@@ -221,6 +265,7 @@ DISCOVERY_ARGS=(
 if [ -n "$SUPERVISED_PREDICTIONS_PATH" ]; then
   DISCOVERY_ARGS+=(--supervised-predictions "$SUPERVISED_PREDICTIONS_PATH")
 fi
+DISCOVERY_ARGS+=(--known-radius-m 20)
 
 scripts/python.sh -m culvert_ai.cli build-discovery-ranking "${DISCOVERY_ARGS[@]}"
 

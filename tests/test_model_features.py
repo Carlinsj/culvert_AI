@@ -8,6 +8,8 @@ def test_select_feature_columns_excludes_labels_and_coordinates():
         {
             "is_culvert": [1, 0],
             "dist_to_known_culvert_m": [2.0, 80.0],
+            "field_denied": [0, 1],
+            "dist_to_denied_culvert_m": [100.0, 3.0],
             "longitude": [-73.1, -73.2],
             "latitude": [41.1, 41.2],
             "road_stream_distance_m": [0.0, 12.0],

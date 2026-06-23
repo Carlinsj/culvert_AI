@@ -14,13 +14,15 @@ from culvert_ai.io import add_wgs84_coordinates, clean_geometry, project_layers_
 def build_feature_table(
     candidates: gpd.GeoDataFrame,
     known_culverts: gpd.GeoDataFrame | None = None,
+    negative_culverts: gpd.GeoDataFrame | None = None,
     roads: gpd.GeoDataFrame | None = None,
     streams: gpd.GeoDataFrame | None = None,
     dem_path: str | Path | None = None,
     flow_accumulation_path: str | Path | None = None,
     drainage_area_path: str | Path | None = None,
     landcover_path: str | Path | None = None,
-    positive_radius_m: float = 30.0,
+    positive_radius_m: float = 20.0,
+    negative_radius_m: float = 20.0,
     density_radius_m: float = 75.0,
     density_radii_m: tuple[float, ...] | None = None,
 ) -> gpd.GeoDataFrame:
@@ -35,6 +37,10 @@ def build_feature_table(
     if known_culverts is not None:
         known_m = clean_geometry(known_culverts).to_crs(metric_crs)
         features = add_known_culvert_labels(features, known_m, positive_radius_m)
+
+    if negative_culverts is not None:
+        negative_m = clean_geometry(negative_culverts).to_crs(metric_crs)
+        features = add_negative_culvert_labels(features, negative_m, negative_radius_m)
 
     if roads is not None:
         roads_m = clean_geometry(roads).to_crs(metric_crs)
@@ -159,6 +165,43 @@ def add_nearest_known_culvert_metadata(
                 enriched.at[row_index, output_column] = str(nearest[source_column])
 
     return enriched
+
+
+def add_negative_culvert_labels(
+    candidates: gpd.GeoDataFrame,
+    negative_culverts: gpd.GeoDataFrame,
+    negative_radius_m: float,
+) -> gpd.GeoDataFrame:
+    labeled = candidates.copy()
+    labeled["field_denied"] = 0
+    labeled["dist_to_denied_culvert_m"] = np.nan
+    labeled["nearest_denied_observation_id"] = ""
+    labeled["nearest_denied_notes"] = ""
+
+    if negative_culverts.empty:
+        return labeled
+
+    if "is_culvert" not in labeled.columns:
+        labeled["is_culvert"] = 0
+
+    negative_reset = negative_culverts.reset_index(drop=True)
+    for row_index, geometry in labeled.geometry.items():
+        distances = negative_reset.geometry.distance(geometry)
+        nearest_index = int(distances.idxmin())
+        distance = float(distances.iloc[nearest_index])
+        nearest = negative_reset.iloc[nearest_index]
+        labeled.at[row_index, "dist_to_denied_culvert_m"] = distance
+        if distance <= negative_radius_m:
+            labeled.at[row_index, "field_denied"] = 1
+            labeled.at[row_index, "is_culvert"] = 0
+            if "observation_id" in nearest.index and pd.notna(nearest["observation_id"]):
+                labeled.at[row_index, "nearest_denied_observation_id"] = str(
+                    nearest["observation_id"]
+                )
+            if "notes" in nearest.index and pd.notna(nearest["notes"]):
+                labeled.at[row_index, "nearest_denied_notes"] = str(nearest["notes"])
+
+    return labeled
 
 
 def add_raster_samples(

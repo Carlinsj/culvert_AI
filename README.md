@@ -1,6 +1,6 @@
 # Culvert AI: Ulster County Pilot
 
-Last updated: 2026-06-22
+Last updated: 2026-06-23
 
 Culvert AI is a geospatial machine-learning workflow for ranking likely culvert
 locations in Ulster County, New York. It extracts coordinates from field reports,
@@ -35,14 +35,19 @@ hydrology rasters when those rasters are available.
 
 Current dashboard export:
 
-- `1,327` map rows in `web/data/findings.geojson`.
+- `1,324` map rows in `web/data/findings.geojson`.
 - `1,000` undiscovered discovery candidates.
-- `327` known field matches.
+- `324` known field matches.
 - Bounds: Ulster County working extent from `web/data/summary.json`.
+- Current deployed observation API check on 2026-06-23 returned `0` persisted
+  observations, so field marks made before Blob configuration may only exist in
+  the phone browser session/local storage.
 
 Current field-report extraction:
 
 - `176` deduped report coordinate rows from `34` source files.
+- Report inputs are combined into one training set; team number is not used as a
+  model feature.
 - `96` Team 4 rows extracted.
 - `128` in-bound report coordinates used as exact candidates and QC positives.
 - `48` coordinates rejected from training because they fall outside the current
@@ -55,6 +60,15 @@ Current training artifacts:
 - `data/processed/high_confidence_training_points.gpkg`: report-derived positive labels.
 - `data/processed/field_observations.geojson`: local user/ABU observations.
 - `models/actual_ulster_field_report_model.joblib`: current supervised model bundle.
+
+Current spatial matching rule:
+
+- A field-report or field-observed culvert must match within `20 m`.
+- A `50 m` miss is no longer counted as correct.
+- Confirmed ABU/user-added points are not used as positive training labels by default.
+  Set `INCLUDE_FIELD_OBSERVATIONS_AS_POSITIVES=1` only after those points are trusted.
+- `no_culvert` observations are stored as negative field labels and removed from
+  the priority queue within `20 m`.
 
 Generated markdown reports are intentionally written outside the repo at
 `/private/tmp/culvert_extracted_points_analysis.md` so project documentation stays
@@ -79,16 +93,16 @@ Model families currently compared:
 
 Current selected model:
 
-- Model: `hist_gradient_boosting`
-- Rows: `5,173`
-- Positive labels: `327`
-- Negative labels: `4,846`
+- Model: `spatial_regularized_extra_trees`
+- Rows: `14,553`
+- Positive labels: `324`
+- Negative labels: `14,229`
 - Feature count: `28`
 - QC coordinate training positives: `128`
-- Random holdout AP: `0.719`
-- Random holdout ROC AUC: `0.926`
-- Spatial holdout AP: `0.563`
-- Spatial holdout ROC AUC: `0.859`
+- Random holdout AP: `0.728`
+- Random holdout ROC AUC: `0.959`
+- Spatial holdout AP: `0.495`
+- Spatial holdout ROC AUC: `0.782`
 - Spatial holdout P@10: `1.000`
 
 Metric interpretation: spatial holdout is the metric to trust because field-report
@@ -176,9 +190,22 @@ CULVERT_SUMMARY_BLOB_PATH
 CULVERT_FEEDBACK_MATCH_RADIUS_M
 ```
 
+Use `CULVERT_FEEDBACK_MATCH_RADIUS_M=20` for the current strict field rule.
+
 If Blob is not configured, deployed feedback can be handled in memory/static mode,
-but it will not be durable. To fold deployed observations back into local training,
-pull them and retrain:
+but it will not be durable. The browser keeps a local recovery copy; after Blob is
+configured, opening the updated app on the same phone will try to sync those local
+observations to `/api/observations`.
+
+To configure persistence, attach a Vercel Blob store to the deployed project and
+set `BLOB_READ_WRITE_TOKEN` for production and preview. Then redeploy and verify:
+
+```bash
+curl -s https://culvert-ai.vercel.app/api/observations
+curl -s https://culvert-ai.vercel.app/api/summary
+```
+
+To fold persisted deployed observations back into local training, pull them and retrain:
 
 ```bash
 npm run retrain:from-vercel
@@ -195,7 +222,8 @@ The main production-like workflow is:
 5. Add valid field-report coordinates as exact candidates.
 6. Analyze extracted points against roads, streams, candidates, and boundary.
 7. Build high-confidence training positives.
-8. Merge local or pulled ABU/user observations into training labels.
+8. Merge report-derived positives and persisted `no_culvert` observations into labels.
+   Confirmed ABU/user positives are excluded unless explicitly enabled.
 9. Build features from candidates, GIS layers, labels, and optional rasters.
 10. Score all candidates with interpretable evidence.
 11. Train and compare supervised models when enough positives and negatives exist.
@@ -226,6 +254,9 @@ Refresh the current Ulster model and web data:
 ```bash
 npm run predict:actual
 ```
+
+By default this reads every path in `configs/field_report_inputs.txt` and combines
+all readable report points into one training set.
 
 Run with explicit field-report paths:
 

@@ -47,3 +47,47 @@ def test_build_feature_table_adds_dem_hydrology_proxies(tmp_path):
     assert "terrain_break_score_proxy_31x31" in features.columns
     assert "crossing_geometry_signal" in features.columns
     assert features.iloc[0]["source_exact_intersection"] == 1
+
+
+def test_build_feature_table_applies_negative_observations_at_20m():
+    candidates = gpd.GeoDataFrame(
+        [
+            {
+                "candidate_id": "denied",
+                "road_stream_distance_m": 0.0,
+                "source": "exact_road_stream_intersection",
+                "geometry": Point(0, 0),
+            },
+            {
+                "candidate_id": "positive",
+                "road_stream_distance_m": 0.0,
+                "source": "exact_road_stream_intersection",
+                "geometry": Point(100, 0),
+            },
+        ],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+    known = gpd.GeoDataFrame(
+        [{"culvert_id": "known-1", "geometry": Point(0, 0)}],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+    negative = gpd.GeoDataFrame(
+        [{"observation_id": "obs-denied", "notes": "not there", "geometry": Point(10, 0)}],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+
+    features = build_feature_table(
+        candidates,
+        known_culverts=known,
+        negative_culverts=negative,
+        positive_radius_m=20,
+        negative_radius_m=20,
+    ).set_index("candidate_id")
+
+    assert features.loc["denied", "field_denied"] == 1
+    assert features.loc["denied", "is_culvert"] == 0
+    assert features.loc["denied", "nearest_denied_observation_id"] == "obs-denied"
+    assert features.loc["positive", "field_denied"] == 0

@@ -59,6 +59,9 @@ def score_unlabeled_candidates(
         20 * scored["non_culvert_structure_penalty"]
     )
     scored["culvert_likelihood_score"] = scored["culvert_likelihood_score"].clip(0, 100)
+    if "field_denied" in scored.columns:
+        denied = pd.to_numeric(scored["field_denied"], errors="coerce").fillna(0).astype(int) == 1
+        scored.loc[denied, "culvert_likelihood_score"] = 0
     if "is_culvert" in scored.columns:
         known = pd.to_numeric(scored["is_culvert"], errors="coerce").fillna(0).astype(int) == 1
         scored.loc[known, "culvert_likelihood_score"] = scored.loc[
@@ -117,13 +120,19 @@ def build_discovery_ranking(
         0.55 * agreement_signal + 0.25 * evidence_score.loc[has_model] + 0.20 * weighted_signal
     ).clip(0, 1)
 
-    known = _known_field_match_mask(ranked, known_radius_m=known_radius_m)
+    denied = _field_denied_mask(ranked, known_radius_m=known_radius_m)
+    known = _known_field_match_mask(ranked, known_radius_m=known_radius_m) & ~denied
     ranked["is_known_field_match"] = known.astype(int)
-    ranked["discovery_status"] = np.where(known, "known_field_match", "undiscovered_candidate")
+    ranked["discovery_status"] = np.select(
+        [denied, known],
+        ["field_denied", "known_field_match"],
+        default="undiscovered_candidate",
+    )
     ranked["evidence_score"] = (evidence_score.fillna(0.0) * 100).clip(0, 100)
     ranked["model_probability_score"] = (model_probability.fillna(0.0) * 100).clip(0, 100)
     ranked["model_rank_score"] = (model_rank_score.fillna(0.0) * 100).clip(0, 100)
     ranked["discovery_score"] = (blended.fillna(evidence_score).fillna(0.0) * 100).clip(0, 100)
+    ranked.loc[denied, ["evidence_score", "model_probability_score", "model_rank_score", "discovery_score"]] = 0
 
     sort_table = ranked.assign(_known_sort=known.astype(int))
     sort_table = sort_table.sort_values(
@@ -376,9 +385,21 @@ def _known_field_match_mask(table: pd.DataFrame, known_radius_m: float) -> pd.Se
     return known
 
 
+def _field_denied_mask(table: pd.DataFrame, known_radius_m: float) -> pd.Series:
+    denied = pd.Series(False, index=table.index)
+    if "field_denied" in table.columns:
+        denied |= pd.to_numeric(table["field_denied"], errors="coerce").fillna(0).astype(int) == 1
+    if "dist_to_denied_culvert_m" in table.columns:
+        distance = pd.to_numeric(table["dist_to_denied_culvert_m"], errors="coerce")
+        denied |= distance.notna() & (distance <= known_radius_m)
+    return denied
+
+
 def _discovery_evidence_summary(row: pd.Series) -> str:
     base = str(row.get("evidence_summary", "") or "")
     status = row.get("discovery_status")
+    if status == "field_denied":
+        return "field observation says no culvert within 20 m; removed from priority queue"
     if status == "known_field_match":
         return "known field-report match; use for model validation"
     if base and base != "weak evidence; review only if nearby":

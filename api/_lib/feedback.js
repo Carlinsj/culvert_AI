@@ -13,7 +13,7 @@ const FINDINGS_BLOB_PATH = process.env.CULVERT_FINDINGS_BLOB_PATH || "culvert-ai
 const SUMMARY_BLOB_PATH = process.env.CULVERT_SUMMARY_BLOB_PATH || "culvert-ai/summary.json";
 
 const OBSERVATION_STATUSES = new Set(["confirmed_culvert", "no_culvert", "uncertain"]);
-const FEEDBACK_MATCH_RADIUS_M = Number(process.env.CULVERT_FEEDBACK_MATCH_RADIUS_M || 75);
+const FEEDBACK_MATCH_RADIUS_M = Number(process.env.CULVERT_FEEDBACK_MATCH_RADIUS_M || 20);
 
 export function blobConfigured() {
   return Boolean(

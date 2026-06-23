@@ -61,6 +61,8 @@ DEFAULT_EXCLUDED_FEATURES = {
     "model_rank_score",
     "label_confidence",
     "nearest_field_report_label_confidence",
+    "field_denied",
+    "dist_to_denied_culvert_m",
     "spatial_block_id",
     "route_sample_distance_m",
     "route_part_index",

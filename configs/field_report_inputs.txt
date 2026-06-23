@@ -1,0 +1,23 @@
+# One field-report file or folder per line. The pipeline combines all readable inputs.
+/Users/Carli/Downloads/Team No. 2-selected (1)
+/Users/Carli/Downloads/Archive/18 JUNE 2026 TEAM 4 DAILY REPORT.pdf
+/Users/Carli/Downloads/Archive/17 JUNE 2026 TEAM 4 DAILY REPORT.pdf
+/Users/Carli/Downloads/Archive/16 JUNE 2026 TEAM 4 DAILY REPORT.pdf
+/Users/Carli/Downloads/Archive/15 JUNE 2026 TEAM 4 DAILY REPORT.pdf
+/Users/Carli/Downloads/Archive/29 MAY 2026 TEAM 4 DAILY REPORT.pdf
+/Users/Carli/Downloads/Archive/28 MAY 2026 TEAM 4 DAILY REPORT.pdf
+/Users/Carli/Downloads/Archive/27 MAY 2026 TEAM 4 DAILY REPORT.pdf
+/Users/Carli/Downloads/Archive/26 MAY 2026 TEAM 4 DAILY REPORT.pdf
+/Users/Carli/Downloads/Archive/21 MAY 2026 TEAM 4 DAILY REPORT.pdf
+/Users/Carli/Downloads/Archive/20 MAY 2026 TEAM 4 DAILY REPORT.pdf
+/Users/Carli/Downloads/Archive/19 MAY 2026 TEAM 4 DAILY REPORT.pdf
+/Users/Carli/Downloads/Archive/12 JUNE 2026 TEAM 4 DAILY REPORT.pdf
+/Users/Carli/Downloads/Archive/11 JUNE 2026 TEAM 4 DAILY REPORT.pdf
+/Users/Carli/Downloads/Archive/10 JUNE 2026 TEAM 4 DAILY REPORT.pdf
+/Users/Carli/Downloads/Archive/9 JUNE 2026 TEAM 4 DAILY REPORT.pdf
+/Users/Carli/Downloads/Archive/8 JUNE 2026 TEAM 4 DAILY REPORT.pdf
+/Users/Carli/Downloads/Archive/5 JUNE 2026 TEAM 4 DAILY REPORT.pdf
+/Users/Carli/Downloads/Archive/4 JUNE 2026 TEAM 4 DAILY REPORT.pdf
+/Users/Carli/Downloads/Archive/3 JUNE 2026 TEAM 4 DAILY REPORT.pdf
+/Users/Carli/Downloads/Archive/2 JUNE 2026 TEAM 4 DAILY REPORT.pdf
+/Users/Carli/Downloads/Archive/1 JUNE 2026 TEAM 4 DAILY REPORT.pdf

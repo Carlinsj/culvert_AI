@@ -15,6 +15,9 @@ const NEARBY_FOCUS_LIMIT = 12;
 const FIELD_CONTEXT_RADIUS_M = 100;
 const SELECTED_POINT_ZOOM = 16;
 const SELECTION_POPUP_DELAY_MS = 460;
+const LOCATION_FOCUS_ZOOM = 16;
+const LOCATION_MIN_MOVE_M = 4;
+const LOCATION_LIST_THROTTLE_MS = 900;
 
 const state = {
   features: [],
@@ -33,6 +36,9 @@ const state = {
   placingPoint: false,
   locationWatchId: null,
   userLocation: null,
+  locationMarker: null,
+  locationAccuracyCircle: null,
+  lastLocationListRenderAt: 0,
   shouldFocusLocationOnNextUpdate: false,
   modelSummary: null,
 };
@@ -93,6 +99,7 @@ async function init() {
     ]);
     state.modelSummary = modelSummary;
     applyDashboardData(geojson, summary, observations);
+    syncLocalObservationsToServer();
   } catch (error) {
     showLoadError(`Could not load web/data/findings.geojson. Run culvert-ai export-web first.`);
     console.error(error);
@@ -292,6 +299,14 @@ function removeLocalObservation(observationId) {
     );
   } catch {
     // Local storage is only a fallback when the dev server has not been restarted.
+  }
+}
+
+function clearLocalObservations() {
+  try {
+    window.localStorage?.removeItem(LOCAL_OBSERVATIONS_KEY);
+  } catch {
+    // Local storage is a best-effort offline recovery cache.
   }
 }
 
@@ -892,7 +907,7 @@ function startLocationTracking() {
     {
       enableHighAccuracy: true,
       timeout: 12000,
-      maximumAge: 15000,
+      maximumAge: 5000,
     },
   );
 }
@@ -903,6 +918,9 @@ function stopLocationTracking() {
   }
   state.locationWatchId = null;
   state.userLocation = null;
+  state.locationMarker = null;
+  state.locationAccuracyCircle = null;
+  state.lastLocationListRenderAt = 0;
   state.shouldFocusLocationOnNextUpdate = false;
   state.locationLayer?.clearLayers();
   updateLocationButton(false);
@@ -918,15 +936,24 @@ function handleLocationSuccess(position) {
     return;
   }
 
+  const previousLocation = state.userLocation;
+  const accuracy = Number(position.coords.accuracy);
+  const movedMeters = previousLocation
+    ? distanceMeters(previousLocation.lat, previousLocation.lng, latitude, longitude)
+    : Infinity;
+  if (previousLocation && movedMeters < LOCATION_MIN_MOVE_M && accuracy >= previousLocation.accuracy) {
+    return;
+  }
+
   state.userLocation = {
     lat: latitude,
     lng: longitude,
-    accuracy: Number(position.coords.accuracy),
+    accuracy,
   };
   renderLocationMarker();
-  updateNearbyListFromLocation();
+  updateNearbyListFromLocation({ force: !previousLocation });
   if (state.shouldFocusLocationOnNextUpdate) {
-    focusNearbyCulverts();
+    focusUserLocation();
     state.shouldFocusLocationOnNextUpdate = false;
   }
   updateLocationButton(true);
@@ -967,47 +994,52 @@ function renderLocationMarker() {
   const accuracy = Number.isFinite(state.userLocation.accuracy)
     ? Math.min(Math.max(state.userLocation.accuracy, 12), 250)
     : 25;
-  state.locationLayer.clearLayers();
-  L.circle(latLng, {
-    radius: accuracy,
-    color: "#1f6f57",
-    fillColor: "#1f6f57",
-    fillOpacity: 0.12,
-    weight: 1,
-    interactive: false,
-  }).addTo(state.locationLayer);
-  L.circleMarker(latLng, {
-    radius: 8,
-    color: "#ffffff",
-    fillColor: "#1f6f57",
-    fillOpacity: 1,
-    weight: 3,
-    className: "user-location-marker",
-    interactive: false,
-  }).addTo(state.locationLayer);
-}
 
-function focusNearbyCulverts() {
-  if (!state.userLocation) return;
-  const nearby = nearestCandidateFeatures(NEARBY_FOCUS_LIMIT);
-  const latLngs = [
-    [state.userLocation.lat, state.userLocation.lng],
-    ...nearby.map(featureLatLng).filter(Boolean),
-  ];
-
-  state.map.stop();
-  if (latLngs.length > 1) {
-    state.map.fitBounds(latLngs, { padding: [42, 42], maxZoom: 17, animate: true, duration: 0.35 });
+  if (!state.locationAccuracyCircle) {
+    state.locationAccuracyCircle = L.circle(latLng, {
+      radius: accuracy,
+      color: "#1f6f57",
+      fillColor: "#1f6f57",
+      fillOpacity: 0.12,
+      weight: 1,
+      interactive: false,
+    }).addTo(state.locationLayer);
   } else {
-    state.map.flyTo([state.userLocation.lat, state.userLocation.lng], 16, {
-      animate: true,
-      duration: 0.32,
-      easeLinearity: 0.45,
-    });
+    state.locationAccuracyCircle.setLatLng(latLng);
+    state.locationAccuracyCircle.setRadius(accuracy);
+  }
+
+  if (!state.locationMarker) {
+    state.locationMarker = L.circleMarker(latLng, {
+      radius: 8,
+      color: "#ffffff",
+      fillColor: "#1f6f57",
+      fillOpacity: 1,
+      weight: 3,
+      className: "user-location-marker",
+      interactive: false,
+    }).addTo(state.locationLayer);
+  } else {
+    state.locationMarker.setLatLng(latLng);
   }
 }
 
-function updateNearbyListFromLocation() {
+function focusUserLocation() {
+  if (!state.userLocation) return;
+  const latLng = [state.userLocation.lat, state.userLocation.lng];
+  const zoom = Math.max(state.map.getZoom(), LOCATION_FOCUS_ZOOM);
+  state.map.stop();
+  state.map.flyTo(latLng, zoom, {
+    animate: true,
+    duration: 0.65,
+    easeLinearity: 0.2,
+  });
+}
+
+function updateNearbyListFromLocation(options = {}) {
+  const now = performance.now();
+  if (!options.force && now - state.lastLocationListRenderAt < LOCATION_LIST_THROTTLE_MS) return;
+  state.lastLocationListRenderAt = now;
   updateFeatureDistances();
   state.filtered.sort(compareFeaturesForList);
   renderList();
@@ -1246,6 +1278,44 @@ async function saveObservation(payload) {
     storeLocalObservation(feature);
     addObservation(feature);
     return { feature, storage: "browser" };
+  }
+}
+
+async function syncLocalObservationsToServer() {
+  const local = loadLocalObservations();
+  if (!local.length) return;
+
+  let synced = 0;
+  let latestRefresh = null;
+  for (const feature of local) {
+    const normalized = normalizeObservationFeature(feature);
+    if (!normalized) continue;
+
+    try {
+      const response = await fetch(OBSERVATIONS_URL, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(normalized.properties),
+      });
+      if (!response.ok) continue;
+
+      const saved = await response.json();
+      if (saved.storage === "vercel_blob" || saved.storage === "file") {
+        synced += 1;
+        latestRefresh = saved;
+      }
+    } catch {
+      return;
+    }
+  }
+
+  if (synced === local.length) {
+    clearLocalObservations();
+    if (latestRefresh?.findings && latestRefresh?.summary) {
+      applyDashboardData(latestRefresh.findings, latestRefresh.summary, latestRefresh.observations, {
+        preserveSelection: true,
+      });
+    }
   }
 }
 

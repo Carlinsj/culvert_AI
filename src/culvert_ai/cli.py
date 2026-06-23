@@ -260,6 +260,23 @@ def build_parser() -> argparse.ArgumentParser:
         default="data/processed/training_known_culverts.csv",
         help="Optional CSV export.",
     )
+    merge_observations.add_argument(
+        "--confirmed-output",
+        help="Optional point layer containing only confirmed field observations.",
+    )
+    merge_observations.add_argument(
+        "--denied-output",
+        help="Optional point layer containing no-culvert field observations.",
+    )
+    merge_observations.add_argument(
+        "--denied-csv-output",
+        help="Optional CSV export for no-culvert field observations.",
+    )
+    merge_observations.add_argument(
+        "--exclude-confirmed",
+        action="store_true",
+        help="Do not merge confirmed dashboard observations as positive training labels.",
+    )
     merge_observations.set_defaults(func=_merge_field_observations)
 
     add_report_candidates = subparsers.add_parser(
@@ -325,7 +342,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--routes-from",
         help="Optional field report point layer containing a route column.",
     )
-    road_candidates.add_argument("--interval-m", type=float, default=75.0)
+    road_candidates.add_argument("--interval-m", type=float, default=20.0)
     road_candidates.set_defaults(func=_build_road_candidates)
 
     merge_candidates = subparsers.add_parser(
@@ -342,13 +359,15 @@ def build_parser() -> argparse.ArgumentParser:
     features.add_argument("--candidates", required=True, help="Candidate point vector file.")
     features.add_argument("--output", required=True, help="Output feature vector file.")
     features.add_argument("--known-culverts", help="Known culvert point inventory.")
+    features.add_argument("--negative-culverts", help="Field-confirmed no-culvert point layer.")
     features.add_argument("--roads", help="Road centerline vector file.")
     features.add_argument("--streams", help="Stream/drainage vector file.")
     features.add_argument("--dem", help="DEM raster path.")
     features.add_argument("--flow-accumulation", help="Optional flow accumulation raster path.")
     features.add_argument("--drainage-area", help="Optional drainage area raster path.")
     features.add_argument("--landcover", help="Land cover raster path.")
-    features.add_argument("--positive-radius-m", type=float, default=30.0)
+    features.add_argument("--positive-radius-m", type=float, default=20.0)
+    features.add_argument("--negative-radius-m", type=float, default=20.0)
     features.add_argument("--density-radius-m", type=float, default=75.0)
     features.add_argument(
         "--density-radii-m",
@@ -427,7 +446,7 @@ def build_parser() -> argparse.ArgumentParser:
     discovery.add_argument("--kml-max-points", type=int, default=500)
     discovery.add_argument("--evidence-weight", type=float, default=0.40)
     discovery.add_argument("--model-weight", type=float, default=0.60)
-    discovery.add_argument("--known-radius-m", type=float, default=75.0)
+    discovery.add_argument("--known-radius-m", type=float, default=20.0)
     discovery.set_defaults(func=_build_discovery_ranking)
 
     export_web = subparsers.add_parser(
@@ -553,6 +572,10 @@ def _merge_field_observations(args) -> dict:
         base_known_path=args.base_known,
         output_path=args.output,
         csv_output=args.csv_output,
+        confirmed_output_path=args.confirmed_output,
+        denied_output_path=args.denied_output,
+        denied_csv_output=args.denied_csv_output,
+        include_confirmed=not args.exclude_confirmed,
     )
 
 
@@ -628,11 +651,13 @@ def _merge_candidates(args) -> dict:
 def _build_features(args) -> dict:
     candidates = read_vector(args.candidates)
     known = read_vector(args.known_culverts) if args.known_culverts else None
+    negative = read_vector(args.negative_culverts) if args.negative_culverts else None
     roads = read_vector(args.roads) if args.roads else None
     streams = read_vector(args.streams) if args.streams else None
     output = build_feature_table(
         candidates,
         known_culverts=known,
+        negative_culverts=negative,
         roads=roads,
         streams=streams,
         dem_path=args.dem,
@@ -640,6 +665,7 @@ def _build_features(args) -> dict:
         drainage_area_path=args.drainage_area,
         landcover_path=args.landcover,
         positive_radius_m=args.positive_radius_m,
+        negative_radius_m=args.negative_radius_m,
         density_radius_m=args.density_radius_m,
         density_radii_m=tuple(args.density_radii_m) if args.density_radii_m else None,
     )
