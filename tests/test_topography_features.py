@@ -2,7 +2,7 @@ import geopandas as gpd
 import numpy as np
 import rasterio
 from rasterio.transform import from_origin
-from shapely.geometry import Point
+from shapely.geometry import LineString, Point
 
 from culvert_ai.features import build_feature_table
 
@@ -49,7 +49,7 @@ def test_build_feature_table_adds_dem_hydrology_proxies(tmp_path):
     assert features.iloc[0]["source_exact_intersection"] == 1
 
 
-def test_build_feature_table_applies_negative_observations_at_20m():
+def test_build_feature_table_applies_negative_observations_at_10m():
     candidates = gpd.GeoDataFrame(
         [
             {
@@ -83,11 +83,67 @@ def test_build_feature_table_applies_negative_observations_at_20m():
         candidates,
         known_culverts=known,
         negative_culverts=negative,
-        positive_radius_m=20,
-        negative_radius_m=20,
+        positive_radius_m=10,
+        negative_radius_m=10,
     ).set_index("candidate_id")
 
     assert features.loc["denied", "field_denied"] == 1
     assert features.loc["denied", "is_culvert"] == 0
     assert features.loc["denied", "nearest_denied_observation_id"] == "obs-denied"
     assert features.loc["positive", "field_denied"] == 0
+
+
+def test_build_feature_table_applies_missed_prediction_by_candidate_id():
+    roads = gpd.GeoDataFrame(
+        [{"geometry": LineString([(0, -1), (0, 1)])}],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+    streams = gpd.GeoDataFrame(
+        [{"stream_order": 1, "geometry": LineString([(-1, 0), (1, 0)])}],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+    candidates = gpd.GeoDataFrame(
+        [
+            {"candidate_id": "bad-prediction", "geometry": Point(0, 0)},
+            {"candidate_id": "other", "geometry": Point(200, 0)},
+        ],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+    known = gpd.GeoDataFrame(
+        [{"geometry": Point(100, 0)}],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+    negatives = gpd.GeoDataFrame(
+        [
+            {
+                "observation_id": "obs-miss",
+                "candidate_id": "bad-prediction",
+                "label": "missed_prediction",
+                "miss_distance_m": 100.0,
+                "notes": "confirmed culvert was 100.0 m from this prediction",
+                "geometry": Point(100, 0),
+            }
+        ],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+
+    features = build_feature_table(
+        candidates,
+        known_culverts=known,
+        positive_radius_m=10,
+        negative_culverts=negatives,
+        negative_radius_m=10,
+        roads=roads,
+        streams=streams,
+    ).set_index("candidate_id")
+
+    assert features.loc["bad-prediction", "field_denied"] == 1
+    assert features.loc["bad-prediction", "is_culvert"] == 0
+    assert features.loc["bad-prediction", "dist_to_denied_culvert_m"] == 100.0
+    assert features.loc["bad-prediction", "nearest_denied_observation_id"] == "obs-miss"
+    assert features.loc["other", "field_denied"] == 0

@@ -28,7 +28,13 @@ Build a field-ready culvert discovery workflow for Ulster County:
   known points were inaccurate and not present in the report files.
 - Live deployed `/api/observations` returned 0 persisted observations on 2026-06-23;
   the Vercel project still needs Blob persistence configured.
-- Current strict field match radius is 20 m. A 50 m miss is not counted as correct.
+- Deployed observations do not automatically run the Python training pipeline. Once Blob is
+  configured, they persist and refresh served rankings; full retraining still uses
+  `npm run retrain:from-vercel`.
+- Current strict field match radius is 10 m. A 50 m miss is not counted as correct.
+- A confirmed ABU point farther than 10 m from its nearest predicted candidate is
+  now stored as the true positive location and can also mark that predicted
+  candidate as a missed/negative training label.
 
 ## Current Model
 
@@ -67,6 +73,10 @@ Implemented:
 - User-added observation deletion works through `/api/observations?id=...`.
 - Location tracking now updates the GPS marker in place, throttles nearby-list rerenders,
   and uses a single smooth first-location fly-to.
+- Mobile prediction and known-point markers now render through one Leaflet canvas layer,
+  not hundreds of DOM markers.
+- Mobile camera movement now uses short pan/fly animations and defers full list rerenders
+  while the drawer is closed.
 - Browser-local observations now attempt to sync to the server after Blob is configured.
 - Default report inputs now come from `configs/field_report_inputs.txt` and are combined into
   one report-derived training set; team number is not used as a model feature.
@@ -130,5 +140,5 @@ npm run build
 3. Configure Vercel Blob, then reopen the app on the same phone to sync any browser-local marks.
 4. Add DEM/flow/drainage rasters.
 5. Replace Census roads/water with NYSDOT/county GIS.
-6. Add route/day field validation reports: precision at 10, 25, 50 using 20 m match radius.
+6. Add route/day field validation reports: precision at 10, 25, 50 using 10 m match radius.
 7. Add a simple UI summary for last retrain date, model name, training positives, ABU count, and spatial AP.

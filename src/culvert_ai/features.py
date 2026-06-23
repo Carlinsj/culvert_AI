@@ -21,8 +21,8 @@ def build_feature_table(
     flow_accumulation_path: str | Path | None = None,
     drainage_area_path: str | Path | None = None,
     landcover_path: str | Path | None = None,
-    positive_radius_m: float = 20.0,
-    negative_radius_m: float = 20.0,
+    positive_radius_m: float = 10.0,
+    negative_radius_m: float = 10.0,
     density_radius_m: float = 75.0,
     density_radii_m: tuple[float, ...] | None = None,
 ) -> gpd.GeoDataFrame:
@@ -185,23 +185,41 @@ def add_negative_culvert_labels(
         labeled["is_culvert"] = 0
 
     negative_reset = negative_culverts.reset_index(drop=True)
+    negative_by_candidate_id = {}
+    if "candidate_id" in negative_reset.columns:
+        for negative_index, candidate_id in negative_reset["candidate_id"].fillna("").astype(str).items():
+            if candidate_id:
+                negative_by_candidate_id[candidate_id] = negative_reset.iloc[int(negative_index)]
+
     for row_index, geometry in labeled.geometry.items():
         distances = negative_reset.geometry.distance(geometry)
         nearest_index = int(distances.idxmin())
         distance = float(distances.iloc[nearest_index])
         nearest = negative_reset.iloc[nearest_index]
         labeled.at[row_index, "dist_to_denied_culvert_m"] = distance
-        if distance <= negative_radius_m:
-            labeled.at[row_index, "field_denied"] = 1
-            labeled.at[row_index, "is_culvert"] = 0
-            if "observation_id" in nearest.index and pd.notna(nearest["observation_id"]):
-                labeled.at[row_index, "nearest_denied_observation_id"] = str(
-                    nearest["observation_id"]
-                )
-            if "notes" in nearest.index and pd.notna(nearest["notes"]):
-                labeled.at[row_index, "nearest_denied_notes"] = str(nearest["notes"])
+        candidate_id = str(labeled.at[row_index, "candidate_id"]) if "candidate_id" in labeled else ""
+        exact_negative = negative_by_candidate_id.get(candidate_id)
+        if exact_negative is not None:
+            nearest = exact_negative
+            if "miss_distance_m" in nearest.index and pd.notna(nearest["miss_distance_m"]):
+                labeled.at[row_index, "dist_to_denied_culvert_m"] = float(nearest["miss_distance_m"])
+            mark_negative = True
+        else:
+            mark_negative = distance <= negative_radius_m
+
+        if mark_negative:
+            _mark_negative_label(labeled, row_index, nearest)
 
     return labeled
+
+
+def _mark_negative_label(labeled: gpd.GeoDataFrame, row_index, nearest: pd.Series) -> None:
+    labeled.at[row_index, "field_denied"] = 1
+    labeled.at[row_index, "is_culvert"] = 0
+    if "observation_id" in nearest.index and pd.notna(nearest["observation_id"]):
+        labeled.at[row_index, "nearest_denied_observation_id"] = str(nearest["observation_id"])
+    if "notes" in nearest.index and pd.notna(nearest["notes"]):
+        labeled.at[row_index, "nearest_denied_notes"] = str(nearest["notes"])
 
 
 def add_raster_samples(

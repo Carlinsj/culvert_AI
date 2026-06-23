@@ -277,6 +277,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Do not merge confirmed dashboard observations as positive training labels.",
     )
+    merge_observations.add_argument(
+        "--miss-threshold-m",
+        type=float,
+        default=10.0,
+        help="Maximum distance in meters for a prediction to count as a hit before it is treated as a miss.",
+    )
     merge_observations.set_defaults(func=_merge_field_observations)
 
     add_report_candidates = subparsers.add_parser(
@@ -366,8 +372,8 @@ def build_parser() -> argparse.ArgumentParser:
     features.add_argument("--flow-accumulation", help="Optional flow accumulation raster path.")
     features.add_argument("--drainage-area", help="Optional drainage area raster path.")
     features.add_argument("--landcover", help="Land cover raster path.")
-    features.add_argument("--positive-radius-m", type=float, default=20.0)
-    features.add_argument("--negative-radius-m", type=float, default=20.0)
+    features.add_argument("--positive-radius-m", type=float, default=10.0)
+    features.add_argument("--negative-radius-m", type=float, default=10.0)
     features.add_argument("--density-radius-m", type=float, default=75.0)
     features.add_argument(
         "--density-radii-m",
@@ -446,7 +452,7 @@ def build_parser() -> argparse.ArgumentParser:
     discovery.add_argument("--kml-max-points", type=int, default=500)
     discovery.add_argument("--evidence-weight", type=float, default=0.40)
     discovery.add_argument("--model-weight", type=float, default=0.60)
-    discovery.add_argument("--known-radius-m", type=float, default=20.0)
+    discovery.add_argument("--known-radius-m", type=float, default=10.0)
     discovery.set_defaults(func=_build_discovery_ranking)
 
     export_web = subparsers.add_parser(
@@ -576,6 +582,7 @@ def _merge_field_observations(args) -> dict:
         denied_output_path=args.denied_output,
         denied_csv_output=args.denied_csv_output,
         include_confirmed=not args.exclude_confirmed,
+        miss_threshold_m=args.miss_threshold_m,
     )
 
 

@@ -13,11 +13,20 @@ const OBSERVATION_STATUSES = {
 const MOBILE_VIEWPORT_QUERY = "(max-width: 820px)";
 const NEARBY_FOCUS_LIMIT = 12;
 const FIELD_CONTEXT_RADIUS_M = 100;
+const PREDICTION_HIT_RADIUS_M = 10;
 const SELECTED_POINT_ZOOM = 16;
 const SELECTION_POPUP_DELAY_MS = 460;
 const LOCATION_FOCUS_ZOOM = 16;
 const LOCATION_MIN_MOVE_M = 4;
-const LOCATION_LIST_THROTTLE_MS = 900;
+const LOCATION_LIST_THROTTLE_MS = 650;
+
+const MARKER_COLORS = {
+  very_high: "#8f8a00",
+  high: "#9f8f00",
+  medium: "#1f7a63",
+  low: "#2d806d",
+  known: "#1f6f57",
+};
 
 const state = {
   features: [],
@@ -209,6 +218,11 @@ function setMobileDrawerOpen(open) {
   if (els.drawerBackdrop) {
     els.drawerBackdrop.hidden = !open;
   }
+  if (open && state.userLocation) {
+    updateFeatureDistances();
+    state.filtered.sort(compareFeaturesForList);
+    renderList();
+  }
   window.requestAnimationFrame(() => state.map?.invalidateSize());
 }
 
@@ -223,6 +237,10 @@ function setListView(view) {
 
 function isMobileViewport() {
   return window.matchMedia(MOBILE_VIEWPORT_QUERY).matches;
+}
+
+function isMobileDrawerOpen() {
+  return document.body.classList.contains("mobile-drawer-open");
 }
 
 async function fetchJson(url) {
@@ -440,10 +458,7 @@ function renderMarkers() {
     const props = feature.properties;
     if (!Number.isFinite(props.latitude) || !Number.isFinite(props.longitude)) return;
 
-    const marker = L.marker([props.latitude, props.longitude], {
-      icon: markerIcon(props),
-      riseOnHover: true,
-    });
+    const marker = createCandidateMarker([props.latitude, props.longitude], props);
     marker.bindPopup(popupHtml(props), selectedPopupOptions());
     marker.on("click", () => selectFeature(idOf(feature), { pan: true }));
     marker.addTo(state.layer);
@@ -454,17 +469,7 @@ function renderMarkers() {
     const props = feature.properties;
     if (!Number.isFinite(props.latitude) || !Number.isFinite(props.longitude)) return;
 
-    const marker = L.marker([props.latitude, props.longitude], {
-      icon: knownMarkerIcon(props),
-      riseOnHover: true,
-      zIndexOffset: 700,
-    });
-    marker.bindTooltip(knownCulvertLabel(props), {
-      permanent: true,
-      direction: "top",
-      offset: [0, -18],
-      className: "known-culvert-label",
-    });
+    const marker = createKnownMarker([props.latitude, props.longitude], props);
     marker.bindPopup(popupHtml(props), selectedPopupOptions());
     marker.on("click", () => selectFeature(idOf(feature), { pan: true }));
     marker.addTo(state.knownLayer);
@@ -616,10 +621,20 @@ function scrollDetailIntoViewOnMobile() {
 function centerMapOnPoint(latLng) {
   state.map.stop();
   const zoom = Math.max(state.map.getZoom(), SELECTED_POINT_ZOOM);
+  const mobile = isMobileViewport();
+  if (mobile && state.map.getZoom() >= SELECTED_POINT_ZOOM) {
+    state.map.panTo(latLng, {
+      animate: true,
+      duration: 0.18,
+      easeLinearity: 0.25,
+    });
+    return;
+  }
+
   state.map.flyTo(latLng, zoom, {
     animate: true,
-    duration: 0.32,
-    easeLinearity: 0.45,
+    duration: mobile ? 0.2 : 0.32,
+    easeLinearity: 0.3,
   });
 }
 
@@ -645,11 +660,22 @@ function selectedPopupOptions() {
 
 function updateSelectedMarkerClass() {
   state.markers.forEach((marker, markerId) => {
-    marker.getElement()?.classList.toggle("selected-marker", markerId === state.selectedId);
+    setMarkerSelected(marker, markerId === state.selectedId);
   });
   state.observationMarkers.forEach((marker, markerId) => {
-    marker.getElement()?.classList.toggle("selected-marker", markerId === state.selectedObservationId);
+    setMarkerSelected(marker, markerId === state.selectedObservationId);
   });
+}
+
+function setMarkerSelected(marker, selected) {
+  if (marker?._culvertBaseStyle && typeof marker.setStyle === "function") {
+    marker.setStyle(selected ? marker._culvertSelectedStyle : marker._culvertBaseStyle);
+    if (selected && typeof marker.bringToFront === "function") {
+      marker.bringToFront();
+    }
+    return;
+  }
+  marker.getElement()?.classList.toggle("selected-marker", selected);
 }
 
 function renderDetail(feature) {
@@ -1028,11 +1054,21 @@ function focusUserLocation() {
   if (!state.userLocation) return;
   const latLng = [state.userLocation.lat, state.userLocation.lng];
   const zoom = Math.max(state.map.getZoom(), LOCATION_FOCUS_ZOOM);
+  const mobile = isMobileViewport();
   state.map.stop();
+  if (mobile && state.map.getZoom() >= LOCATION_FOCUS_ZOOM) {
+    state.map.panTo(latLng, {
+      animate: true,
+      duration: 0.18,
+      easeLinearity: 0.25,
+    });
+    return;
+  }
+
   state.map.flyTo(latLng, zoom, {
     animate: true,
-    duration: 0.65,
-    easeLinearity: 0.2,
+    duration: mobile ? 0.22 : 0.45,
+    easeLinearity: 0.25,
   });
 }
 
@@ -1042,7 +1078,9 @@ function updateNearbyListFromLocation(options = {}) {
   state.lastLocationListRenderAt = now;
   updateFeatureDistances();
   state.filtered.sort(compareFeaturesForList);
-  renderList();
+  if (!isMobileViewport() || isMobileDrawerOpen()) {
+    renderList();
+  }
   updateVisibleCount();
 }
 
@@ -1062,6 +1100,63 @@ function featureLatLng(feature) {
   const lon = Number(feature.properties.longitude);
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
   return [lat, lon];
+}
+
+function createCandidateMarker(latLng, props) {
+  if (isMobileViewport()) {
+    return canvasPointMarker(latLng, props);
+  }
+  return L.marker(latLng, {
+    icon: markerIcon(props),
+    riseOnHover: true,
+  });
+}
+
+function createKnownMarker(latLng, props) {
+  if (isMobileViewport()) {
+    return canvasPointMarker(latLng, props, { known: true });
+  }
+  const marker = L.marker(latLng, {
+    icon: knownMarkerIcon(props),
+    riseOnHover: true,
+    zIndexOffset: 700,
+  });
+  marker.bindTooltip(knownCulvertLabel(props), {
+    permanent: true,
+    direction: "top",
+    offset: [0, -18],
+    className: "known-culvert-label",
+  });
+  return marker;
+}
+
+function canvasPointMarker(latLng, props, options = {}) {
+  const baseStyle = canvasMarkerStyle(props, options);
+  const selectedStyle = {
+    ...baseStyle,
+    radius: baseStyle.radius + 3,
+    weight: 4,
+    color: "#0b3d2e",
+    fillOpacity: 0.95,
+  };
+  const marker = L.circleMarker(latLng, baseStyle);
+  marker._culvertBaseStyle = baseStyle;
+  marker._culvertSelectedStyle = selectedStyle;
+  return marker;
+}
+
+function canvasMarkerStyle(props, options = {}) {
+  const bucket = props.bucket || "low";
+  const fillColor = options.known ? MARKER_COLORS.known : MARKER_COLORS[bucket] || MARKER_COLORS.low;
+  return {
+    radius: options.known ? 7 : 6,
+    color: "#ffffff",
+    fillColor,
+    fillOpacity: 0.88,
+    opacity: 0.95,
+    weight: 2,
+    interactive: true,
+  };
 }
 
 function markerIcon(props) {
@@ -1237,6 +1332,8 @@ async function saveObservationAtPoint(latLng, status, notes, options = {}) {
     layout_scan_summary: context.summary || "",
     nearest_candidate_id: matched.candidate_id || "",
     nearest_candidate_distance_m: context.distanceMeters,
+    missed_candidate_id: context.missedCandidateId || "",
+    missed_candidate_distance_m: context.missedCandidateDistanceMeters,
     inferred_from_candidate: context.withinRadius ? 1 : 0,
     prediction_score: matched.score,
     priority_rank: matched.rank,
@@ -1424,6 +1521,8 @@ function observationFeatureFromPayload(payload) {
       layout_scan_summary: payload.layout_scan_summary || "",
       nearest_candidate_id: payload.nearest_candidate_id || "",
       nearest_candidate_distance_m: numberOrNull(payload.nearest_candidate_distance_m),
+      missed_candidate_id: payload.missed_candidate_id || "",
+      missed_candidate_distance_m: numberOrNull(payload.missed_candidate_distance_m),
       inferred_from_candidate: numberOrNull(payload.inferred_from_candidate),
       latitude,
       longitude,
@@ -1557,16 +1656,20 @@ function mapContextForPoint(latLng) {
   const roadName = props.road_name || "";
   const streamName = drainageLabel(props);
   const nearestDisplayId = locationDisplayId(props);
+  const isPredictionHit = nearest.distanceMeters <= PREDICTION_HIT_RADIUS_M;
+  const isTrackedMiss = !isPredictionHit && Boolean(props.candidate_id);
   return {
     matchedFeature: nearest.feature,
     withinRadius,
     distanceMeters: nearest.distanceMeters,
+    missedCandidateId: isTrackedMiss ? props.candidate_id : "",
+    missedCandidateDistanceMeters: isTrackedMiss ? nearest.distanceMeters : null,
     roadName: withinRadius ? roadName : "",
     streamName: withinRadius ? streamName : "",
     nearestDisplayId,
     layoutSource: withinRadius ? "nearest_map_candidate" : "manual_map_point",
     summary: withinRadius
-      ? `Copied road, drainage, rank, and estimate context from ${nearestDisplayId}, ${formatNumber(nearest.distanceMeters, "m")} from the clicked point.`
+      ? `${isPredictionHit ? "Copied" : "Recorded miss against"} road, drainage, rank, and estimate context from ${nearestDisplayId}, ${formatNumber(nearest.distanceMeters, "m")} from the clicked point.`
       : `Nearest map candidate is ${formatNumber(nearest.distanceMeters, "m")} away, outside the ${FIELD_CONTEXT_RADIUS_M} m context radius, so the point will be saved without inferred road/drainage context.`,
   };
 }

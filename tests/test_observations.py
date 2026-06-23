@@ -132,3 +132,45 @@ def test_merge_observations_can_exclude_confirmed_user_points(tmp_path):
     assert result["denied_saved_for_review"] == 1
     assert combined["culvert_id"].tolist() == ["report-point"]
     assert denied["candidate_id"].tolist() == ["bad-prediction"]
+
+
+def test_merge_observations_turns_far_confirmed_points_into_missed_prediction_labels(tmp_path):
+    observations = gpd.GeoDataFrame(
+        [
+            {
+                "observation_id": "obs-miss",
+                "observed_at": "2026-06-14T12:00:00Z",
+                "status": "confirmed_culvert",
+                "candidate_id": "field-added",
+                "field_culvert_id": "ABU-1",
+                "missed_candidate_id": "bad-prediction",
+                "missed_candidate_distance_m": 100.0,
+                "nearest_candidate_id": "bad-prediction",
+                "nearest_candidate_distance_m": 100.0,
+                "road_name": "State Rte 28",
+                "geometry": Point(-74.1, 42.0),
+            },
+        ],
+        geometry="geometry",
+        crs="EPSG:4326",
+    )
+
+    observations_path = tmp_path / "field_observations.geojson"
+    output_path = tmp_path / "combined_known.gpkg"
+    denied_path = tmp_path / "denied.gpkg"
+    write_vector(observations, observations_path)
+
+    result = merge_confirmed_observations(
+        observations_path=observations_path,
+        output_path=output_path,
+        denied_output_path=denied_path,
+        include_confirmed=False,
+        miss_threshold_m=10,
+    )
+    denied = read_vector(denied_path)
+
+    assert result["confirmed_added"] == 0
+    assert result["denied_saved_for_review"] == 1
+    assert denied.iloc[0]["label"] == "missed_prediction"
+    assert denied.iloc[0]["candidate_id"] == "bad-prediction"
+    assert denied.iloc[0]["miss_distance_m"] == 100.0

@@ -399,7 +399,7 @@ def _discovery_evidence_summary(row: pd.Series) -> str:
     base = str(row.get("evidence_summary", "") or "")
     status = row.get("discovery_status")
     if status == "field_denied":
-        return "field observation says no culvert within 20 m; removed from priority queue"
+        return "field observation says no culvert within 10 m; removed from priority queue"
     if status == "known_field_match":
         return "known field-report match; use for model validation"
     if base and base != "weak evidence; review only if nearby":

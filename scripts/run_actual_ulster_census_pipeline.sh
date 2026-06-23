@@ -129,7 +129,7 @@ if [ -n "$EXTRACTED_POINTS_PATH" ] && [ -f "$EXTRACTED_POINTS_PATH" ]; then
     --output-csv data/processed/extracted_points_analysis.csv
     --output-json reports/extracted_points_analysis.json
     --output-markdown /private/tmp/culvert_extracted_points_analysis.md
-    --match-radius-m 20
+    --match-radius-m 10
   )
   if [ -f "$BOUNDARY_PATH" ]; then
     ANALYZE_POINTS_ARGS+=(--boundary "$BOUNDARY_PATH")
@@ -164,6 +164,7 @@ PY
       --confirmed-output data/processed/confirmed_field_observations.gpkg
       --denied-output data/processed/no_culvert_observations.gpkg
       --denied-csv-output data/processed/no_culvert_observations.csv
+      --miss-threshold-m 10
     )
     if [ -n "$KNOWN_CULVERTS_PATH" ] && [ -f "$KNOWN_CULVERTS_PATH" ]; then
       MERGE_OBSERVATIONS_ARGS+=(--base-known "$KNOWN_CULVERTS_PATH")
@@ -185,7 +186,7 @@ PY
       scripts/python.sh -m culvert_ai.cli add-field-report-candidates "${ADD_OBSERVATION_CANDIDATE_ARGS[@]}"
       CANDIDATES_PATH="data/interim/actual_ulster_candidates_with_field_observations.gpkg"
     fi
-    if [ "$DENIED_OBSERVATIONS" -gt 0 ] && [ -f data/processed/no_culvert_observations.gpkg ]; then
+    if [ -f data/processed/no_culvert_observations.gpkg ]; then
       DENIED_CULVERTS_PATH="data/processed/no_culvert_observations.gpkg"
     fi
   fi
@@ -200,10 +201,10 @@ FEATURE_ARGS=(
 )
 
 if [ -n "$KNOWN_CULVERTS_PATH" ] && [ -f "$KNOWN_CULVERTS_PATH" ]; then
-  FEATURE_ARGS+=(--known-culverts "$KNOWN_CULVERTS_PATH" --positive-radius-m 20)
+  FEATURE_ARGS+=(--known-culverts "$KNOWN_CULVERTS_PATH" --positive-radius-m 10)
 fi
 if [ -n "$DENIED_CULVERTS_PATH" ] && [ -f "$DENIED_CULVERTS_PATH" ]; then
-  FEATURE_ARGS+=(--negative-culverts "$DENIED_CULVERTS_PATH" --negative-radius-m 20)
+  FEATURE_ARGS+=(--negative-culverts "$DENIED_CULVERTS_PATH" --negative-radius-m 10)
 fi
 if [ -f data/raw/dem.tif ]; then
   FEATURE_ARGS+=(--dem data/raw/dem.tif)
@@ -265,7 +266,7 @@ DISCOVERY_ARGS=(
 if [ -n "$SUPERVISED_PREDICTIONS_PATH" ]; then
   DISCOVERY_ARGS+=(--supervised-predictions "$SUPERVISED_PREDICTIONS_PATH")
 fi
-DISCOVERY_ARGS+=(--known-radius-m 20)
+DISCOVERY_ARGS+=(--known-radius-m 10)
 
 scripts/python.sh -m culvert_ai.cli build-discovery-ranking "${DISCOVERY_ARGS[@]}"
 

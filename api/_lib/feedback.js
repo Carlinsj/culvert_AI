@@ -13,7 +13,7 @@ const FINDINGS_BLOB_PATH = process.env.CULVERT_FINDINGS_BLOB_PATH || "culvert-ai
 const SUMMARY_BLOB_PATH = process.env.CULVERT_SUMMARY_BLOB_PATH || "culvert-ai/summary.json";
 
 const OBSERVATION_STATUSES = new Set(["confirmed_culvert", "no_culvert", "uncertain"]);
-const FEEDBACK_MATCH_RADIUS_M = Number(process.env.CULVERT_FEEDBACK_MATCH_RADIUS_M || 20);
+const FEEDBACK_MATCH_RADIUS_M = Number(process.env.CULVERT_FEEDBACK_MATCH_RADIUS_M || 10);
 
 export function blobConfigured() {
   return Boolean(
@@ -212,6 +212,8 @@ function observationFeature(payload) {
       layout_scan_summary: safeString(props.layout_scan_summary, 600),
       nearest_candidate_id: safeString(props.nearest_candidate_id, 120),
       nearest_candidate_distance_m: numberOrNull(props.nearest_candidate_distance_m),
+      missed_candidate_id: safeString(props.missed_candidate_id, 120),
+      missed_candidate_distance_m: numberOrNull(props.missed_candidate_distance_m),
       inferred_from_candidate: numberOrNull(props.inferred_from_candidate),
       latitude,
       longitude,
@@ -253,6 +255,12 @@ function applyFeedbackToFindings(baseFindings, observations) {
 
   for (const observation of observations.features || []) {
     const props = observation.properties || {};
+    const missedCandidate = missedCandidateForObservation(props, byCandidateId);
+    if (missedCandidate) {
+      applyMissedPredictionToFeature(missedCandidate, observation);
+      matchedObservationIds.add(props.observation_id);
+    }
+
     const direct = props.candidate_id ? byCandidateId.get(String(props.candidate_id)) : null;
     const nearest = direct || nearestFeature(features, observation, FEEDBACK_MATCH_RADIUS_M);
 
@@ -283,6 +291,16 @@ function applyFeedbackToFindings(baseFindings, observations) {
       mode: "deployed_feedback_ranking",
     },
   };
+}
+
+function missedCandidateForObservation(props, byCandidateId) {
+  if (props.status !== "confirmed_culvert") return null;
+  const candidateId = safeString(props.missed_candidate_id || props.nearest_candidate_id, 120);
+  const distance = numberOrNull(props.missed_candidate_distance_m ?? props.nearest_candidate_distance_m);
+  if (!candidateId || !Number.isFinite(distance) || distance <= FEEDBACK_MATCH_RADIUS_M) {
+    return null;
+  }
+  return byCandidateId.get(candidateId) || null;
 }
 
 function cloneFeatures(features) {
@@ -361,6 +379,36 @@ function applyObservationToFeature(feature, observation) {
 
   props.discovery_status = props.discovery_status || "field_uncertain";
   props.evidence_summary = appendEvidenceSummary(props.evidence_summary, "field observation uncertain");
+}
+
+function applyMissedPredictionToFeature(feature, observation) {
+  const props = feature.properties || {};
+  const obs = observation.properties || {};
+  const distance = numberOrNull(obs.missed_candidate_distance_m ?? obs.nearest_candidate_distance_m);
+
+  props.field_feedback_status = "missed_prediction";
+  props.field_feedback_observation_id = obs.observation_id;
+  props.field_feedback_at = obs.observed_at;
+  props.field_feedback_notes = appendEvidenceSummary(
+    obs.notes || "",
+    Number.isFinite(distance)
+      ? `confirmed field culvert was ${distance.toFixed(1)} m away`
+      : "confirmed field culvert was outside the hit radius",
+  );
+  props.discovery_status = "field_missed_prediction";
+  props.discovery_score = Math.min(numberOrZero(props.discovery_score), 15);
+  props.culvert_likelihood_score = Math.min(numberOrZero(props.culvert_likelihood_score), 15);
+  props.model_probability_score = Math.min(numberOrZero(props.model_probability_score), 15);
+  props.field_report_support_score = 0;
+  props.priority_bucket = "low";
+  props.missed_by_observation_id = obs.observation_id;
+  props.missed_by_distance_m = distance;
+  props.evidence_summary = appendEvidenceSummary(
+    props.evidence_summary,
+    Number.isFinite(distance)
+      ? `field-confirmed culvert was ${distance.toFixed(1)} m away; not counted as a hit`
+      : "field-confirmed culvert was outside the hit radius; not counted as a hit",
+  );
 }
 
 function featureFromConfirmedObservation(observation) {

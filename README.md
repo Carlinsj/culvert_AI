@@ -63,12 +63,12 @@ Current training artifacts:
 
 Current spatial matching rule:
 
-- A field-report or field-observed culvert must match within `20 m`.
+- A field-report or field-observed culvert must match within `10 m`.
 - A `50 m` miss is no longer counted as correct.
 - Confirmed ABU/user-added points are not used as positive training labels by default.
   Set `INCLUDE_FIELD_OBSERVATIONS_AS_POSITIVES=1` only after those points are trusted.
 - `no_culvert` observations are stored as negative field labels and removed from
-  the priority queue within `20 m`.
+  the priority queue within `10 m`.
 
 Generated markdown reports are intentionally written outside the repo at
 `/private/tmp/culvert_extracted_points_analysis.md` so project documentation stays
@@ -190,7 +190,11 @@ CULVERT_SUMMARY_BLOB_PATH
 CULVERT_FEEDBACK_MATCH_RADIUS_M
 ```
 
-Use `CULVERT_FEEDBACK_MATCH_RADIUS_M=20` for the current strict field rule.
+Use `CULVERT_FEEDBACK_MATCH_RADIUS_M=10` for the current strict field rule. This
+is the hit/miss tolerance: a prediction within 10 m of the field point can be
+treated as the same culvert, while a farther confirmed ABU point is saved as the
+actual positive location and can mark the missed predicted candidate as a
+negative/missed training signal.
 
 If Blob is not configured, deployed feedback can be handled in memory/static mode,
 but it will not be durable. The browser keeps a local recovery copy; after Blob is
@@ -211,6 +215,11 @@ To fold persisted deployed observations back into local training, pull them and 
 npm run retrain:from-vercel
 ```
 
+The deployed Vercel API does not run the Python/scikit-learn training pipeline by itself.
+With Blob configured, field updates persist and refresh the served ranking immediately;
+full supervised retraining still happens when `npm run retrain:from-vercel` is run and
+the rebuilt outputs are deployed.
+
 ## How The Pipeline Runs
 
 The main production-like workflow is:
@@ -222,7 +231,8 @@ The main production-like workflow is:
 5. Add valid field-report coordinates as exact candidates.
 6. Analyze extracted points against roads, streams, candidates, and boundary.
 7. Build high-confidence training positives.
-8. Merge report-derived positives and persisted `no_culvert` observations into labels.
+8. Merge report-derived positives, persisted `no_culvert` observations, and
+   missed-prediction labels into training labels.
    Confirmed ABU/user positives are excluded unless explicitly enabled.
 9. Build features from candidates, GIS layers, labels, and optional rasters.
 10. Score all candidates with interpretable evidence.

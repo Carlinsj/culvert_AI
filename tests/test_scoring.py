@@ -115,7 +115,7 @@ def test_discovery_ranking_does_not_count_50m_as_known_match():
         crs="EPSG:4326",
     )
 
-    ranked = build_discovery_ranking(evidence, known_radius_m=20)
+    ranked = build_discovery_ranking(evidence, known_radius_m=10)
     by_id = ranked.set_index("candidate_id")
 
     assert by_id.loc["too-far", "discovery_status"] == "undiscovered_candidate"
