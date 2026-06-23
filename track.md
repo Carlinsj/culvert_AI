@@ -71,10 +71,14 @@ Implemented:
 - ABU tab in the drawer lists all confirmed user-added points.
 - ABU points can be selected, opened in Google Maps, or deleted.
 - User-added observation deletion works through `/api/observations?id=...`.
+- Deleting an observation removes its deployed feedback and refreshes the served
+  ranking; the deleted point is also absent from the next Blob-backed retrain.
 - Location tracking now updates the GPS marker in place, throttles nearby-list rerenders,
   and uses a single smooth first-location fly-to.
 - Mobile prediction and known-point markers now render through one Leaflet canvas layer,
   not hundreds of DOM markers.
+- Mobile prediction circles now show score labels again through a separate canvas
+  overlay, keeping the score display without reintroducing DOM marker lag.
 - Mobile camera movement now uses short pan/fly animations and defers full list rerenders
   while the drawer is closed.
 - Browser-local observations now attempt to sync to the server after Blob is configured.

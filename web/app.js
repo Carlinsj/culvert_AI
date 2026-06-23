@@ -41,6 +41,7 @@ const state = {
   knownLayer: null,
   observationLayer: null,
   locationLayer: null,
+  scoreLabelLayer: null,
   map: null,
   placingPoint: false,
   locationWatchId: null,
@@ -146,6 +147,7 @@ function setupMap() {
   state.knownLayer = L.layerGroup().addTo(state.map);
   state.observationLayer = L.layerGroup().addTo(state.map);
   state.locationLayer = L.layerGroup().addTo(state.map);
+  state.scoreLabelLayer = createScoreLabelLayer().addTo(state.map);
   state.map.on("click", handleMapClick);
   requestAnimationFrame(() => state.map.invalidateSize());
 }
@@ -477,7 +479,15 @@ function renderMarkers() {
   });
 
   renderObservationMarkers();
+  updateScoreLabelLayer();
   updateSelectedMarkerClass();
+}
+
+function updateScoreLabelLayer() {
+  state.scoreLabelLayer?.setFeatures([
+    ...state.filtered.filter((feature) => !feature.properties.knownFieldMatch),
+    ...knownFeatures(),
+  ]);
 }
 
 function renderList() {
@@ -1149,14 +1159,102 @@ function canvasMarkerStyle(props, options = {}) {
   const bucket = props.bucket || "low";
   const fillColor = options.known ? MARKER_COLORS.known : MARKER_COLORS[bucket] || MARKER_COLORS.low;
   return {
-    radius: options.known ? 7 : 6,
+    radius: options.known ? 16 : 17,
     color: "#ffffff",
     fillColor,
-    fillOpacity: 0.88,
+    fillOpacity: 0.92,
     opacity: 0.95,
-    weight: 2,
+    weight: 3,
     interactive: true,
   };
+}
+
+function createScoreLabelLayer() {
+  const ScoreLabelLayer = L.Layer.extend({
+    initialize() {
+      this._features = [];
+      this._frame = null;
+    },
+
+    onAdd(map) {
+      this._map = map;
+      this._canvas = L.DomUtil.create("canvas", "score-label-canvas leaflet-zoom-animated");
+      this._canvas.setAttribute("aria-hidden", "true");
+      map.getPanes().overlayPane.appendChild(this._canvas);
+      this._bringToFront();
+      map.on("move zoom resize zoomend moveend viewreset", this._scheduleRedraw, this);
+      this._scheduleRedraw();
+    },
+
+    onRemove(map) {
+      map.off("move zoom resize zoomend moveend viewreset", this._scheduleRedraw, this);
+      if (this._frame) {
+        window.cancelAnimationFrame(this._frame);
+        this._frame = null;
+      }
+      this._canvas?.remove();
+      this._canvas = null;
+      this._map = null;
+    },
+
+    setFeatures(features) {
+      this._features = Array.isArray(features) ? features : [];
+      this._bringToFront();
+      this._scheduleRedraw();
+    },
+
+    _bringToFront() {
+      if (this._canvas?.parentNode) {
+        this._canvas.parentNode.appendChild(this._canvas);
+      }
+    },
+
+    _scheduleRedraw() {
+      if (this._frame) return;
+      this._frame = window.requestAnimationFrame(() => {
+        this._frame = null;
+        this._redraw();
+      });
+    },
+
+    _redraw() {
+      if (!this._map || !this._canvas) return;
+      const size = this._map.getSize();
+      const topLeft = this._map.containerPointToLayerPoint([0, 0]);
+      const pixelRatio = window.devicePixelRatio || 1;
+
+      L.DomUtil.setPosition(this._canvas, topLeft);
+      this._canvas.width = Math.max(1, Math.round(size.x * pixelRatio));
+      this._canvas.height = Math.max(1, Math.round(size.y * pixelRatio));
+      this._canvas.style.width = `${size.x}px`;
+      this._canvas.style.height = `${size.y}px`;
+
+      const context = this._canvas.getContext("2d");
+      context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+      context.clearRect(0, 0, size.x, size.y);
+      if (!isMobileViewport()) return;
+
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.font = "800 11px Inter, system-ui, sans-serif";
+      context.lineWidth = 3;
+      context.strokeStyle = "rgba(0, 0, 0, 0.34)";
+      context.fillStyle = "#ffffff";
+
+      for (const feature of this._features) {
+        const props = feature.properties || {};
+        const latLng = featureLatLng(feature);
+        if (!latLng) continue;
+        const point = this._map.latLngToContainerPoint(latLng);
+        if (point.x < -24 || point.y < -24 || point.x > size.x + 24 || point.y > size.y + 24) continue;
+        const label = props.knownFieldMatch ? knownCulvertShortLabel(props) : String(Math.round(props.score));
+        context.strokeText(label, point.x, point.y);
+        context.fillText(label, point.x, point.y);
+      }
+    },
+  });
+
+  return new ScoreLabelLayer();
 }
 
 function markerIcon(props) {

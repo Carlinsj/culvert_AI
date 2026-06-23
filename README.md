@@ -159,6 +159,9 @@ Implemented UI behavior:
 - ABU tab listing all user-added confirmed culverts.
 - Add user observation from the map.
 - Delete incorrect user-added observations.
+- Deleted observations are removed from the served feedback set; with Blob configured,
+  the deployed ranking refreshes without that ABU/no-culvert/missed-prediction signal.
+  The next `npm run retrain:from-vercel` also excludes the deleted point.
 - Removed the old tracking-status text overlay.
 
 Observation statuses supported by the API:

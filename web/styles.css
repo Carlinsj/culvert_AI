@@ -914,6 +914,12 @@ output {
   font-weight: 900;
 }
 
+.score-label-canvas {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+}
+
 .known-marker .marker-dot {
   border-color: #111;
   opacity: 0.78;
