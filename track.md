@@ -1,6 +1,6 @@
 # Culvert AI Track
 
-Last updated: 2026-06-23
+Last updated: 2026-06-24
 
 ## Current Goal
 
@@ -19,18 +19,23 @@ Build a field-ready culvert discovery workflow for Ulster County:
 - Team 4 rows extracted: 96.
 - In-bound coordinates used as exact candidates/training positives: 128.
 - Out-of-bound coordinates rejected: 48.
-- Candidate universe after 20 m route sampling and report coordinates: 14,553 rows.
-- Dashboard export: 1,324 rows.
+- Candidate universe after 20 m route sampling, report coordinates, and field observations: 14,565 rows.
+- Dashboard export: 1,210 rows.
 - Discovery candidates shown: 1,000.
-- Known field matches shown: 324.
+- Known field matches shown: 210.
 - Local ABU/user observations: `data/processed/field_observations.geojson`.
-- User-confirmed ABU positives are excluded from training by default because some field-added
-  known points were inaccurate and not present in the report files.
-- Live deployed `/api/observations` returned 0 persisted observations on 2026-06-23;
-  the Vercel project still needs Blob persistence configured.
-- Deployed observations do not automatically run the Python training pipeline. Once Blob is
-  configured, they persist and refresh served rankings; full retraining still uses
-  `npm run retrain:from-vercel`.
+- Deployed observation pull on 2026-06-24 returned 19 observations:
+  13 confirmed culverts, 6 no-culvert labels, and 12 unique confirmed positives
+  after duplicate field IDs are deduped.
+- User-confirmed ABU positives are included in retraining by default now that field
+  crews are intentionally adding missed culverts. Set
+  `INCLUDE_FIELD_OBSERVATIONS_AS_POSITIVES=0` only for a questionable batch.
+- `scripts/pull_vercel_observations.js` can pull deployed observations through
+  Blob credentials or the public `/api/observations` endpoint.
+- Deployed observation uploads now queue automatic retraining when
+  `CULVERT_RETRAIN_WEBHOOK_URL` or `GITHUB_RETRAIN_TOKEN`/`GITHUB_REPOSITORY` is
+  configured. The Python training still runs in an external worker with
+  `npm run retrain:from-vercel`, then deploys rebuilt `web/data` files.
 - Current strict field match radius is 10 m. A 50 m miss is not counted as correct.
 - A confirmed ABU point farther than 10 m from its nearest predicted candidate is
   now stored as the true positive location and can also mark that predicted
@@ -38,7 +43,7 @@ Build a field-ready culvert discovery workflow for Ulster County:
 
 ## Current Model
 
-Selected model: `spatial_regularized_extra_trees`.
+Selected model: `hist_gradient_boosting`.
 
 Model comparison includes:
 
@@ -53,9 +58,10 @@ Model comparison includes:
 
 Current measured metrics:
 
-- Spatial holdout average precision: 0.495.
+- Spatial holdout average precision: 0.635.
 - Spatial holdout P@10: 1.000.
-- QC coordinate training positives: 128.
+- Training point rows: 140.
+- Class counts: 210 positives, 14,355 negatives.
 
 Interpretation: the metrics are much stronger after adding exact field-report coordinate candidates.
 That is useful for learning from known points, but it does not prove perfect discovery of unseen
@@ -84,6 +90,8 @@ Implemented:
 - Browser-local observations now attempt to sync to the server after Blob is configured.
 - Default report inputs now come from `configs/field_report_inputs.txt` and are combined into
   one report-derived training set; team number is not used as a model feature.
+- Observation save/delete responses include a `retraining` object showing whether
+  automatic retraining was queued, debounced, unchanged, failed, or not configured.
 
 ## Bottlenecks
 
@@ -141,7 +149,8 @@ npm run build
 
 1. Collect confirmed `no culvert` labels and train with negatives.
 2. Add the missing third team's report path to `configs/field_report_inputs.txt` once available.
-3. Configure Vercel Blob, then reopen the app on the same phone to sync any browser-local marks.
+3. Configure Vercel Blob and retraining worker env vars, then reopen the app on the same phone
+   to sync any browser-local marks.
 4. Add DEM/flow/drainage rasters.
 5. Replace Census roads/water with NYSDOT/county GIS.
 6. Add route/day field validation reports: precision at 10, 25, 50 using 10 m match radius.

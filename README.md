@@ -1,6 +1,6 @@
 # Culvert AI: Ulster County Pilot
 
-Last updated: 2026-06-23
+Last updated: 2026-06-24
 
 Culvert AI is a geospatial machine-learning workflow for ranking likely culvert
 locations in Ulster County, New York. It extracts coordinates from field reports,
@@ -35,13 +35,12 @@ hydrology rasters when those rasters are available.
 
 Current dashboard export:
 
-- `1,324` map rows in `web/data/findings.geojson`.
+- `1,210` map rows in `web/data/findings.geojson`.
 - `1,000` undiscovered discovery candidates.
-- `324` known field matches.
+- `210` known field matches.
 - Bounds: Ulster County working extent from `web/data/summary.json`.
-- Current deployed observation API check on 2026-06-23 returned `0` persisted
-  observations, so field marks made before Blob configuration may only exist in
-  the phone browser session/local storage.
+- Current deployed observation pull on 2026-06-24 returned `19` persisted
+  observations: `13` confirmed culverts and `6` no-culvert labels.
 
 Current field-report extraction:
 
@@ -65,8 +64,9 @@ Current spatial matching rule:
 
 - A field-report or field-observed culvert must match within `10 m`.
 - A `50 m` miss is no longer counted as correct.
-- Confirmed ABU/user-added points are not used as positive training labels by default.
-  Set `INCLUDE_FIELD_OBSERVATIONS_AS_POSITIVES=1` only after those points are trusted.
+- Confirmed ABU/user-added points are used as positive training labels when the
+  retrain pipeline runs. Set `INCLUDE_FIELD_OBSERVATIONS_AS_POSITIVES=0` only for
+  a questionable observation batch that should be displayed but not learned yet.
 - `no_culvert` observations are stored as negative field labels and removed from
   the priority queue within `10 m`.
 
@@ -93,16 +93,16 @@ Model families currently compared:
 
 Current selected model:
 
-- Model: `spatial_regularized_extra_trees`
-- Rows: `14,553`
-- Positive labels: `324`
-- Negative labels: `14,229`
+- Model: `hist_gradient_boosting`
+- Rows: `14,565`
+- Positive labels: `210`
+- Negative labels: `14,355`
 - Feature count: `28`
-- QC coordinate training positives: `128`
-- Random holdout AP: `0.728`
-- Random holdout ROC AUC: `0.959`
-- Spatial holdout AP: `0.495`
-- Spatial holdout ROC AUC: `0.782`
+- Training-point rows: `140`
+- Random holdout AP: `0.701`
+- Random holdout ROC AUC: `0.914`
+- Spatial holdout AP: `0.635`
+- Spatial holdout ROC AUC: `0.827`
 - Spatial holdout P@10: `1.000`
 
 Metric interpretation: spatial holdout is the metric to trust because field-report
@@ -187,10 +187,19 @@ Relevant environment variables:
 BLOB_READ_WRITE_TOKEN
 VERCEL_OIDC_TOKEN
 BLOB_STORE_ID
+CULVERT_OBSERVATIONS_URL
 CULVERT_OBSERVATIONS_BLOB_PATH
 CULVERT_FINDINGS_BLOB_PATH
 CULVERT_SUMMARY_BLOB_PATH
 CULVERT_FEEDBACK_MATCH_RADIUS_M
+CULVERT_RETRAIN_WEBHOOK_URL
+CULVERT_RETRAIN_WEBHOOK_SECRET
+CULVERT_RETRAIN_MIN_INTERVAL_SECONDS
+CULVERT_RETRAIN_STATE_BLOB_PATH
+GITHUB_RETRAIN_TOKEN
+GITHUB_REPOSITORY
+GITHUB_RETRAIN_EVENT_TYPE
+CRON_SECRET
 ```
 
 Use `CULVERT_FEEDBACK_MATCH_RADIUS_M=10` for the current strict field rule. This
@@ -218,10 +227,45 @@ To fold persisted deployed observations back into local training, pull them and 
 npm run retrain:from-vercel
 ```
 
+If Blob credentials are not available locally, `scripts/pull_vercel_observations.js`
+falls back to `CULVERT_OBSERVATIONS_URL`, defaulting to the deployed
+`https://culvert-ai.vercel.app/api/observations` endpoint.
+
 The deployed Vercel API does not run the Python/scikit-learn training pipeline by itself.
 With Blob configured, field updates persist and refresh the served ranking immediately;
-full supervised retraining still happens when `npm run retrain:from-vercel` is run and
-the rebuilt outputs are deployed.
+full supervised retraining happens when `npm run retrain:from-vercel` is run and the
+rebuilt outputs are deployed.
+
+### Continuous Retraining Trigger
+
+Field uploads now queue retraining automatically when a worker is configured:
+
+- `POST /api/observations` and `DELETE /api/observations?id=...` save feedback,
+  refresh the served ranking, then call the retraining trigger.
+- The trigger dispatches either `CULVERT_RETRAIN_WEBHOOK_URL` or GitHub repository
+  dispatch through `GITHUB_RETRAIN_TOKEN` plus `GITHUB_REPOSITORY`.
+- Retraining is debounced with `CULVERT_RETRAIN_MIN_INTERVAL_SECONDS`, defaulting
+  to `900` seconds, so a field session does not start one model rebuild per tap.
+- `/api/cron/retrain` is also configured as a daily Vercel Cron backup in
+  `vercel.json`. Production cron calls require `CRON_SECRET`.
+
+The retraining worker should run:
+
+```bash
+npm run retrain:from-vercel
+```
+
+Then it should commit or deploy these regenerated files:
+
+```text
+web/data/findings.geojson
+web/data/summary.json
+web/data/model_summary.json
+```
+
+Keep the model rebuild outside the upload request. Vercel Functions should only
+queue the job because the real pipeline needs Python, geospatial dependencies,
+source field-report data, and more time than a normal request path should use.
 
 ## How The Pipeline Runs
 
@@ -234,9 +278,10 @@ The main production-like workflow is:
 5. Add valid field-report coordinates as exact candidates.
 6. Analyze extracted points against roads, streams, candidates, and boundary.
 7. Build high-confidence training positives.
-8. Merge report-derived positives, persisted `no_culvert` observations, and
-   missed-prediction labels into training labels.
-   Confirmed ABU/user positives are excluded unless explicitly enabled.
+8. Merge report-derived positives, confirmed ABU/user-added positives,
+   persisted `no_culvert` observations, and missed-prediction labels into
+   training labels.
+   Confirmed ABU/user positives are included unless explicitly disabled.
 9. Build features from candidates, GIS layers, labels, and optional rasters.
 10. Score all candidates with interpretable evidence.
 11. Train and compare supervised models when enough positives and negatives exist.
@@ -307,7 +352,7 @@ Verify deployable static/API assets:
 npm run build
 ```
 
-Pull Vercel Blob observations, retrain, and rebuild:
+Pull deployed observations, retrain, and rebuild:
 
 ```bash
 npm run retrain:from-vercel
@@ -320,7 +365,8 @@ npm run retrain:from-vercel
 - `scripts/bootstrap_python.sh`: creates the local Python environment.
 - `scripts/write_model_summary.py`: writes the UI model summary JSON.
 - `scripts/verify_web_build.js`: checks static web data and API imports.
-- `scripts/pull_vercel_observations.js`: downloads Vercel Blob observations for retraining.
+- `scripts/pull_vercel_observations.js`: downloads deployed observations for retraining,
+  using Blob credentials when present or the public observations API otherwise.
 
 ## Important Source Files
 
@@ -334,6 +380,8 @@ npm run retrain:from-vercel
 - `src/culvert_ai/web_export.py`: GeoJSON and summary export for the UI.
 - `server/dev-server.js`: local web server and observation endpoints.
 - `api/observations.js`: Vercel observation API.
+- `api/_lib/retrain.js`: automatic retraining dispatch and debounce helper.
+- `api/cron/retrain.js`: protected Vercel Cron backup endpoint for retraining dispatch.
 - `api/findings.js`: Vercel findings API.
 - `api/summary.js`: Vercel summary API.
 - `web/app.js`: Leaflet UI behavior.
@@ -341,9 +389,10 @@ npm run retrain:from-vercel
 
 ## Documentation Files
 
-Project Markdown is intentionally limited to three files:
+Project Markdown is intentionally kept small:
 
 - `README.md`: main project handbook.
+- `model.md`: model training, scoring, and prediction calculation details.
 - `track.md`: current status and handoff notes.
 - `docs/research_notes.md`: research framing and external communication notes.
 

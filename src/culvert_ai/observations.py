@@ -97,6 +97,7 @@ def _confirmed_observations_as_known(
     confirmed = observations[observations["status"] == "confirmed_culvert"].copy()
     if confirmed.empty:
         return None
+    confirmed = _dedupe_observation_rows(confirmed)
 
     if output_crs is not None and confirmed.crs != output_crs:
         confirmed = confirmed.to_crs(output_crs)
@@ -179,6 +180,7 @@ def _missed_predictions_as_negative(
     confirmed = observations[observations["status"] == "confirmed_culvert"].copy()
     if confirmed.empty:
         return _empty_observation_labels(observations.crs)
+    confirmed = _dedupe_observation_rows(confirmed)
 
     candidate_id = _first_non_empty_series(
         confirmed,
@@ -195,6 +197,7 @@ def _missed_predictions_as_negative(
     confirmed["miss_distance_m"] = distance_m
     missed = confirmed[
         (confirmed["miss_candidate_id"] != "")
+        & confirmed["miss_candidate_id"].map(_is_prediction_candidate_id)
         & (confirmed["miss_distance_m"] > float(miss_threshold_m))
     ].copy()
     if missed.empty:
@@ -246,6 +249,37 @@ def _empty_observation_labels(crs) -> gpd.GeoDataFrame:
         geometry="geometry",
         crs=crs,
     )
+
+
+def _dedupe_observation_rows(observations: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    if observations.empty:
+        return observations
+
+    deduped = observations.copy()
+    deduped["_observation_dedupe_key"] = deduped.apply(_observation_dedupe_key, axis=1)
+    return deduped.drop_duplicates("_observation_dedupe_key", keep="first").drop(
+        columns=["_observation_dedupe_key"],
+    )
+
+
+def _observation_dedupe_key(row: pd.Series) -> str:
+    field_id = str(row.get("field_culvert_id", "") or "").strip()
+    if field_id:
+        return f"field:{field_id}"
+
+    geometry = row.get("geometry")
+    if geometry is not None and not geometry.is_empty:
+        return f"point:{geometry.x:.6f}:{geometry.y:.6f}"
+
+    observation_id = str(row.get("observation_id", "") or "").strip()
+    if observation_id:
+        return f"observation:{observation_id}"
+
+    return f"row:{row.name}"
+
+
+def _is_prediction_candidate_id(candidate_id: str) -> bool:
+    return str(candidate_id or "").strip().lower().startswith("cand_")
 
 
 def _string_series(table: gpd.GeoDataFrame, column: str) -> pd.Series:

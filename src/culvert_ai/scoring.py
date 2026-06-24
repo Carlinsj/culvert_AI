@@ -388,7 +388,7 @@ def _known_field_match_mask(table: pd.DataFrame, known_radius_m: float) -> pd.Se
 def _field_denied_mask(table: pd.DataFrame, known_radius_m: float) -> pd.Series:
     denied = pd.Series(False, index=table.index)
     if "field_denied" in table.columns:
-        denied |= pd.to_numeric(table["field_denied"], errors="coerce").fillna(0).astype(int) == 1
+        return pd.to_numeric(table["field_denied"], errors="coerce").fillna(0).astype(int) == 1
     if "dist_to_denied_culvert_m" in table.columns:
         distance = pd.to_numeric(table["dist_to_denied_culvert_m"], errors="coerce")
         denied |= distance.notna() & (distance <= known_radius_m)

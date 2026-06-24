@@ -1,6 +1,8 @@
 from pathlib import Path
 
+import geopandas as gpd
 import pandas as pd
+from shapely.geometry import Point
 
 from culvert_ai.field_reports import (
     _culvert_ids,
@@ -8,7 +10,9 @@ from culvert_ai.field_reports import (
     _normalize_route,
     _records_from_text,
     _report_date,
+    append_field_report_candidates,
 )
+from culvert_ai.io import read_vector, write_vector
 
 
 def test_report_date_parses_team_two_filename_formats():
@@ -112,3 +116,36 @@ def test_deduplicate_prefers_identified_record_but_keeps_route():
     assert len(deduped) == 1
     assert deduped.iloc[0]["culvert_id"] == "SC150332"
     assert deduped.iloc[0]["route"] == "NY212"
+
+
+def test_append_field_report_candidates_continues_existing_field_ids(tmp_path):
+    candidates = gpd.GeoDataFrame(
+        [
+            {"candidate_id": "cand_000001", "geometry": Point(0, 0)},
+            {"candidate_id": "field_000012", "geometry": Point(1, 1)},
+        ],
+        geometry="geometry",
+        crs="EPSG:4326",
+    )
+    field_points = gpd.GeoDataFrame(
+        [
+            {
+                "route": "NY212",
+                "culvert_id": "FC-1",
+                "source_file": "field_observations.geojson",
+                "geometry": Point(2, 2),
+            }
+        ],
+        geometry="geometry",
+        crs="EPSG:4326",
+    )
+    candidates_path = tmp_path / "candidates.gpkg"
+    field_points_path = tmp_path / "field_points.gpkg"
+    output_path = tmp_path / "combined.gpkg"
+    write_vector(candidates, candidates_path)
+    write_vector(field_points, field_points_path)
+
+    append_field_report_candidates(candidates_path, field_points_path, output_path)
+
+    combined = read_vector(output_path)
+    assert combined["candidate_id"].tolist() == ["cand_000001", "field_000012", "field_000013"]

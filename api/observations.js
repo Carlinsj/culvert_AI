@@ -6,6 +6,7 @@ import {
   saveObservation,
 } from "./_lib/feedback.js";
 import { readJsonBody, requireMethod, sendError, sendJson } from "./_lib/http.js";
+import { maybeTriggerRetrain } from "./_lib/retrain.js";
 
 export default async function handler(request, response) {
   if (!requireMethod(request, response, ["GET", "POST", "DELETE"])) return;
@@ -23,6 +24,10 @@ export default async function handler(request, response) {
       const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
       const deleted = await deleteObservation(url.searchParams.get("id"));
       const { findings, summary } = await refreshPublishedData(deleted.observations);
+      const retraining = await maybeTriggerRetrain({
+        observations: deleted.observations,
+        reason: "field_observation_deleted",
+      });
 
       sendJson(response, {
         status: "deleted",
@@ -31,6 +36,7 @@ export default async function handler(request, response) {
         findings,
         summary,
         storage: deleted.storage,
+        retraining,
         warning: deleted.warning,
       });
       return;
@@ -39,6 +45,10 @@ export default async function handler(request, response) {
     const payload = await readJsonBody(request);
     const saved = await saveObservation(payload);
     const { findings, summary } = await refreshPublishedData(saved.observations);
+    const retraining = await maybeTriggerRetrain({
+      observations: saved.observations,
+      reason: "field_observation_saved",
+    });
 
     sendJson(response, {
       status: "saved",
@@ -48,10 +58,14 @@ export default async function handler(request, response) {
       summary,
       storage: saved.storage,
       warning: saved.warning,
+      retraining,
       training: {
         mode: "deployed_feedback_ranking",
         status: "applied",
-        fullRetrain: "Run npm run retrain:from-vercel locally to fold Blob observations into the Python supervised model.",
+        fullRetrain:
+          retraining.status === "queued"
+            ? "Automatic retraining was queued on the configured worker."
+            : "Run npm run retrain:from-vercel locally, or configure CULVERT_RETRAIN_WEBHOOK_URL/GITHUB_RETRAIN_TOKEN for automatic retraining.",
       },
     }, 201);
   } catch (error) {

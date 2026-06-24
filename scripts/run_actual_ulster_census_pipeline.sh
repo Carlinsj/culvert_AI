@@ -22,7 +22,8 @@ BOUNDARY_PATH="${BOUNDARY_PATH:-data/raw/ulster_county_boundary.gpkg}"
 EXTRACTED_POINTS_PATH=""
 KNOWN_CULVERTS_PATH=""
 DENIED_CULVERTS_PATH=""
-INCLUDE_FIELD_OBSERVATIONS_AS_POSITIVES="${INCLUDE_FIELD_OBSERVATIONS_AS_POSITIVES:-0}"
+TRAINING_POINTS_SUMMARY_PATH="data/processed/high_confidence_training_points.csv"
+INCLUDE_FIELD_OBSERVATIONS_AS_POSITIVES="${INCLUDE_FIELD_OBSERVATIONS_AS_POSITIVES:-1}"
 
 FIELD_REPORT_INPUTS=()
 if [ -n "${FIELD_REPORTS_PATHS:-}" ]; then
@@ -174,6 +175,7 @@ PY
     fi
     scripts/python.sh -m culvert_ai.cli merge-field-observations "${MERGE_OBSERVATIONS_ARGS[@]}"
     KNOWN_CULVERTS_PATH="data/processed/training_known_culverts.gpkg"
+    TRAINING_POINTS_SUMMARY_PATH="data/processed/training_known_culverts.csv"
     if [ "$INCLUDE_FIELD_OBSERVATIONS_AS_POSITIVES" = "1" ] && [ "$CONFIRMED_OBSERVATIONS" -gt 0 ] && [ -f data/processed/confirmed_field_observations.gpkg ]; then
       ADD_OBSERVATION_CANDIDATE_ARGS=(
         --candidates "$CANDIDATES_PATH"
@@ -278,5 +280,5 @@ scripts/python.sh -m culvert_ai.cli export-web \
 scripts/python.sh scripts/write_model_summary.py \
   --metrics reports/actual_ulster_field_report_metrics.json \
   --point-analysis reports/extracted_points_analysis.json \
-  --training-points data/processed/high_confidence_training_points.csv \
+  --training-points "$TRAINING_POINTS_SUMMARY_PATH" \
   --output web/data/model_summary.json

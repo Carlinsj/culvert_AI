@@ -164,9 +164,12 @@ def append_field_report_candidates(
             "rows": int(len(candidates)),
         }
 
+    first_field_index = _next_field_candidate_index(candidates)
     field_candidates = gpd.GeoDataFrame(
         {
-            "candidate_id": [f"field_{index + 1:06d}" for index in range(len(field_points))],
+            "candidate_id": [
+                f"field_{first_field_index + index:06d}" for index in range(len(field_points))
+            ],
             "road_id": field_points.get("route", pd.Series("", index=field_points.index)).fillna(""),
             "stream_id": field_points.get("culvert_id", pd.Series("", index=field_points.index)).fillna(""),
             "road_name": field_points.get("route", pd.Series("Field report", index=field_points.index))
@@ -205,6 +208,22 @@ def append_field_report_candidates(
         "field_report_rows": int(len(field_candidates)),
         "rows": int(len(merged)),
     }
+
+
+def _next_field_candidate_index(candidates: gpd.GeoDataFrame) -> int:
+    if "candidate_id" not in candidates.columns:
+        return 1
+
+    values = (
+        candidates["candidate_id"]
+        .fillna("")
+        .astype(str)
+        .str.extract(r"^field_(\d+)$", expand=False)
+    )
+    numeric = pd.to_numeric(values, errors="coerce").dropna()
+    if numeric.empty:
+        return 1
+    return int(numeric.max()) + 1
 
 
 def extract_field_report_records(input_path: str | Path | Sequence[str | Path]) -> list[CoordinateRecord]:

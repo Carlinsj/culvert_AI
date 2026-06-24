@@ -13,6 +13,7 @@ const requiredFiles = [
   "web/data/model_summary.json",
   "api/findings.js",
   "api/observations.js",
+  "api/cron/retrain.js",
   "api/summary.js",
 ];
 
@@ -47,6 +48,7 @@ console.log(`Verified static Vercel build assets: ${findings.features.length} fi
 await Promise.all([
   import("../api/findings.js"),
   import("../api/observations.js"),
+  import("../api/cron/retrain.js"),
   import("../api/summary.js"),
 ]);
 

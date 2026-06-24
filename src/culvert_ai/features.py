@@ -201,11 +201,12 @@ def add_negative_culvert_labels(
         exact_negative = negative_by_candidate_id.get(candidate_id)
         if exact_negative is not None:
             nearest = exact_negative
-            if "miss_distance_m" in nearest.index and pd.notna(nearest["miss_distance_m"]):
-                labeled.at[row_index, "dist_to_denied_culvert_m"] = float(nearest["miss_distance_m"])
+            miss_distance_m = _optional_float(nearest.get("miss_distance_m"))
+            if miss_distance_m is not None:
+                labeled.at[row_index, "dist_to_denied_culvert_m"] = miss_distance_m
             mark_negative = True
         else:
-            mark_negative = distance <= negative_radius_m
+            mark_negative = distance <= negative_radius_m and not _is_missed_prediction(nearest)
 
         if mark_negative:
             _mark_negative_label(labeled, row_index, nearest)
@@ -220,6 +221,17 @@ def _mark_negative_label(labeled: gpd.GeoDataFrame, row_index, nearest: pd.Serie
         labeled.at[row_index, "nearest_denied_observation_id"] = str(nearest["observation_id"])
     if "notes" in nearest.index and pd.notna(nearest["notes"]):
         labeled.at[row_index, "nearest_denied_notes"] = str(nearest["notes"])
+
+
+def _is_missed_prediction(row: pd.Series) -> bool:
+    return str(row.get("label", "") or "").strip() == "missed_prediction"
+
+
+def _optional_float(value) -> float | None:
+    number = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+    if pd.isna(number):
+        return None
+    return float(number)
 
 
 def add_raster_samples(

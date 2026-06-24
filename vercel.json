@@ -10,6 +10,12 @@
       "includeFiles": "web/data/**"
     }
   },
+  "crons": [
+    {
+      "path": "/api/cron/retrain",
+      "schedule": "0 6 * * *"
+    }
+  ],
   "headers": [
     {
       "source": "/data/(.*)",

@@ -19,6 +19,8 @@ const SELECTION_POPUP_DELAY_MS = 460;
 const LOCATION_FOCUS_ZOOM = 16;
 const LOCATION_MIN_MOVE_M = 4;
 const LOCATION_LIST_THROTTLE_MS = 650;
+const OSM_MAX_NATIVE_ZOOM = 19;
+const MAP_MAX_ZOOM = 20;
 
 const MARKER_COLORS = {
   very_high: "#8f8a00",
@@ -139,7 +141,8 @@ function setupMap() {
   }).setView([41.73, -74.03], 12);
 
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 20,
+    maxZoom: MAP_MAX_ZOOM,
+    maxNativeZoom: OSM_MAX_NATIVE_ZOOM,
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
   }).addTo(state.map);
 
@@ -1755,7 +1758,7 @@ function mapContextForPoint(latLng) {
   const streamName = drainageLabel(props);
   const nearestDisplayId = locationDisplayId(props);
   const isPredictionHit = nearest.distanceMeters <= PREDICTION_HIT_RADIUS_M;
-  const isTrackedMiss = !isPredictionHit && Boolean(props.candidate_id);
+  const isTrackedMiss = !isPredictionHit && isMissablePredictionCandidate(props);
   return {
     matchedFeature: nearest.feature,
     withinRadius,
@@ -1770,6 +1773,17 @@ function mapContextForPoint(latLng) {
       ? `${isPredictionHit ? "Copied" : "Recorded miss against"} road, drainage, rank, and estimate context from ${nearestDisplayId}, ${formatNumber(nearest.distanceMeters, "m")} from the clicked point.`
       : `Nearest map candidate is ${formatNumber(nearest.distanceMeters, "m")} away, outside the ${FIELD_CONTEXT_RADIUS_M} m context radius, so the point will be saved without inferred road/drainage context.`,
   };
+}
+
+function isMissablePredictionCandidate(props) {
+  const candidateId = String(props?.candidate_id || "");
+  const source = String(props?.source || "");
+  const status = String(props?.discovery_status || "");
+  if (!/^cand_\d+$/i.test(candidateId)) return false;
+  if (props?.knownFieldMatch || status === "known_field_match" || status === "confirmed_field_observation") {
+    return false;
+  }
+  return source !== "field_report_observed_culvert" && source !== "vercel_field_observation";
 }
 
 function nearestFeatureToPoint(latLng) {
