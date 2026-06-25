@@ -102,10 +102,10 @@ def generate_candidates(
                 "stream_id",
                 "road_name",
                 "stream_name",
-            "source",
-            "road_stream_distance_m",
-            "crossing_angle_degrees",
-            "geometry",
+                "source",
+                "road_stream_distance_m",
+                "crossing_angle_degrees",
+                "geometry",
             ],
             geometry="geometry",
             crs=metric_crs,
@@ -120,15 +120,16 @@ def generate_candidates(
 
 def generate_road_route_candidates(
     roads: gpd.GeoDataFrame,
-    routes: list[str],
+    routes: list[str] | None = None,
     interval_m: float = 75.0,
+    include_numbered_roads: bool = False,
 ) -> gpd.GeoDataFrame:
     roads = clean_geometry(roads)
     if interval_m <= 0:
         raise ValueError("interval_m must be positive.")
 
-    route_tokens = {_route_token(route) for route in routes if _route_token(route)}
-    if not route_tokens:
+    route_tokens = {_route_token(route) for route in routes or [] if _route_token(route)}
+    if not route_tokens and not include_numbered_roads:
         raise ValueError("At least one usable route is required.")
 
     (roads_m,), metric_crs = project_layers_to_metric(roads)
@@ -137,6 +138,8 @@ def generate_road_route_candidates(
         road_name = _optional_name(road) or ""
         road_tokens = _road_route_tokens(road)
         matched = sorted(route_tokens & road_tokens)
+        if include_numbered_roads and road_tokens and _auto_sample_numbered_road(row=road):
+            matched = sorted(set(matched) or road_tokens)
         if not matched:
             continue
 
@@ -349,14 +352,26 @@ def _road_route_tokens(row: pd.Series) -> set[str]:
     return tokens
 
 
+def _auto_sample_numbered_road(row: pd.Series) -> bool:
+    route_type = _first_value(row, ("RTTYP", "rttyp", "route_type", "ROUTE_TYPE"))
+    if route_type is None or str(route_type).strip() == "":
+        return True
+    return str(route_type).strip().upper() in {"S", "U", "I"}
+
+
 def _route_tokens_from_text(value) -> set[str]:
     text = str(value or "").upper()
     tokens = set()
-    for match in re.finditer(
-        r"\b(?:NY|NYS|STATE\s+RTE|STATE\s+ROUTE|ROUTE|RTE|RT|US|I|CR|CO\s+RD|COUNTY\s+ROAD|COUNTY\s+ROUTE)\s*-?\s*(\d+[A-Z]?)\b",
-        text,
-    ):
-        tokens.add(match.group(1))
+    route_patterns = (
+        r"\b(?:NY|NYS)\s*-?\s*(?:RTE|ROUTE|RT|HWY|HIGHWAY)?\s*-?\s*(\d+[A-Z]?)\b",
+        r"\b(?:STATE\s+RTE|STATE\s+ROUTE|STATE\s+RT|ROUTE|RTE|RT)\s*-?\s*(\d+[A-Z]?)\b",
+        r"\b(?:US|U\.S\.)\s*-?\s*(?:HWY|HIGHWAY|RTE|ROUTE|RT)?\s*-?\s*(\d+[A-Z]?)\b",
+        r"\b(?:INTERSTATE|I)\s*-?\s*(\d+[A-Z]?)\b",
+        r"\b(?:CR|CO\s+RD|COUNTY\s+ROAD|COUNTY\s+ROUTE|COUNTY\s+RTE)\s*-?\s*(\d+[A-Z]?)\b",
+    )
+    for pattern in route_patterns:
+        for match in re.finditer(pattern, text):
+            tokens.add(match.group(1))
     return tokens
 
 

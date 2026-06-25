@@ -24,12 +24,11 @@ from sklearn.metrics import (
     average_precision_score,
     brier_score_loss,
     f1_score,
-    make_scorer,
     precision_score,
     recall_score,
     roc_auc_score,
 )
-from sklearn.model_selection import GroupShuffleSplit, StratifiedKFold, cross_validate, train_test_split
+from sklearn.model_selection import GroupShuffleSplit, StratifiedKFold, train_test_split
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
@@ -61,6 +60,7 @@ DEFAULT_EXCLUDED_FEATURES = {
     "model_rank_score",
     "label_confidence",
     "nearest_field_report_label_confidence",
+    "training_sample_weight",
     "field_denied",
     "dist_to_denied_culvert_m",
     "spatial_block_id",
@@ -118,6 +118,7 @@ def train_model(
         raise ValueError("No numeric feature columns were found for training.")
 
     x = _prepare_features(features, feature_columns)
+    sample_weight = _training_sample_weight(features)
 
     model_candidates = _candidate_models(random_state)
     if model_family != "auto":
@@ -133,10 +134,12 @@ def train_model(
     }
     class_counts = y.value_counts().to_dict()
     metrics["class_counts"] = {str(k): int(v) for k, v in class_counts.items()}
+    metrics["sample_weight"] = _sample_weight_summary(sample_weight, y)
     metrics["model_comparison"] = _compare_models(
         model_candidates,
         x,
         y,
+        sample_weight=sample_weight,
         features=features,
         spatial_cv=spatial_cv,
         spatial_block_size_m=spatial_block_size_m,
@@ -150,9 +153,10 @@ def train_model(
     metrics["selected_model"] = selected_name
 
     if can_split:
-        x_train, x_test, y_train, y_test = train_test_split(
+        x_train, x_test, y_train, y_test, weight_train, _weight_test = train_test_split(
             x,
             y,
+            sample_weight,
             test_size=test_size,
             random_state=random_state,
             stratify=y,
@@ -163,6 +167,7 @@ def train_model(
             x_test,
             y_train,
             y_test,
+            sample_weight_train=weight_train,
             top_k=(5, 10, 25),
         )
 
@@ -172,6 +177,7 @@ def train_model(
                 features,
                 x,
                 y,
+                sample_weight,
                 test_size=test_size,
                 random_state=random_state,
                 block_size_m=spatial_block_size_m,
@@ -182,7 +188,7 @@ def train_model(
         metrics["note"] = "Dataset too small for a reliable holdout split; trained on all rows."
 
     final_model = clone(model_candidates[selected_name])
-    final_model.fit(x, y)
+    _fit_estimator(final_model, x, y, sample_weight)
     importances = _feature_importance(final_model, x, y, feature_columns, random_state)
     metrics["feature_importance"] = importances
 
@@ -195,6 +201,7 @@ def train_model(
         "random_state": random_state,
         "training_rows": int(len(features)),
         "class_counts": metrics["class_counts"],
+        "sample_weight": metrics["sample_weight"],
     }
     ensure_parent_dir(model_output)
     joblib.dump(bundle, model_output)
@@ -298,6 +305,7 @@ def _compare_models(
     models: dict,
     x: pd.DataFrame,
     y: pd.Series,
+    sample_weight: pd.Series | None = None,
     features: gpd.GeoDataFrame | None = None,
     spatial_cv: bool = True,
     spatial_block_size_m: float = 2_500.0,
@@ -316,40 +324,25 @@ def _compare_models(
 
     n_splits = min(5, min_class_count)
     cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
-    scoring = {
-        "roc_auc": "roc_auc",
-        "average_precision": "average_precision",
-        "f1": make_scorer(f1_score, zero_division=0),
-        "precision": make_scorer(precision_score, zero_division=0),
-        "recall": make_scorer(recall_score, zero_division=0),
-    }
 
     comparison = {}
     for name, estimator in models.items():
         try:
-            scores = cross_validate(
+            comparison[name] = _cross_validate_model(
                 estimator,
                 x,
                 y,
                 cv=cv,
-                scoring=scoring,
-                error_score=np.nan,
-                n_jobs=None,
+                sample_weight=sample_weight,
             )
-            comparison[name] = {
-                "folds": int(n_splits),
-                "mean_roc_auc": _nan_mean(scores["test_roc_auc"]),
-                "mean_average_precision": _nan_mean(scores["test_average_precision"]),
-                "mean_f1": _nan_mean(scores["test_f1"]),
-                "mean_precision": _nan_mean(scores["test_precision"]),
-                "mean_recall": _nan_mean(scores["test_recall"]),
-            }
+            comparison[name]["folds"] = int(n_splits)
             if spatial_cv and features is not None:
                 spatial = _spatial_holdout_score(
                     estimator,
                     features,
                     x,
                     y,
+                    sample_weight,
                     test_size=test_size,
                     random_state=random_state,
                     block_size_m=spatial_block_size_m,
@@ -387,16 +380,59 @@ def _select_model(comparison: dict) -> str:
             float(spatial_avg_precision)
             if spatial_avg_precision is not None and not np.isnan(spatial_avg_precision)
             else -1.0,
-            float(avg_precision) if avg_precision is not None and not np.isnan(avg_precision) else -1.0,
+            float(avg_precision)
+            if avg_precision is not None and not np.isnan(avg_precision)
+            else -1.0,
             float(f1) if f1 is not None and not np.isnan(f1) else -1.0,
         )
 
     return max(candidates.items(), key=score)[0]
 
 
-def _fit_and_score(model, x_train, x_test, y_train, y_test, top_k: tuple[int, ...]) -> dict:
+def _cross_validate_model(
+    estimator,
+    x: pd.DataFrame,
+    y: pd.Series,
+    cv: StratifiedKFold,
+    sample_weight: pd.Series | None,
+) -> dict:
+    scores = {
+        "roc_auc": [],
+        "average_precision": [],
+        "f1": [],
+        "precision": [],
+        "recall": [],
+    }
+    for train_idx, test_idx in cv.split(x, y):
+        fitted = clone(estimator)
+        weights_train = sample_weight.iloc[train_idx] if sample_weight is not None else None
+        _fit_estimator(fitted, x.iloc[train_idx], y.iloc[train_idx], weights_train)
+        probabilities = fitted.predict_proba(x.iloc[test_idx])[:, 1]
+        predictions = (probabilities >= 0.5).astype(int)
+        fold_metrics = _classification_metrics(y.iloc[test_idx], predictions, probabilities)
+        for metric in scores:
+            scores[metric].append(fold_metrics.get(metric, np.nan))
+
+    return {
+        "mean_roc_auc": _nan_mean(scores["roc_auc"]),
+        "mean_average_precision": _nan_mean(scores["average_precision"]),
+        "mean_f1": _nan_mean(scores["f1"]),
+        "mean_precision": _nan_mean(scores["precision"]),
+        "mean_recall": _nan_mean(scores["recall"]),
+    }
+
+
+def _fit_and_score(
+    model,
+    x_train,
+    x_test,
+    y_train,
+    y_test,
+    sample_weight_train: pd.Series | None,
+    top_k: tuple[int, ...],
+) -> dict:
     fitted = clone(model)
-    fitted.fit(x_train, y_train)
+    _fit_estimator(fitted, x_train, y_train, sample_weight_train)
     probabilities = fitted.predict_proba(x_test)[:, 1]
     predictions = (probabilities >= 0.5).astype(int)
     metrics = _classification_metrics(y_test, predictions, probabilities)
@@ -411,6 +447,7 @@ def _spatial_holdout_score(
     features: gpd.GeoDataFrame,
     x: pd.DataFrame,
     y: pd.Series,
+    sample_weight: pd.Series | None,
     test_size: float,
     random_state: int,
     block_size_m: float,
@@ -431,6 +468,7 @@ def _spatial_holdout_score(
             x.iloc[test_idx],
             y_train,
             y_test,
+            sample_weight.iloc[train_idx] if sample_weight is not None else None,
             top_k=(5, 10, 25),
         )
         metrics["spatial_block_size_m"] = float(block_size_m)
@@ -456,6 +494,42 @@ def _spatial_blocks(features: gpd.GeoDataFrame, block_size_m: float) -> pd.Serie
     x_block = np.floor(x_coord / block_size_m).astype(int)
     y_block = np.floor(y_coord / block_size_m).astype(int)
     return pd.Series(x_block.astype(str) + "_" + y_block.astype(str), index=features.index)
+
+
+def _training_sample_weight(features: pd.DataFrame) -> pd.Series:
+    if "training_sample_weight" not in features.columns:
+        return pd.Series(1.0, index=features.index, dtype=float)
+
+    weights = pd.to_numeric(features["training_sample_weight"], errors="coerce").fillna(1.0)
+    return weights.clip(lower=0.01).astype(float)
+
+
+def _sample_weight_summary(sample_weight: pd.Series, y: pd.Series) -> dict:
+    positives = y.astype(int) == 1
+    negatives = ~positives
+    return {
+        "column": "training_sample_weight",
+        "min": float(sample_weight.min()),
+        "max": float(sample_weight.max()),
+        "mean": float(sample_weight.mean()),
+        "positive_weight_sum": float(sample_weight[positives].sum()),
+        "negative_weight_sum": float(sample_weight[negatives].sum()),
+    }
+
+
+def _fit_estimator(
+    estimator, x: pd.DataFrame, y: pd.Series, sample_weight: pd.Series | None = None
+):
+    if sample_weight is None:
+        return estimator.fit(x, y)
+
+    try:
+        return estimator.fit(x, y, sample_weight=sample_weight)
+    except (TypeError, ValueError):
+        if hasattr(estimator, "named_steps"):
+            final_step_name = list(estimator.named_steps)[-1]
+            return estimator.fit(x, y, **{f"{final_step_name}__sample_weight": sample_weight})
+        return estimator.fit(x, y)
 
 
 def _feature_importance(

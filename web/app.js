@@ -19,6 +19,7 @@ const SELECTION_POPUP_DELAY_MS = 460;
 const LOCATION_FOCUS_ZOOM = 16;
 const LOCATION_MIN_MOVE_M = 4;
 const LOCATION_LIST_THROTTLE_MS = 650;
+const LOCATION_RECENTER_THRESHOLD_M = 120;
 const OSM_MAX_NATIVE_ZOOM = 19;
 const MAP_MAX_ZOOM = 20;
 
@@ -87,6 +88,7 @@ const els = {
   mobileMenuToggle: document.querySelector("#mobile-menu-toggle"),
   mobileSidebarClose: document.querySelector("#mobile-sidebar-close"),
   locateMe: document.querySelector("#locate-me"),
+  recenterLocation: document.querySelector("#recenter-location"),
   locationStatus: document.querySelector("#location-status"),
 };
 
@@ -152,6 +154,7 @@ function setupMap() {
   state.locationLayer = L.layerGroup().addTo(state.map);
   state.scoreLabelLayer = createScoreLabelLayer().addTo(state.map);
   state.map.on("click", handleMapClick);
+  state.map.on("moveend", updateRecenterLocationButton);
   requestAnimationFrame(() => state.map.invalidateSize());
 }
 
@@ -173,6 +176,7 @@ function bindControls() {
   els.mobileSidebarClose?.addEventListener("click", () => setMobileDrawerOpen(false));
   els.drawerBackdrop?.addEventListener("click", () => setMobileDrawerOpen(false));
   els.locateMe?.addEventListener("click", toggleLocationTracking);
+  els.recenterLocation?.addEventListener("click", recenterOnUserLocation);
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
       setFilterPanelOpen(false);
@@ -963,6 +967,7 @@ function stopLocationTracking() {
   state.shouldFocusLocationOnNextUpdate = false;
   state.locationLayer?.clearLayers();
   updateLocationButton(false);
+  updateRecenterLocationButton();
   setLocationStatus("");
   render();
 }
@@ -996,6 +1001,7 @@ function handleLocationSuccess(position) {
     state.shouldFocusLocationOnNextUpdate = false;
   }
   updateLocationButton(true);
+  updateRecenterLocationButton();
   setLocationStatus("Tracking is on. Nearby list updates as your position changes.");
 }
 
@@ -1010,6 +1016,7 @@ function handleLocationError(error) {
   state.locationWatchId = null;
   state.shouldFocusLocationOnNextUpdate = false;
   updateLocationButton(false);
+  updateRecenterLocationButton();
   setLocationStatus(message);
 }
 
@@ -1019,6 +1026,24 @@ function updateLocationButton(isTracking) {
   els.locateMe.textContent = isTracking ? "Tracking" : "Locate";
   els.locateMe.setAttribute("aria-pressed", String(isTracking));
   els.locateMe.setAttribute("aria-label", isTracking ? "Stop location tracking" : "Start location tracking");
+}
+
+function recenterOnUserLocation() {
+  if (!state.userLocation) return;
+  focusUserLocation();
+  els.recenterLocation?.classList.remove("off-center");
+  window.setTimeout(updateRecenterLocationButton, isMobileViewport() ? 350 : 560);
+  setLocationStatus("Centered on your current location. Tracking remains on.");
+}
+
+function updateRecenterLocationButton() {
+  if (!els.recenterLocation) return;
+  const isTracking = state.locationWatchId !== null;
+  const hasLocation = Boolean(state.userLocation);
+  els.recenterLocation.hidden = !isTracking;
+  els.recenterLocation.disabled = !hasLocation;
+  els.recenterLocation.setAttribute("aria-disabled", String(!hasLocation));
+  els.recenterLocation.classList.toggle("off-center", hasLocation && isUserLocationOffCenter());
 }
 
 function setLocationStatus(message) {
@@ -1083,6 +1108,15 @@ function focusUserLocation() {
     duration: mobile ? 0.22 : 0.45,
     easeLinearity: 0.25,
   });
+}
+
+function isUserLocationOffCenter() {
+  if (!state.map || !state.userLocation) return false;
+  const center = state.map.getCenter();
+  return (
+    distanceMeters(center.lat, center.lng, state.userLocation.lat, state.userLocation.lng) >
+    LOCATION_RECENTER_THRESHOLD_M
+  );
 }
 
 function updateNearbyListFromLocation(options = {}) {

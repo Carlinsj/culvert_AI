@@ -97,12 +97,12 @@ Current selected model:
 - Rows: `14,565`
 - Positive labels: `210`
 - Negative labels: `14,355`
-- Feature count: `28`
+- Feature count: `70`
 - Training-point rows: `140`
-- Random holdout AP: `0.701`
-- Random holdout ROC AUC: `0.914`
-- Spatial holdout AP: `0.635`
-- Spatial holdout ROC AUC: `0.827`
+- Random holdout AP: `0.708`
+- Random holdout ROC AUC: `0.935`
+- Spatial holdout AP: `0.645`
+- Spatial holdout ROC AUC: `0.882`
 - Spatial holdout P@10: `1.000`
 
 Metric interpretation: spatial holdout is the metric to trust because field-report
@@ -127,7 +127,12 @@ The model uses numeric geospatial features from candidate points, including:
 - optional flow-accumulation features,
 - optional drainage-area features.
 
-The feature builder automatically samples these optional raster files when present:
+The actual Ulster pipeline now downloads a USGS 3DEP 1 arc-second DEM to
+`data/raw/dem.tif` when it is missing, then samples terrain features from it.
+Use `REFRESH_DEM=1` to rebuild it, `DOWNLOAD_DEM=0` to skip it, or
+`DEM_RESOLUTION=13` to request larger 1/3 arc-second USGS tiles.
+
+The feature builder automatically samples these raster files when present:
 
 - `data/raw/dem.tif`
 - `data/raw/flow_accumulation.tif`
@@ -328,6 +333,19 @@ Refresh Census input files before predicting:
 REFRESH_CENSUS_INPUTS=1 npm run predict:actual
 ```
 
+Refresh the USGS 3DEP DEM before predicting:
+
+```bash
+REFRESH_DEM=1 npm run predict:actual
+```
+
+Use the larger 1/3 arc-second DEM tiles when higher-resolution terrain is worth
+the longer download:
+
+```bash
+REFRESH_DEM=1 DEM_RESOLUTION=13 npm run predict:actual
+```
+
 Start the local app:
 
 ```bash
@@ -373,6 +391,7 @@ npm run retrain:from-vercel
 - `src/culvert_ai/field_reports.py`: PDF/DOCX coordinate extraction.
 - `src/culvert_ai/point_analysis.py`: coordinate QC and training-point filtering.
 - `src/culvert_ai/candidates.py`: road-stream, route, and merged candidate generation.
+- `src/culvert_ai/dem.py`: USGS 3DEP DEM tile download and county mosaic creation.
 - `src/culvert_ai/features.py`: feature table construction and raster sampling.
 - `src/culvert_ai/model.py`: model comparison, training, validation, and prediction.
 - `src/culvert_ai/scoring.py`: evidence scoring and discovery ranking.
@@ -405,7 +424,8 @@ Highest-priority improvements:
 - Add confirmed `no_culvert` field checks as negative labels.
 - Add official NYSDOT or county road centerlines.
 - Add official hydrography, drainage, ditch, and structure layers.
-- Add LiDAR-derived DEM, flow accumulation, and drainage area rasters.
+- Add flow accumulation and drainage area rasters; consider higher-resolution DEM
+  only when download/runtime cost is acceptable.
 - Validate by field route/day with precision at 10, 25, and 50.
 - Track false positives and false negatives after each field session.
 
@@ -442,7 +462,8 @@ should focus on data and validation:
   the Ulster model run.
 - User observations are local unless Vercel Blob is configured.
 - Current labels are clustered by field routes, so random validation is optimistic.
-- Optional terrain/hydrology rasters are supported but not committed in this repo.
+- The USGS 3DEP DEM is generated locally and not committed in this repo.
+- Flow accumulation and drainage area rasters are supported but not committed.
 
 ## Quick Health Check
 

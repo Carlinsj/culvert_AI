@@ -4,7 +4,7 @@ import rasterio
 from rasterio.transform import from_origin
 from shapely.geometry import LineString, Point
 
-from culvert_ai.features import build_feature_table
+from culvert_ai.features import add_training_sample_weights, build_feature_table
 
 
 def test_build_feature_table_adds_dem_hydrology_proxies(tmp_path):
@@ -224,3 +224,52 @@ def test_missed_prediction_negative_does_not_deny_true_culvert_geometry():
     assert features.loc["bad-prediction", "is_culvert"] == 0
     assert features.loc["true-culvert", "field_denied"] == 0
     assert features.loc["true-culvert", "is_culvert"] == 1
+
+
+def test_training_sample_weights_prioritize_abu_inputs():
+    features = gpd.GeoDataFrame(
+        [
+            {
+                "candidate_id": "weak-unlabeled",
+                "is_culvert": 0,
+                "field_denied": 0,
+                "geometry": Point(0, 0),
+            },
+            {
+                "candidate_id": "report-positive",
+                "is_culvert": 1,
+                "nearest_field_report_source_file": "team_report.pdf",
+                "geometry": Point(1, 0),
+            },
+            {
+                "candidate_id": "abu-positive",
+                "is_culvert": 1,
+                "nearest_field_report_source_file": "field_observations.geojson",
+                "geometry": Point(2, 0),
+            },
+            {
+                "candidate_id": "abu-denied",
+                "is_culvert": 0,
+                "field_denied": 1,
+                "nearest_denied_notes": "no crossing found",
+                "geometry": Point(3, 0),
+            },
+            {
+                "candidate_id": "abu-missed",
+                "is_culvert": 0,
+                "field_denied": 1,
+                "nearest_denied_notes": "confirmed culvert was 100.0 m from this prediction",
+                "geometry": Point(4, 0),
+            },
+        ],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+
+    weighted = add_training_sample_weights(features).set_index("candidate_id")
+
+    assert weighted.loc["weak-unlabeled", "training_sample_weight"] == 0.25
+    assert weighted.loc["report-positive", "training_sample_weight"] == 6.0
+    assert weighted.loc["abu-positive", "training_sample_weight"] == 18.0
+    assert weighted.loc["abu-denied", "training_sample_weight"] == 12.0
+    assert weighted.loc["abu-missed", "training_sample_weight"] == 16.0

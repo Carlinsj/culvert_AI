@@ -15,6 +15,11 @@ from culvert_ai.census import (
     DEFAULT_TIGER_YEAR,
     download_ulster_census_inputs,
 )
+from culvert_ai.dem import (
+    DEFAULT_USGS_3DEP_RESOLUTION,
+    download_usgs_3dep_dem,
+    usgs_3dep_base_url,
+)
 from culvert_ai.demo import create_demo_dataset, run_demo_pipeline
 from culvert_ai.evaluate import evaluate_predictions
 from culvert_ai.features import build_feature_table
@@ -97,6 +102,31 @@ def build_parser() -> argparse.ArgumentParser:
     download_census.add_argument("--countyfp", default="111")
     download_census.add_argument("--county-boundary-url", default=DEFAULT_COUNTY_BOUNDARY_URL)
     download_census.set_defaults(func=_download_census)
+
+    download_dem = subparsers.add_parser(
+        "download-dem",
+        help="Download and mosaic USGS 3DEP DEM tiles for the project boundary.",
+    )
+    download_dem.add_argument(
+        "--boundary",
+        default="data/raw/ulster_county_boundary.gpkg",
+        help="Boundary vector used to pick and crop DEM tiles.",
+    )
+    download_dem.add_argument("--output", default="data/raw/dem.tif", help="Output DEM GeoTIFF.")
+    download_dem.add_argument(
+        "--source-dir",
+        default="data/raw/sources/dem",
+        help="Directory for downloaded source DEM tiles.",
+    )
+    download_dem.add_argument("--resolution", default=DEFAULT_USGS_3DEP_RESOLUTION)
+    download_dem.add_argument(
+        "--base-url",
+        default=None,
+        help=f"Override DEM tile base URL. Default: {usgs_3dep_base_url(DEFAULT_USGS_3DEP_RESOLUTION)}",
+    )
+    download_dem.add_argument("--buffer-degrees", type=float, default=0.02)
+    download_dem.add_argument("--overwrite", action="store_true")
+    download_dem.set_defaults(func=_download_dem)
 
     import_reports = subparsers.add_parser(
         "import-field-reports",
@@ -348,6 +378,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--routes-from",
         help="Optional field report point layer containing a route column.",
     )
+    road_candidates.add_argument(
+        "--all-numbered-roads",
+        action="store_true",
+        help="Also sample every parsed state, US, or interstate route corridor.",
+    )
     road_candidates.add_argument("--interval-m", type=float, default=20.0)
     road_candidates.set_defaults(func=_build_road_candidates)
 
@@ -514,6 +549,18 @@ def _download_census(args) -> dict:
     )
 
 
+def _download_dem(args) -> dict:
+    return download_usgs_3dep_dem(
+        boundary_path=args.boundary,
+        output_path=args.output,
+        source_dir=args.source_dir,
+        resolution=args.resolution,
+        base_url=args.base_url,
+        buffer_degrees=args.buffer_degrees,
+        overwrite=args.overwrite,
+    )
+
+
 def _import_field_reports(args) -> dict:
     return import_field_reports(
         input_path=args.input,
@@ -638,7 +685,12 @@ def _build_road_candidates(args) -> dict:
         route_points = read_vector(args.routes_from)
         if "route" in route_points.columns:
             routes.extend(str(route) for route in route_points["route"].dropna().unique())
-    output = generate_road_route_candidates(roads, routes=routes, interval_m=args.interval_m)
+    output = generate_road_route_candidates(
+        roads,
+        routes=routes,
+        interval_m=args.interval_m,
+        include_numbered_roads=args.all_numbered_roads,
+    )
     write_vector(output, args.output)
     return {
         "candidates": Path(args.output),

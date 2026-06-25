@@ -4,7 +4,7 @@ set -euo pipefail
 # Real-data first-pass prediction workflow.
 # Downloads actual Census TIGER/Line roads/linear water for Ulster County,
 # predicts likely culvert locations, and refreshes the web dashboard data.
-# If data/raw/dem.tif exists, it is used automatically.
+# Downloads a USGS 3DEP DEM by default if data/raw/dem.tif is missing.
 
 if [ "${REFRESH_CENSUS_INPUTS:-0}" = "1" ] || [ ! -f data/raw/roads.gpkg ] || [ ! -f data/raw/streams.gpkg ]; then
   scripts/python.sh -m culvert_ai.cli download-census \
@@ -13,6 +13,24 @@ if [ "${REFRESH_CENSUS_INPUTS:-0}" = "1" ] || [ ! -f data/raw/roads.gpkg ] || [ 
     --countyfp "111"
 else
   echo "Using existing Census inputs in data/raw. Set REFRESH_CENSUS_INPUTS=1 to download fresh copies."
+fi
+
+DEM_PATH="${DEM_PATH:-data/raw/dem.tif}"
+if [ "${DOWNLOAD_DEM:-1}" = "1" ] && { [ "${REFRESH_DEM:-0}" = "1" ] || [ ! -f "$DEM_PATH" ]; }; then
+  DOWNLOAD_DEM_ARGS=(
+    --boundary data/raw/ulster_county_boundary.gpkg
+    --output "$DEM_PATH"
+    --source-dir "${DEM_SOURCE_DIR:-data/raw/sources/dem}"
+    --resolution "${DEM_RESOLUTION:-1}"
+  )
+  if [ "${REFRESH_DEM:-0}" = "1" ]; then
+    DOWNLOAD_DEM_ARGS+=(--overwrite)
+  fi
+  scripts/python.sh -m culvert_ai.cli download-dem "${DOWNLOAD_DEM_ARGS[@]}"
+elif [ -f "$DEM_PATH" ]; then
+  echo "Using existing DEM at $DEM_PATH. Set REFRESH_DEM=1 to rebuild it."
+else
+  echo "DEM download disabled. Set DOWNLOAD_DEM=1 to add terrain features."
 fi
 
 DEFAULT_FIELD_REPORTS_PATH="/Users/Carli/Downloads/Team No. 2-selected (1)"
@@ -83,6 +101,7 @@ scripts/python.sh -m culvert_ai.cli build-candidates \
   --min-spacing-m 20
 
 CANDIDATES_PATH="data/interim/actual_ulster_candidates.gpkg"
+ROUTE_COUNT=0
 if [ -n "$EXTRACTED_POINTS_PATH" ] && [ -f "$EXTRACTED_POINTS_PATH" ]; then
   ROUTE_COUNT="$(POINTS_PATH="$EXTRACTED_POINTS_PATH" scripts/python.sh - <<'PY'
 import os
@@ -97,12 +116,20 @@ else:
 PY
 )"
 fi
-if [ -n "$EXTRACTED_POINTS_PATH" ] && [ -f "$EXTRACTED_POINTS_PATH" ] && [ "${ROUTE_COUNT:-0}" -gt 0 ]; then
-  scripts/python.sh -m culvert_ai.cli build-road-candidates \
-    --roads data/raw/roads.gpkg \
-    --routes-from "$EXTRACTED_POINTS_PATH" \
-    --interval-m 20 \
+BUILD_NUMBERED_ROAD_CANDIDATES="${BUILD_NUMBERED_ROAD_CANDIDATES:-1}"
+if [ "$BUILD_NUMBERED_ROAD_CANDIDATES" = "1" ] || { [ -n "$EXTRACTED_POINTS_PATH" ] && [ -f "$EXTRACTED_POINTS_PATH" ] && [ "${ROUTE_COUNT:-0}" -gt 0 ]; }; then
+  ROUTE_CANDIDATE_ARGS=(
+    --roads data/raw/roads.gpkg
+    --interval-m "${ROUTE_SAMPLE_INTERVAL_M:-20}"
     --output data/interim/actual_ulster_route_candidates.gpkg
+  )
+  if [ "$BUILD_NUMBERED_ROAD_CANDIDATES" = "1" ]; then
+    ROUTE_CANDIDATE_ARGS+=(--all-numbered-roads)
+  fi
+  if [ -n "$EXTRACTED_POINTS_PATH" ] && [ -f "$EXTRACTED_POINTS_PATH" ] && [ "${ROUTE_COUNT:-0}" -gt 0 ]; then
+    ROUTE_CANDIDATE_ARGS+=(--routes-from "$EXTRACTED_POINTS_PATH")
+  fi
+  scripts/python.sh -m culvert_ai.cli build-road-candidates "${ROUTE_CANDIDATE_ARGS[@]}"
 
   scripts/python.sh -m culvert_ai.cli merge-candidates \
     --inputs data/interim/actual_ulster_candidates.gpkg data/interim/actual_ulster_route_candidates.gpkg \
@@ -208,8 +235,8 @@ fi
 if [ -n "$DENIED_CULVERTS_PATH" ] && [ -f "$DENIED_CULVERTS_PATH" ]; then
   FEATURE_ARGS+=(--negative-culverts "$DENIED_CULVERTS_PATH" --negative-radius-m 10)
 fi
-if [ -f data/raw/dem.tif ]; then
-  FEATURE_ARGS+=(--dem data/raw/dem.tif)
+if [ -f "$DEM_PATH" ]; then
+  FEATURE_ARGS+=(--dem "$DEM_PATH")
 fi
 if [ -f data/raw/flow_accumulation.tif ]; then
   FEATURE_ARGS+=(--flow-accumulation data/raw/flow_accumulation.tif)
@@ -225,7 +252,7 @@ scripts/python.sh -m culvert_ai.cli score-unlabeled \
   --output data/processed/actual_ulster_unlabeled_predictions.gpkg \
   --csv-output data/processed/actual_ulster_unlabeled_predictions.csv \
   --kml-output data/processed/actual_ulster_evidence_review.kml \
-  --kml-max-points 500
+  --kml-max-points 1500
 
 SUPERVISED_PREDICTIONS_PATH=""
 if [ -n "$KNOWN_CULVERTS_PATH" ] && [ -f "$KNOWN_CULVERTS_PATH" ]; then
@@ -245,7 +272,7 @@ PY
       --model-output models/actual_ulster_field_report_model.joblib \
       --metrics-output reports/actual_ulster_field_report_metrics.json \
       --importance-output reports/actual_ulster_field_report_feature_importance.csv \
-      --model-family auto \
+      --model-family "${CULVERT_MODEL_FAMILY:-hist_gradient_boosting}" \
       --spatial-block-size-m 2500
 
     scripts/python.sh -m culvert_ai.cli predict \
@@ -262,7 +289,7 @@ DISCOVERY_ARGS=(
   --output data/processed/actual_ulster_discovery_predictions.gpkg
   --csv-output data/processed/actual_ulster_discovery_predictions.csv
   --kml-output data/processed/actual_ulster_google_earth_review.kml
-  --kml-max-points 500
+  --kml-max-points 1500
 )
 
 if [ -n "$SUPERVISED_PREDICTIONS_PATH" ]; then

@@ -32,7 +32,8 @@ The current rebuilt model artifacts report:
 - Positive labels: `210`
 - Negative labels: `14,355`
 - Training point rows: `140`
-- Spatial holdout average precision: `0.635`
+- Feature count: `70`
+- Spatial holdout average precision: `0.645`
 - Spatial holdout precision at 10: `1.000`
 
 The source of truth for the latest run is `web/data/model_summary.json`.
@@ -95,7 +96,11 @@ main feature groups are:
 - optional flow-accumulation features,
 - optional drainage-area features.
 
-Optional rasters are sampled only when these files exist:
+The actual Ulster pipeline downloads a USGS 3DEP 1 arc-second DEM to
+`data/raw/dem.tif` when it is missing. Use `REFRESH_DEM=1` to rebuild it or
+`DEM_RESOLUTION=13` to request larger 1/3 arc-second USGS tiles.
+
+Raster files are sampled when these files exist:
 
 ```text
 data/raw/dem.tif
@@ -295,7 +300,10 @@ is to improve candidate generation as well as model training.
 
 - Field labels are still clustered by routes and work days.
 - Census roads and water layers are coarse compared with engineering GIS.
-- Terrain and hydrology rasters are optional and currently depend on local files.
+- The default USGS 3DEP DEM is useful but still coarser than project-specific
+  LiDAR-derived terrain products.
+- Flow accumulation and drainage area rasters are optional and currently depend
+  on local files.
 - A high score is a field-review priority, not a verified culvert inventory.
 - Better negatives are as valuable as better positives; `no_culvert` checks teach
   the model what to avoid.

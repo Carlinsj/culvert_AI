@@ -58,10 +58,11 @@ Model comparison includes:
 
 Current measured metrics:
 
-- Spatial holdout average precision: 0.635.
+- Spatial holdout average precision: 0.645.
 - Spatial holdout P@10: 1.000.
 - Training point rows: 140.
 - Class counts: 210 positives, 14,355 negatives.
+- Feature count: 70, including DEM-derived terrain features.
 
 Interpretation: the metrics are much stronger after adding exact field-report coordinate candidates.
 That is useful for learning from known points, but it does not prove perfect discovery of unseen
@@ -98,8 +99,10 @@ Implemented:
 - Need negative labels from field checks.
 - Need Vercel Blob attached and `BLOB_READ_WRITE_TOKEN` set so ABU/no-culvert marks persist.
 - Need official NYSDOT/county road and drainage layers.
-- Need DEM and hydrology rasters:
-  - `data/raw/dem.tif`
+- DEM support is now implemented:
+  - `data/raw/dem.tif` is generated from USGS 3DEP 1 arc-second tiles by default.
+  - Use `REFRESH_DEM=1` to rebuild and `DEM_RESOLUTION=13` for larger 1/3 arc-second tiles.
+- Need hydrology rasters:
   - `data/raw/flow_accumulation.tif`
   - `data/raw/drainage_area.tif`
 - Current Census road/water data is good enough for prototype ranking but not final research quality.
@@ -151,7 +154,7 @@ npm run build
 2. Add the missing third team's report path to `configs/field_report_inputs.txt` once available.
 3. Configure Vercel Blob and retraining worker env vars, then reopen the app on the same phone
    to sync any browser-local marks.
-4. Add DEM/flow/drainage rasters.
+4. Add flow/drainage rasters and test whether 1/3 arc-second DEM improves field-route precision.
 5. Replace Census roads/water with NYSDOT/county GIS.
 6. Add route/day field validation reports: precision at 10, 25, 50 using 10 m match radius.
 7. Add a simple UI summary for last retrain date, model name, training positives, ABU count, and spatial AP.

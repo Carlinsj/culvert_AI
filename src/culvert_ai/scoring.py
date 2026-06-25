@@ -11,13 +11,14 @@ from culvert_ai.io import ensure_parent_dir
 
 
 DEFAULT_WEIGHTS = {
-    "road_stream_proximity_score": 0.25,
-    "drainage_strength_score": 0.20,
-    "valley_position_score": 0.16,
-    "crossing_geometry_score": 0.10,
-    "terrain_break_score": 0.13,
-    "road_context_score": 0.10,
-    "osm_culvert_tag_score": 0.06,
+    "road_stream_proximity_score": 0.19,
+    "drainage_strength_score": 0.16,
+    "valley_position_score": 0.15,
+    "crossing_geometry_score": 0.08,
+    "terrain_break_score": 0.11,
+    "road_context_score": 0.07,
+    "dem_route_drainage_score": 0.12,
+    "osm_culvert_tag_score": 0.04,
     "field_report_support_score": 0.08,
 }
 
@@ -41,6 +42,7 @@ def score_unlabeled_candidates(
     scored["crossing_geometry_score"] = _crossing_geometry_score(scored)
     scored["terrain_break_score"] = _terrain_break_score(scored)
     scored["road_context_score"] = _road_context_score(scored)
+    scored["dem_route_drainage_score"] = _dem_route_drainage_score(scored)
     scored["osm_culvert_tag_score"] = _osm_culvert_tag_score(scored)
     scored["field_report_support_score"] = _field_report_support_score(scored)
     scored["non_culvert_structure_penalty"] = _non_culvert_structure_penalty(scored)
@@ -299,6 +301,43 @@ def _road_context_score(table: pd.DataFrame) -> pd.Series:
     return _mean_score(table, pieces)
 
 
+def _dem_route_drainage_score(table: pd.DataFrame) -> pd.Series:
+    route_signal = _route_sample_signal(table)
+    if route_signal.sum() == 0:
+        return _zero(table)
+
+    pieces = []
+    for column in ("valley_position_score", "terrain_break_score", "drainage_strength_score"):
+        if column in table.columns:
+            pieces.append(pd.to_numeric(table[column], errors="coerce").fillna(0.0).clip(0, 1))
+    if not pieces:
+        return _zero(table)
+
+    return (route_signal * _mean_score(table, pieces)).clip(0, 1)
+
+
+def _route_sample_signal(table: pd.DataFrame) -> pd.Series:
+    signal = pd.Series(0.0, index=table.index)
+    if "source_route_interval_sample" in table.columns:
+        signal = pd.Series(
+            np.maximum(
+                signal.to_numpy(),
+                pd.to_numeric(table["source_route_interval_sample"], errors="coerce")
+                .fillna(0.0)
+                .clip(0, 1)
+                .to_numpy(),
+            ),
+            index=table.index,
+        )
+    if "source" in table.columns:
+        source = table["source"].fillna("").astype(str).str.lower()
+        signal = pd.Series(
+            np.maximum(signal.to_numpy(), source.eq("route_interval_sample").astype(float).to_numpy()),
+            index=table.index,
+        )
+    return signal.clip(0, 1)
+
+
 def _evidence_summary(row: pd.Series) -> str:
     evidence = []
     thresholds = [
@@ -308,6 +347,7 @@ def _evidence_summary(row: pd.Series) -> str:
         ("crossing_geometry_score", "culvert-like crossing angle"),
         ("terrain_break_score", "terrain break or relief"),
         ("road_context_score", "road corridor context"),
+        ("dem_route_drainage_score", "DEM road low point or drainage dip"),
         ("osm_culvert_tag_score", "mapped culvert/tunnel signal"),
         ("field_report_support_score", "field report match"),
     ]

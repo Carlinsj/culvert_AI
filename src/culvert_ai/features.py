@@ -56,7 +56,9 @@ def build_feature_table(
         for radius in density_radii:
             column = _density_column("stream", radius)
             features[column] = _line_density(features.geometry, streams_m, radius)
-        features["stream_density_m_per_sqkm"] = features[_density_column("stream", density_radius_m)]
+        features["stream_density_m_per_sqkm"] = features[
+            _density_column("stream", density_radius_m)
+        ]
 
     if dem_path:
         features = add_raster_samples(features, dem_path, prefix="dem")
@@ -73,6 +75,7 @@ def build_feature_table(
     if landcover_path:
         features = add_raster_samples(features, landcover_path, prefix="landcover")
 
+    features = add_training_sample_weights(features)
     features = add_wgs84_coordinates(features)
     return features.reset_index(drop=True)
 
@@ -92,7 +95,9 @@ def add_candidate_derived_features(candidates: gpd.GeoDataFrame) -> gpd.GeoDataF
             1.0 - (features["crossing_angle_abs_from_90"] / 90.0)
         ).clip(0, 1)
 
-    if {"road_stream_proximity_signal", "crossing_angle_perpendicularity"}.issubset(features.columns):
+    if {"road_stream_proximity_signal", "crossing_angle_perpendicularity"}.issubset(
+        features.columns
+    ):
         features["crossing_geometry_signal"] = (
             0.65 * features["road_stream_proximity_signal"].fillna(0.0)
             + 0.35 * features["crossing_angle_perpendicularity"].fillna(0.0)
@@ -100,10 +105,14 @@ def add_candidate_derived_features(candidates: gpd.GeoDataFrame) -> gpd.GeoDataF
 
     if "source" in features.columns:
         source = features["source"].fillna("").astype(str).str.lower()
-        features["source_exact_intersection"] = source.eq("exact_road_stream_intersection").astype(int)
+        features["source_exact_intersection"] = source.eq("exact_road_stream_intersection").astype(
+            int
+        )
         features["source_nearest_approach"] = source.eq("nearest_road_stream_approach").astype(int)
         features["source_route_interval_sample"] = source.eq("route_interval_sample").astype(int)
-        features["source_field_report_observed"] = source.eq("field_report_observed_culvert").astype(int)
+        features["source_field_report_observed"] = source.eq(
+            "field_report_observed_culvert"
+        ).astype(int)
 
     for column in ("road_name", "stream_name", "matched_route"):
         if column in features.columns:
@@ -187,7 +196,9 @@ def add_negative_culvert_labels(
     negative_reset = negative_culverts.reset_index(drop=True)
     negative_by_candidate_id = {}
     if "candidate_id" in negative_reset.columns:
-        for negative_index, candidate_id in negative_reset["candidate_id"].fillna("").astype(str).items():
+        for negative_index, candidate_id in (
+            negative_reset["candidate_id"].fillna("").astype(str).items()
+        ):
             if candidate_id:
                 negative_by_candidate_id[candidate_id] = negative_reset.iloc[int(negative_index)]
 
@@ -197,7 +208,9 @@ def add_negative_culvert_labels(
         distance = float(distances.iloc[nearest_index])
         nearest = negative_reset.iloc[nearest_index]
         labeled.at[row_index, "dist_to_denied_culvert_m"] = distance
-        candidate_id = str(labeled.at[row_index, "candidate_id"]) if "candidate_id" in labeled else ""
+        candidate_id = (
+            str(labeled.at[row_index, "candidate_id"]) if "candidate_id" in labeled else ""
+        )
         exact_negative = negative_by_candidate_id.get(candidate_id)
         if exact_negative is not None:
             nearest = exact_negative
@@ -315,9 +328,9 @@ def add_dem_hydrology_proxies(points: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         enriched[f"low_slope_valley_score_{window_size}x{window_size}"] = (
             _robust_0_to_1(valley_depth) * slope_damping
         )
-        enriched[f"terrain_break_score_proxy_{window_size}x{window_size}"] = (
-            np.log1p(relief) * np.log1p(roughness)
-        )
+        enriched[f"terrain_break_score_proxy_{window_size}x{window_size}"] = np.log1p(
+            relief
+        ) * np.log1p(roughness)
         enriched[f"negative_tpi_{window_size}x{window_size}_m"] = (-tpi).clip(lower=0)
 
     return enriched
@@ -335,7 +348,65 @@ def add_hydrology_raster_features(points: gpd.GeoDataFrame, prefix: str) -> gpd.
     return enriched
 
 
-def _density_radii(base_radius_m: float, extra_radii_m: tuple[float, ...] | None) -> tuple[float, ...]:
+def add_training_sample_weights(points: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Weight field-confirmed labels above weak unlabeled pseudo-negatives."""
+
+    weighted = points.copy()
+    weights = pd.Series(0.25, index=weighted.index, dtype=float)
+
+    is_positive = _numeric_flag(weighted, "is_culvert")
+    is_denied = _numeric_flag(weighted, "field_denied")
+    is_abu_positive = is_positive & _field_observation_match(weighted)
+    is_field_positive = is_positive & ~is_abu_positive
+    is_missed_negative = is_denied & _string_contains(
+        weighted, "nearest_denied_notes", "confirmed culvert was"
+    )
+
+    weights.loc[is_field_positive] = 6.0
+    weights.loc[is_abu_positive] = 18.0
+    weights.loc[is_denied] = 12.0
+    weights.loc[is_missed_negative] = 16.0
+
+    weighted["training_sample_weight"] = weights
+    return weighted
+
+
+def _numeric_flag(table: pd.DataFrame, column: str) -> pd.Series:
+    if column not in table.columns:
+        return pd.Series(False, index=table.index)
+    return pd.to_numeric(table[column], errors="coerce").fillna(0).astype(int) == 1
+
+
+def _field_observation_match(table: pd.DataFrame) -> pd.Series:
+    source_columns = [
+        column
+        for column in ("field_report_source_file", "nearest_field_report_source_file")
+        if column in table.columns
+    ]
+    if not source_columns:
+        return pd.Series(False, index=table.index)
+
+    result = pd.Series(False, index=table.index)
+    for column in source_columns:
+        result |= (
+            table[column]
+            .fillna("")
+            .astype(str)
+            .str.lower()
+            .str.contains("field_observations.geojson", regex=False)
+        )
+    return result
+
+
+def _string_contains(table: pd.DataFrame, column: str, needle: str) -> pd.Series:
+    if column not in table.columns:
+        return pd.Series(False, index=table.index)
+    return table[column].fillna("").astype(str).str.contains(needle, case=False, regex=False)
+
+
+def _density_radii(
+    base_radius_m: float, extra_radii_m: tuple[float, ...] | None
+) -> tuple[float, ...]:
     radii = {float(base_radius_m), 50.0, 100.0, 250.0}
     if extra_radii_m:
         radii.update(float(radius) for radius in extra_radii_m)

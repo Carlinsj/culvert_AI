@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Culvert AI Field Review</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <link rel="stylesheet" href="styles.css?v=20260622-mobile-field" />
+    <link rel="stylesheet" href="styles.css?v=20260625-recenter" />
   </head>
   <body>
     <main class="app-shell">
@@ -113,6 +113,16 @@
           <button id="locate-me" class="locate-me" type="button" aria-pressed="false">
             Locate
           </button>
+          <button
+            id="recenter-location"
+            class="recenter-location"
+            type="button"
+            aria-label="Recenter map on my location"
+            hidden
+            disabled
+          >
+            <span class="recenter-icon" aria-hidden="true"></span>
+          </button>
         </div>
         <p id="location-status" class="location-status" role="status" aria-live="polite"></p>
         <div id="map"></div>
@@ -144,6 +154,6 @@
     </template>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="app.js?v=20260622-mobile-field"></script>
+    <script src="app.js?v=20260625-recenter"></script>
   </body>
 </html>

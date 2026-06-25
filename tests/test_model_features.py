@@ -19,6 +19,7 @@ def test_select_feature_columns_excludes_labels_and_coordinates():
             "has_matched_route": [1, 0],
             "route_sample_distance_m": [37.5, 0.0],
             "priority_seed": [0.0, 1.0],
+            "training_sample_weight": [18.0, 0.25],
             "road_id": [10, 11],
         }
     )

@@ -2,15 +2,15 @@
   "available": true,
   "selected_model": "hist_gradient_boosting",
   "selection_metric": "spatial_holdout_average_precision_then_cross_validated_average_precision",
-  "rows": 14565,
-  "positive_labels": 210,
-  "negative_labels": 14355,
+  "rows": 43224,
+  "positive_labels": 225,
+  "negative_labels": 42999,
   "training_points": 140,
-  "feature_count": 28,
-  "random_holdout_average_precision": 0.7014579502886309,
-  "random_holdout_roc_auc": 0.913924622930653,
-  "spatial_holdout_average_precision": 0.6347172178943571,
-  "spatial_holdout_roc_auc": 0.8273670666262174,
+  "feature_count": 70,
+  "random_holdout_average_precision": 0.6728167642730793,
+  "random_holdout_roc_auc": 0.9424784053156148,
+  "spatial_holdout_average_precision": 0.7113766247140972,
+  "spatial_holdout_roc_auc": 0.9621326356741109,
   "spatial_holdout_top10_precision": 1.0,
   "point_qc": {
     "rows": 176,
@@ -25,12 +25,12 @@
     {
       "path": "reports/actual_ulster_field_report_metrics.json",
       "exists": true,
-      "bytes": 11275
+      "bytes": 17568
     },
     {
       "path": "reports/extracted_points_analysis.json",
       "exists": true,
-      "bytes": 5996
+      "bytes": 5997
     },
     {
       "path": "data/processed/training_known_culverts.csv",

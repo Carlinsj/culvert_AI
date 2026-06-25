@@ -1,4 +1,5 @@
 import geopandas as gpd
+import numpy as np
 from shapely.geometry import Point
 
 from culvert_ai.scoring import build_discovery_ranking, score_unlabeled_candidates
@@ -46,6 +47,49 @@ def test_score_unlabeled_candidates_ranks_by_evidence():
     assert scored.iloc[0]["culvert_likelihood_score"] > scored.iloc[1]["culvert_likelihood_score"]
     assert "earth.google.com" in scored.iloc[0]["google_earth_url"]
     assert scored.iloc[0]["evidence_summary"]
+
+
+def test_score_unlabeled_candidates_promotes_dem_route_drainage_signal():
+    features = gpd.GeoDataFrame(
+        [
+            {
+                "candidate_id": "road-dip",
+                "source": "route_interval_sample",
+                "road_stream_distance_m": np.nan,
+                "valley_depth_9x9_m": 4.0,
+                "topographic_position_9x9_m": -2.0,
+                "topographic_wetness_proxy_9x9": 1.2,
+                "terrain_break_score_proxy_9x9": 5.0,
+                "stream_density_250m_m_per_sqkm": 90,
+                "road_density_250m_m_per_sqkm": 70,
+                "latitude": 42.09,
+                "longitude": -73.94,
+                "geometry": Point(-73.94, 42.09),
+            },
+            {
+                "candidate_id": "flat-road",
+                "source": "route_interval_sample",
+                "road_stream_distance_m": np.nan,
+                "valley_depth_9x9_m": 0.0,
+                "topographic_position_9x9_m": 1.0,
+                "topographic_wetness_proxy_9x9": 0.0,
+                "terrain_break_score_proxy_9x9": 0.2,
+                "stream_density_250m_m_per_sqkm": 5,
+                "road_density_250m_m_per_sqkm": 5,
+                "latitude": 42.10,
+                "longitude": -73.95,
+                "geometry": Point(-73.95, 42.10),
+            },
+        ],
+        geometry="geometry",
+        crs="EPSG:4326",
+    )
+
+    scored = score_unlabeled_candidates(features)
+
+    assert scored.iloc[0]["candidate_id"] == "road-dip"
+    assert scored.iloc[0]["dem_route_drainage_score"] > scored.iloc[1]["dem_route_drainage_score"]
+    assert "DEM road low point" in scored.iloc[0]["evidence_summary"]
 
 
 def test_discovery_ranking_prioritizes_undiscovered_candidates():
