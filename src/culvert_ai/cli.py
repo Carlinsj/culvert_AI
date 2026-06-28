@@ -21,7 +21,7 @@ from culvert_ai.dem import (
     usgs_3dep_base_url,
 )
 from culvert_ai.demo import create_demo_dataset, run_demo_pipeline
-from culvert_ai.evaluate import evaluate_predictions
+from culvert_ai.evaluate import evaluate_predictions, evaluate_success_rate_at_actuals
 from culvert_ai.features import build_feature_table
 from culvert_ai.field_reports import append_field_report_candidates, import_field_reports
 from culvert_ai.io import read_vector, write_vector
@@ -384,6 +384,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Also sample every parsed state, US, or interstate route corridor.",
     )
     road_candidates.add_argument("--interval-m", type=float, default=20.0)
+    road_candidates.add_argument(
+        "--lateral-offsets-m",
+        type=float,
+        nargs="*",
+        default=[0.0],
+        help="Optional lateral offsets from road centerline, e.g. 0 -8 8.",
+    )
     road_candidates.set_defaults(func=_build_road_candidates)
 
     merge_candidates = subparsers.add_parser(
@@ -513,6 +520,22 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--probability-threshold", type=float, default=0.7)
     evaluate.add_argument("--match-radius-m", type=float, default=30.0)
     evaluate.set_defaults(func=_evaluate)
+
+    success_rate = subparsers.add_parser(
+        "evaluate-success-rate",
+        help="Measure actual culverts with a prediction within a field distance tolerance.",
+    )
+    success_rate.add_argument("--predictions", required=True, help="Ranked prediction vector file.")
+    success_rate.add_argument("--actual-culverts", required=True, help="Actual/confirmed culvert points.")
+    success_rate.add_argument("--output", default="reports/field_success_rate.json")
+    success_rate.add_argument("--max-distance-m", type=float, default=15.0)
+    success_rate.add_argument(
+        "--include-known-matches",
+        action="store_true",
+        help="Count known/label rows as predictions. Default excludes them.",
+    )
+    success_rate.add_argument("--rank-limit", type=int, help="Evaluate only predictions up to this rank.")
+    success_rate.set_defaults(func=_evaluate_success_rate)
 
     return parser
 
@@ -690,6 +713,7 @@ def _build_road_candidates(args) -> dict:
         routes=routes,
         interval_m=args.interval_m,
         include_numbered_roads=args.all_numbered_roads,
+        lateral_offsets_m=tuple(args.lateral_offsets_m or [0.0]),
     )
     write_vector(output, args.output)
     return {
@@ -811,6 +835,19 @@ def _evaluate(args) -> dict:
         output_path=args.output,
         probability_threshold=args.probability_threshold,
         match_radius_m=args.match_radius_m,
+    )
+
+
+def _evaluate_success_rate(args) -> dict:
+    predictions = read_vector(args.predictions)
+    actual = read_vector(args.actual_culverts)
+    return evaluate_success_rate_at_actuals(
+        predictions,
+        actual,
+        output_path=args.output,
+        max_distance_m=args.max_distance_m,
+        exclude_known_matches=not args.include_known_matches,
+        rank_limit=args.rank_limit,
     )
 
 

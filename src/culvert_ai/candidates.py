@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from math import atan2, degrees, isnan
+from math import atan2, cos, degrees, isnan, radians, sin
 
 import geopandas as gpd
 import numpy as np
@@ -123,10 +123,12 @@ def generate_road_route_candidates(
     routes: list[str] | None = None,
     interval_m: float = 75.0,
     include_numbered_roads: bool = False,
+    lateral_offsets_m: tuple[float, ...] = (0.0,),
 ) -> gpd.GeoDataFrame:
     roads = clean_geometry(roads)
     if interval_m <= 0:
         raise ValueError("interval_m must be positive.")
+    lateral_offsets = _normalized_offsets(lateral_offsets_m)
 
     route_tokens = {_route_token(route) for route in routes or [] if _route_token(route)}
     if not route_tokens and not include_numbered_roads:
@@ -153,24 +155,27 @@ def generate_road_route_candidates(
                 distances = np.array([length / 2])
 
             for distance in distances:
-                point = line.interpolate(float(distance))
-                records.append(
-                    {
-                        "candidate_id": f"route_{len(records) + 1:06d}",
-                        "road_id": _row_identifier(road, road_pos, None, "road"),
-                        "stream_id": "",
-                        "road_name": road_name or "Unnamed road",
-                        "stream_name": "route sample",
-                        "road_highway": _first_value(road, ("highway", "HIGHWAY", "road_highway")),
-                        "source": "route_interval_sample",
-                        "matched_route": ",".join(matched),
-                        "route_sample_distance_m": float(distance),
-                        "route_part_index": int(part_index),
-                        "road_stream_distance_m": np.nan,
-                        "crossing_angle_degrees": np.nan,
-                        "geometry": point,
-                    }
-                )
+                center_point = line.interpolate(float(distance))
+                for offset_m in lateral_offsets:
+                    point = _offset_point_from_line(line, center_point, float(offset_m))
+                    records.append(
+                        {
+                            "candidate_id": f"route_{len(records) + 1:06d}",
+                            "road_id": _row_identifier(road, road_pos, None, "road"),
+                            "stream_id": "",
+                            "road_name": road_name or "Unnamed road",
+                            "stream_name": "route sample",
+                            "road_highway": _first_value(road, ("highway", "HIGHWAY", "road_highway")),
+                            "source": "route_interval_sample",
+                            "matched_route": ",".join(matched),
+                            "route_sample_distance_m": float(distance),
+                            "route_lateral_offset_m": float(offset_m),
+                            "route_part_index": int(part_index),
+                            "road_stream_distance_m": np.nan,
+                            "crossing_angle_degrees": np.nan,
+                            "geometry": point,
+                        }
+                    )
 
     if not records:
         return gpd.GeoDataFrame(
@@ -183,6 +188,7 @@ def generate_road_route_candidates(
                 "source",
                 "matched_route",
                 "route_sample_distance_m",
+                "route_lateral_offset_m",
                 "geometry",
             ],
             geometry="geometry",
@@ -337,6 +343,29 @@ def _line_parts(geometry):
             parts.extend(_line_parts(part))
         return parts
     return []
+
+
+def _normalized_offsets(offsets: tuple[float, ...]) -> tuple[float, ...]:
+    values = [float(value) for value in offsets]
+    if not values:
+        values = [0.0]
+    if 0.0 not in values:
+        values.insert(0, 0.0)
+    return tuple(dict.fromkeys(values))
+
+
+def _offset_point_from_line(line, point: Point, offset_m: float) -> Point:
+    if abs(offset_m) <= 1e-9:
+        return point
+
+    angle = _local_line_angle_degrees(line, point)
+    if angle is None:
+        return point
+
+    angle_rad = radians(angle)
+    normal_x = -sin(angle_rad)
+    normal_y = cos(angle_rad)
+    return Point(point.x + normal_x * offset_m, point.y + normal_y * offset_m)
 
 
 def _road_route_tokens(row: pd.Series) -> set[str]:

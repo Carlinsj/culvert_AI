@@ -73,6 +73,8 @@ def build_summary(
         ),
         "spatial_holdout_roc_auc": _nested_number(metrics, "spatial_holdout", "roc_auc"),
         "spatial_holdout_top10_precision": _top_k_precision(metrics, "spatial_holdout", 10),
+        "target_precision_floor": _float_or_none(metrics.get("target_precision_floor")),
+        "operating_threshold": metrics.get("operating_threshold"),
         "point_qc": _point_qc(point_analysis),
         "source_files": _source_files(metrics_path, point_analysis_path, training_points_path),
     }

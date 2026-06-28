@@ -363,7 +363,7 @@ def add_training_sample_weights(points: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     )
 
     weights.loc[is_field_positive] = 6.0
-    weights.loc[is_abu_positive] = 18.0
+    weights.loc[is_abu_positive] = 24.0
     weights.loc[is_denied] = 12.0
     weights.loc[is_missed_negative] = 16.0
 

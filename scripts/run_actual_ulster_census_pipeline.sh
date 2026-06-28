@@ -120,7 +120,8 @@ BUILD_NUMBERED_ROAD_CANDIDATES="${BUILD_NUMBERED_ROAD_CANDIDATES:-1}"
 if [ "$BUILD_NUMBERED_ROAD_CANDIDATES" = "1" ] || { [ -n "$EXTRACTED_POINTS_PATH" ] && [ -f "$EXTRACTED_POINTS_PATH" ] && [ "${ROUTE_COUNT:-0}" -gt 0 ]; }; then
   ROUTE_CANDIDATE_ARGS=(
     --roads data/raw/roads.gpkg
-    --interval-m "${ROUTE_SAMPLE_INTERVAL_M:-20}"
+    --interval-m "${ROUTE_SAMPLE_INTERVAL_M:-10}"
+    --lateral-offsets-m ${ROUTE_SAMPLE_OFFSETS_M:-0}
     --output data/interim/actual_ulster_route_candidates.gpkg
   )
   if [ "$BUILD_NUMBERED_ROAD_CANDIDATES" = "1" ]; then
@@ -299,10 +300,26 @@ DISCOVERY_ARGS+=(--known-radius-m 10)
 
 scripts/python.sh -m culvert_ai.cli build-discovery-ranking "${DISCOVERY_ARGS[@]}"
 
+if [ -f data/processed/confirmed_field_observations.gpkg ]; then
+  scripts/python.sh -m culvert_ai.cli evaluate-success-rate \
+    --predictions data/processed/actual_ulster_discovery_predictions.gpkg \
+    --actual-culverts data/processed/confirmed_field_observations.gpkg \
+    --output reports/field_success_rate_15m.json \
+    --max-distance-m 15
+fi
+
 scripts/python.sh -m culvert_ai.cli export-web \
   --predictions data/processed/actual_ulster_discovery_predictions.gpkg \
   --output-dir web/data \
-  --limit 1000
+  --limit "${WEB_EXPORT_LIMIT:-5000}"
+
+if [ -f data/processed/confirmed_field_observations.gpkg ]; then
+  scripts/python.sh -m culvert_ai.cli evaluate-success-rate \
+    --predictions web/data/findings.geojson \
+    --actual-culverts data/processed/confirmed_field_observations.gpkg \
+    --output reports/web_field_success_rate_15m.json \
+    --max-distance-m 15
+fi
 
 scripts/python.sh scripts/write_model_summary.py \
   --metrics reports/actual_ulster_field_report_metrics.json \

@@ -76,6 +76,8 @@ WEB_COLUMNS = [
     "road_density_250m_m_per_sqkm",
 ]
 
+FIELD_SUCCESS_EXPORT_RADIUS_M = 15.0
+
 
 def export_web_data(
     predictions_path: str | Path,
@@ -137,10 +139,26 @@ def _limit_for_web(predictions: gpd.GeoDataFrame, limit: int) -> gpd.GeoDataFram
 
     known = predictions[predictions["discovery_status"] == "known_field_match"]
     discovery = predictions[predictions["discovery_status"] != "known_field_match"].head(limit)
-    combined = pd.concat([discovery, known], ignore_index=True)
+    field_success_neighbors = _field_success_neighbors(predictions)
+    combined = pd.concat([discovery, field_success_neighbors, known], ignore_index=True)
     if "candidate_id" in combined.columns:
         combined = combined.drop_duplicates("candidate_id")
     return gpd.GeoDataFrame(combined, geometry="geometry", crs=predictions.crs)
+
+
+def _field_success_neighbors(predictions: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    if "dist_to_known_culvert_m" not in predictions.columns:
+        return predictions.head(0)
+
+    distance = pd.to_numeric(predictions["dist_to_known_culvert_m"], errors="coerce")
+    neighbors = predictions[
+        (predictions["discovery_status"] != "known_field_match")
+        & distance.notna()
+        & (distance <= FIELD_SUCCESS_EXPORT_RADIUS_M)
+    ].copy()
+    if "source" in neighbors.columns:
+        neighbors = neighbors[neighbors["source"] != "field_report_observed_culvert"]
+    return neighbors
 
 
 def _summary(table: gpd.GeoDataFrame, score_column: str | None) -> dict:

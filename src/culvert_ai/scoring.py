@@ -11,13 +11,13 @@ from culvert_ai.io import ensure_parent_dir
 
 
 DEFAULT_WEIGHTS = {
-    "road_stream_proximity_score": 0.19,
+    "road_stream_proximity_score": 0.16,
     "drainage_strength_score": 0.16,
     "valley_position_score": 0.15,
-    "crossing_geometry_score": 0.08,
-    "terrain_break_score": 0.11,
+    "crossing_geometry_score": 0.06,
+    "terrain_break_score": 0.12,
     "road_context_score": 0.07,
-    "dem_route_drainage_score": 0.12,
+    "dem_route_drainage_score": 0.18,
     "osm_culvert_tag_score": 0.04,
     "field_report_support_score": 0.08,
 }
@@ -307,13 +307,33 @@ def _dem_route_drainage_score(table: pd.DataFrame) -> pd.Series:
         return _zero(table)
 
     pieces = []
-    for column in ("valley_position_score", "terrain_break_score", "drainage_strength_score"):
+    for column in (
+        "valley_position_score",
+        "terrain_break_score",
+        "drainage_strength_score",
+        "topographic_wetness_proxy_9x9",
+        "topographic_wetness_proxy_15x15",
+        "topographic_wetness_proxy_31x31",
+        "low_slope_valley_score_9x9",
+        "low_slope_valley_score_15x15",
+        "low_slope_valley_score_31x31",
+        "negative_tpi_9x9_m",
+        "negative_tpi_15x15_m",
+        "negative_tpi_31x31_m",
+    ):
         if column in table.columns:
-            pieces.append(pd.to_numeric(table[column], errors="coerce").fillna(0.0).clip(0, 1))
+            pieces.append(_score_dem_route_column(table[column]))
     if not pieces:
         return _zero(table)
 
     return (route_signal * _mean_score(table, pieces)).clip(0, 1)
+
+
+def _score_dem_route_column(series: pd.Series) -> pd.Series:
+    numeric = pd.to_numeric(series, errors="coerce").fillna(0.0)
+    if numeric.max() <= 1.0 and numeric.min() >= 0.0:
+        return numeric.clip(0, 1)
+    return _percentile(numeric)
 
 
 def _route_sample_signal(table: pd.DataFrame) -> pd.Series:

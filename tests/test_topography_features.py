@@ -270,6 +270,6 @@ def test_training_sample_weights_prioritize_abu_inputs():
 
     assert weighted.loc["weak-unlabeled", "training_sample_weight"] == 0.25
     assert weighted.loc["report-positive", "training_sample_weight"] == 6.0
-    assert weighted.loc["abu-positive", "training_sample_weight"] == 18.0
+    assert weighted.loc["abu-positive", "training_sample_weight"] == 24.0
     assert weighted.loc["abu-denied", "training_sample_weight"] == 12.0
     assert weighted.loc["abu-missed", "training_sample_weight"] == 16.0

@@ -42,6 +42,9 @@ warnings.filterwarnings(
 )
 
 
+DEFAULT_TARGET_PRECISION = 0.60
+
+
 DEFAULT_EXCLUDED_FEATURES = {
     "is_culvert",
     "dist_to_known_culvert_m",
@@ -65,6 +68,7 @@ DEFAULT_EXCLUDED_FEATURES = {
     "dist_to_denied_culvert_m",
     "spatial_block_id",
     "route_sample_distance_m",
+    "route_lateral_offset_m",
     "route_part_index",
     "source_exact_intersection",
     "source_nearest_approach",
@@ -131,6 +135,7 @@ def train_model(
         "feature_columns": feature_columns,
         "rows": int(len(features)),
         "selection_metric": "spatial_holdout_average_precision_then_cross_validated_average_precision",
+        "target_precision_floor": DEFAULT_TARGET_PRECISION,
     }
     class_counts = y.value_counts().to_dict()
     metrics["class_counts"] = {str(k): int(v) for k, v in class_counts.items()}
@@ -184,6 +189,7 @@ def train_model(
             )
             if spatial_holdout:
                 metrics["spatial_holdout"] = spatial_holdout
+        metrics["operating_threshold"] = _operating_threshold_from_metrics(metrics)
     else:
         metrics["note"] = "Dataset too small for a reliable holdout split; trained on all rows."
 
@@ -202,6 +208,7 @@ def train_model(
         "training_rows": int(len(features)),
         "class_counts": metrics["class_counts"],
         "sample_weight": metrics["sample_weight"],
+        "operating_threshold": metrics.get("operating_threshold"),
     }
     ensure_parent_dir(model_output)
     joblib.dump(bundle, model_output)
@@ -436,6 +443,11 @@ def _fit_and_score(
     probabilities = fitted.predict_proba(x_test)[:, 1]
     predictions = (probabilities >= 0.5).astype(int)
     metrics = _classification_metrics(y_test, predictions, probabilities)
+    metrics["precision_floor_60"] = _precision_floor_operating_point(
+        y_test,
+        probabilities,
+        target_precision=DEFAULT_TARGET_PRECISION,
+    )
     metrics["rows_train"] = int(len(x_train))
     metrics["rows_test"] = int(len(x_test))
     metrics["top_k"] = _top_k_metrics(y_test, probabilities, top_k)
@@ -618,6 +630,66 @@ def _classification_metrics(y_true, y_pred, y_probability) -> dict:
     if len(set(y_true)) > 1:
         metrics["roc_auc"] = float(roc_auc_score(y_true, y_probability))
     return metrics
+
+
+def _precision_floor_operating_point(
+    y_true,
+    y_probability,
+    target_precision: float = DEFAULT_TARGET_PRECISION,
+) -> dict:
+    table = pd.DataFrame({"target": list(y_true), "probability": list(y_probability)})
+    table = table.sort_values("probability", ascending=False).reset_index(drop=True)
+    positives = int(table["target"].sum())
+    if table.empty or positives == 0:
+        return {
+            "target_precision": float(target_precision),
+            "meets_precision_floor": False,
+            "threshold": None,
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "predicted_positive_count": 0,
+            "hits": 0,
+        }
+
+    rows = []
+    for threshold in sorted(table["probability"].dropna().unique(), reverse=True):
+        selected = table[table["probability"] >= threshold]
+        predicted = int(len(selected))
+        if predicted == 0:
+            continue
+        hits = int(selected["target"].sum())
+        precision = hits / predicted
+        recall = hits / positives
+        f1 = (2 * precision * recall / (precision + recall)) if precision + recall else 0.0
+        rows.append(
+            {
+                "target_precision": float(target_precision),
+                "meets_precision_floor": precision >= target_precision,
+                "threshold": float(threshold),
+                "precision": float(precision),
+                "recall": float(recall),
+                "f1": float(f1),
+                "predicted_positive_count": predicted,
+                "hits": hits,
+            }
+        )
+
+    passing = [row for row in rows if row["meets_precision_floor"]]
+    if passing:
+        return max(passing, key=lambda row: (row["recall"], row["predicted_positive_count"], row["f1"]))
+    return max(rows, key=lambda row: (row["precision"], row["recall"]))
+
+
+def _operating_threshold_from_metrics(metrics: dict) -> dict | None:
+    for section in ("spatial_holdout", "random_holdout"):
+        operating_point = (metrics.get(section) or {}).get("precision_floor_60")
+        if operating_point:
+            return {
+                **operating_point,
+                "source": section,
+            }
+    return None
 
 
 def _top_k_metrics(y_true, y_probability, top_k: tuple[int, ...]) -> list[dict]:

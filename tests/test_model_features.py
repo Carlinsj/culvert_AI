@@ -1,6 +1,6 @@
 import pandas as pd
 
-from culvert_ai.model import select_feature_columns
+from culvert_ai.model import _precision_floor_operating_point, select_feature_columns
 
 
 def test_select_feature_columns_excludes_labels_and_coordinates():
@@ -18,6 +18,7 @@ def test_select_feature_columns_excludes_labels_and_coordinates():
             "source_exact_intersection": [0, 1],
             "has_matched_route": [1, 0],
             "route_sample_distance_m": [37.5, 0.0],
+            "route_lateral_offset_m": [8.0, 0.0],
             "priority_seed": [0.0, 1.0],
             "training_sample_weight": [18.0, 0.25],
             "road_id": [10, 11],
@@ -28,3 +29,16 @@ def test_select_feature_columns_excludes_labels_and_coordinates():
         "road_stream_distance_m",
         "stream_density_m_per_sqkm",
     ]
+
+
+def test_precision_floor_operating_point_finds_60_percent_cutoff():
+    operating_point = _precision_floor_operating_point(
+        y_true=[1, 0, 1, 0, 1, 0],
+        y_probability=[0.95, 0.9, 0.8, 0.7, 0.65, 0.1],
+        target_precision=0.60,
+    )
+
+    assert operating_point["meets_precision_floor"] is True
+    assert operating_point["precision"] >= 0.60
+    assert operating_point["threshold"] == 0.65
+    assert operating_point["predicted_positive_count"] == 5

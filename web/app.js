@@ -401,9 +401,10 @@ function renderModelQuality() {
   const modelName = formatModelName(summary.selected_model);
   const spatialAp = formatMetric(summary.spatial_holdout_average_precision);
   const precisionAt10 = formatMetric(summary.spatial_holdout_top10_precision);
+  const operatingPrecision = formatOperatingPrecision(summary.operating_threshold);
   const labels = Number(summary.training_points ?? summary.positive_labels ?? 0);
   els.modelQuality.textContent =
-    `${modelName} · spatial AP ${spatialAp} · P@10 ${precisionAt10} · ${labels} QC labels`;
+    `${modelName} · spatial AP ${spatialAp} · P@10 ${precisionAt10} · ${operatingPrecision} · ${labels} QC labels`;
 }
 
 function formatModelName(value) {
@@ -417,6 +418,14 @@ function formatModelName(value) {
 function formatMetric(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number.toFixed(3) : "n/a";
+}
+
+function formatOperatingPrecision(operatingThreshold) {
+  const precision = Number(operatingThreshold?.precision);
+  const target = Number(operatingThreshold?.target_precision);
+  if (!Number.isFinite(precision)) return "floor n/a";
+  const label = Number.isFinite(target) ? `floor ${Math.round(target * 100)}%` : "floor";
+  return `${label} met: ${Math.round(precision * 100)}%`;
 }
 
 function render() {
