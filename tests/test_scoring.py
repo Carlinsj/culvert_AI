@@ -98,6 +98,47 @@ def test_score_unlabeled_candidates_promotes_dem_route_drainage_signal():
     assert "DEM road low point" in scored.iloc[0]["evidence_summary"]
 
 
+def test_score_unlabeled_candidates_promotes_field_confirmed_corridor():
+    features = gpd.GeoDataFrame(
+        [
+            {
+                "candidate_id": "near-abu-corridor",
+                "source": "route_interval_sample",
+                "road_stream_distance_m": np.nan,
+                "dist_to_known_culvert_m": 450.0,
+                "nearest_field_report_source_file": "field_observations.geojson",
+                "valley_depth_9x9_m": 1.0,
+                "stream_density_250m_m_per_sqkm": 20,
+                "road_density_250m_m_per_sqkm": 20,
+                "latitude": 42.12,
+                "longitude": -73.94,
+                "geometry": Point(-73.94, 42.12),
+            },
+            {
+                "candidate_id": "far-route-sample",
+                "source": "route_interval_sample",
+                "road_stream_distance_m": np.nan,
+                "dist_to_known_culvert_m": 2500.0,
+                "nearest_field_report_source_file": "field_observations.geojson",
+                "valley_depth_9x9_m": 1.0,
+                "stream_density_250m_m_per_sqkm": 20,
+                "road_density_250m_m_per_sqkm": 20,
+                "latitude": 42.13,
+                "longitude": -73.95,
+                "geometry": Point(-73.95, 42.13),
+            },
+        ],
+        geometry="geometry",
+        crs="EPSG:4326",
+    )
+
+    scored = score_unlabeled_candidates(features)
+
+    assert scored.iloc[0]["candidate_id"] == "near-abu-corridor"
+    assert scored.iloc[0]["field_corridor_support_score"] > 0
+    assert "field-confirmed culvert corridor" in scored.iloc[0]["evidence_summary"]
+
+
 def test_discovery_ranking_prioritizes_undiscovered_candidates():
     evidence = gpd.GeoDataFrame(
         [
@@ -137,6 +178,42 @@ def test_discovery_ranking_prioritizes_undiscovered_candidates():
     assert ranked.iloc[0]["candidate_id"] == "new"
     assert ranked.iloc[0]["discovery_status"] == "undiscovered_candidate"
     assert ranked.iloc[1]["discovery_status"] == "known_field_match"
+
+
+def test_discovery_ranking_applies_field_corridor_floor_to_route_samples():
+    evidence = gpd.GeoDataFrame(
+        [
+            {
+                "candidate_id": "corridor",
+                "source": "route_interval_sample",
+                "culvert_likelihood_score": 35.0,
+                "field_corridor_support_score": 0.50,
+                "is_culvert": 0,
+                "dist_to_known_culvert_m": 450.0,
+                "latitude": 42.12,
+                "longitude": -73.94,
+                "geometry": Point(-73.94, 42.12),
+            },
+            {
+                "candidate_id": "other",
+                "source": "route_interval_sample",
+                "culvert_likelihood_score": 48.0,
+                "field_corridor_support_score": 0.0,
+                "is_culvert": 0,
+                "dist_to_known_culvert_m": 3000.0,
+                "latitude": 42.13,
+                "longitude": -73.95,
+                "geometry": Point(-73.95, 42.13),
+            },
+        ],
+        geometry="geometry",
+        crs="EPSG:4326",
+    )
+
+    ranked = build_discovery_ranking(evidence, known_radius_m=10).set_index("candidate_id")
+
+    assert ranked.loc["corridor", "discovery_score"] >= 62
+    assert ranked.loc["corridor", "discovery_score"] > ranked.loc["other", "discovery_score"]
 
 
 def test_discovery_ranking_does_not_count_50m_as_known_match():

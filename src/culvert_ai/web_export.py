@@ -43,6 +43,7 @@ WEB_COLUMNS = [
     "dem_route_drainage_score",
     "osm_culvert_tag_score",
     "field_report_support_score",
+    "field_corridor_support_score",
     "non_culvert_structure_penalty",
     "dist_to_known_culvert_m",
     "is_culvert",

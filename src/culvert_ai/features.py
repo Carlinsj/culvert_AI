@@ -428,12 +428,13 @@ def _nearest_distance(points: Iterable, targets: gpd.GeoDataFrame) -> list[float
 def _line_density(points: Iterable, lines: gpd.GeoDataFrame, radius_m: float) -> list[float]:
     area_sqkm = np.pi * radius_m * radius_m / 1_000_000
     densities = []
+    line_geometries = lines.geometry.to_numpy()
 
     for point in points:
         buffer = point.buffer(radius_m)
         total_length_m = 0.0
         for position in _query_positions(lines, buffer):
-            segment = lines.iloc[int(position)].geometry.intersection(buffer)
+            segment = line_geometries[int(position)].intersection(buffer)
             if not segment.is_empty:
                 total_length_m += float(segment.length)
         densities.append(total_length_m / area_sqkm if area_sqkm else 0.0)

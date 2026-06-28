@@ -14,12 +14,13 @@ DEFAULT_WEIGHTS = {
     "road_stream_proximity_score": 0.16,
     "drainage_strength_score": 0.16,
     "valley_position_score": 0.15,
-    "crossing_geometry_score": 0.06,
+    "crossing_geometry_score": 0.05,
     "terrain_break_score": 0.12,
-    "road_context_score": 0.07,
+    "road_context_score": 0.05,
     "dem_route_drainage_score": 0.18,
     "osm_culvert_tag_score": 0.04,
     "field_report_support_score": 0.08,
+    "field_corridor_support_score": 0.12,
 }
 
 
@@ -45,6 +46,7 @@ def score_unlabeled_candidates(
     scored["dem_route_drainage_score"] = _dem_route_drainage_score(scored)
     scored["osm_culvert_tag_score"] = _osm_culvert_tag_score(scored)
     scored["field_report_support_score"] = _field_report_support_score(scored)
+    scored["field_corridor_support_score"] = _field_corridor_support_score(scored)
     scored["non_culvert_structure_penalty"] = _non_culvert_structure_penalty(scored)
 
     total_weight = sum(weights.values())
@@ -134,6 +136,14 @@ def build_discovery_ranking(
     ranked["model_probability_score"] = (model_probability.fillna(0.0) * 100).clip(0, 100)
     ranked["model_rank_score"] = (model_rank_score.fillna(0.0) * 100).clip(0, 100)
     ranked["discovery_score"] = (blended.fillna(evidence_score).fillna(0.0) * 100).clip(0, 100)
+    corridor_score = _score_0_to_1(ranked, "field_corridor_support_score", scale=1.0).fillna(0.0)
+    route_signal = _route_sample_signal(ranked)
+    corridor_floor = ((0.45 + 0.35 * corridor_score) * route_signal * 100).clip(0, 100)
+    unknown = ~(denied | known)
+    ranked.loc[unknown, "discovery_score"] = np.maximum(
+        ranked.loc[unknown, "discovery_score"],
+        corridor_floor.loc[unknown],
+    )
     ranked.loc[denied, ["evidence_score", "model_probability_score", "model_rank_score", "discovery_score"]] = 0
 
     sort_table = ranked.assign(_known_sort=known.astype(int))
@@ -361,18 +371,19 @@ def _route_sample_signal(table: pd.DataFrame) -> pd.Series:
 def _evidence_summary(row: pd.Series) -> str:
     evidence = []
     thresholds = [
-        ("road_stream_proximity_score", "road-drainage crossing"),
-        ("drainage_strength_score", "strong drainage signal"),
-        ("valley_position_score", "valley/low-point terrain"),
-        ("crossing_geometry_score", "culvert-like crossing angle"),
-        ("terrain_break_score", "terrain break or relief"),
-        ("road_context_score", "road corridor context"),
-        ("dem_route_drainage_score", "DEM road low point or drainage dip"),
-        ("osm_culvert_tag_score", "mapped culvert/tunnel signal"),
-        ("field_report_support_score", "field report match"),
+        ("road_stream_proximity_score", "road-drainage crossing", 0.6),
+        ("drainage_strength_score", "strong drainage signal", 0.6),
+        ("valley_position_score", "valley/low-point terrain", 0.6),
+        ("crossing_geometry_score", "culvert-like crossing angle", 0.6),
+        ("terrain_break_score", "terrain break or relief", 0.6),
+        ("road_context_score", "road corridor context", 0.6),
+        ("dem_route_drainage_score", "DEM road low point or drainage dip", 0.6),
+        ("osm_culvert_tag_score", "mapped culvert/tunnel signal", 0.6),
+        ("field_report_support_score", "field report match", 0.6),
+        ("field_corridor_support_score", "field-confirmed culvert corridor", 0.3),
     ]
-    for column, label in thresholds:
-        if float(row.get(column, 0) or 0) >= 0.6:
+    for column, label, threshold in thresholds:
+        if float(row.get(column, 0) or 0) >= threshold:
             evidence.append(label)
     return "; ".join(evidence) if evidence else "weak evidence; review only if nearby"
 
@@ -402,6 +413,34 @@ def _field_report_support_score(table: pd.DataFrame) -> pd.Series:
         distance = pd.to_numeric(table["dist_to_known_culvert_m"], errors="coerce")
         pieces.append((1.0 / (1.0 + distance.clip(lower=0) / 35.0)).fillna(0.0).clip(0, 1))
     return _mean_score(table, pieces)
+
+
+def _field_corridor_support_score(table: pd.DataFrame) -> pd.Series:
+    if "dist_to_known_culvert_m" not in table.columns:
+        return _zero(table)
+
+    distance = pd.to_numeric(table["dist_to_known_culvert_m"], errors="coerce")
+    route_signal = _route_sample_signal(table)
+    field_observation = _nearest_source_contains(table, "field_observations.geojson")
+    max_distance = pd.Series(np.where(field_observation, 1500.0, 500.0), index=table.index)
+    scale = pd.Series(np.where(field_observation, 300.0, 150.0), index=table.index)
+    score = (1.0 / (1.0 + distance.clip(lower=0) / scale)).where(distance <= max_distance, 0.0)
+    return (route_signal * score.fillna(0.0)).clip(0, 1)
+
+
+def _nearest_source_contains(table: pd.DataFrame, needle: str) -> pd.Series:
+    columns = [
+        column
+        for column in ("nearest_field_report_source_file", "field_report_source_file")
+        if column in table.columns
+    ]
+    if not columns:
+        return pd.Series(False, index=table.index)
+
+    result = pd.Series(False, index=table.index)
+    for column in columns:
+        result |= table[column].fillna("").astype(str).str.contains(needle, case=False, regex=False)
+    return result
 
 
 def _attach_supervised_probability(

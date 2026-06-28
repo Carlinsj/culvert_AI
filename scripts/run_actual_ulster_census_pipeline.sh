@@ -118,22 +118,37 @@ PY
 fi
 BUILD_NUMBERED_ROAD_CANDIDATES="${BUILD_NUMBERED_ROAD_CANDIDATES:-1}"
 if [ "$BUILD_NUMBERED_ROAD_CANDIDATES" = "1" ] || { [ -n "$EXTRACTED_POINTS_PATH" ] && [ -f "$EXTRACTED_POINTS_PATH" ] && [ "${ROUTE_COUNT:-0}" -gt 0 ]; }; then
-  ROUTE_CANDIDATE_ARGS=(
-    --roads data/raw/roads.gpkg
-    --interval-m "${ROUTE_SAMPLE_INTERVAL_M:-10}"
-    --lateral-offsets-m ${ROUTE_SAMPLE_OFFSETS_M:-0}
-    --output data/interim/actual_ulster_route_candidates.gpkg
-  )
+  ROUTE_CANDIDATE_INPUTS=()
   if [ "$BUILD_NUMBERED_ROAD_CANDIDATES" = "1" ]; then
-    ROUTE_CANDIDATE_ARGS+=(--all-numbered-roads)
+    ROUTE_CANDIDATE_ARGS=(
+      --roads data/raw/roads.gpkg
+      --interval-m "${ROUTE_SAMPLE_INTERVAL_M:-10}"
+      --lateral-offsets-m ${ROUTE_NUMBERED_SAMPLE_OFFSETS_M:-0}
+      --output data/interim/actual_ulster_route_candidates.gpkg
+      --all-numbered-roads
+    )
+    scripts/python.sh -m culvert_ai.cli build-road-candidates "${ROUTE_CANDIDATE_ARGS[@]}"
+    ROUTE_CANDIDATE_INPUTS+=(data/interim/actual_ulster_route_candidates.gpkg)
   fi
-  if [ -n "$EXTRACTED_POINTS_PATH" ] && [ -f "$EXTRACTED_POINTS_PATH" ] && [ "${ROUTE_COUNT:-0}" -gt 0 ]; then
-    ROUTE_CANDIDATE_ARGS+=(--routes-from "$EXTRACTED_POINTS_PATH")
+  ROUTE_CORRIDOR_SAMPLE_ROUTES="${ROUTE_CORRIDOR_SAMPLE_ROUTES:-US 9W:State Rte 212:State Rte 32A}"
+  ROUTE_CORRIDOR_ARGS=()
+  if [ -n "$ROUTE_CORRIDOR_SAMPLE_ROUTES" ]; then
+    IFS=":" read -r -a ROUTE_CORRIDOR_ARGS <<< "$ROUTE_CORRIDOR_SAMPLE_ROUTES"
   fi
-  scripts/python.sh -m culvert_ai.cli build-road-candidates "${ROUTE_CANDIDATE_ARGS[@]}"
+  if [ "${#ROUTE_CORRIDOR_ARGS[@]}" -gt 0 ]; then
+    OBSERVED_ROUTE_CANDIDATE_ARGS=(
+      --roads data/raw/roads.gpkg
+      --interval-m "${ROUTE_CORRIDOR_SAMPLE_INTERVAL_M:-10}"
+      --lateral-offsets-m ${ROUTE_CORRIDOR_SAMPLE_OFFSETS_M:--8 8}
+      --output data/interim/actual_ulster_observed_route_candidates.gpkg
+      --routes "${ROUTE_CORRIDOR_ARGS[@]}"
+    )
+    scripts/python.sh -m culvert_ai.cli build-road-candidates "${OBSERVED_ROUTE_CANDIDATE_ARGS[@]}"
+    ROUTE_CANDIDATE_INPUTS+=(data/interim/actual_ulster_observed_route_candidates.gpkg)
+  fi
 
   scripts/python.sh -m culvert_ai.cli merge-candidates \
-    --inputs data/interim/actual_ulster_candidates.gpkg data/interim/actual_ulster_route_candidates.gpkg \
+    --inputs data/interim/actual_ulster_candidates.gpkg "${ROUTE_CANDIDATE_INPUTS[@]}" \
     --output data/interim/actual_ulster_candidates_with_route_samples.gpkg
   CANDIDATES_PATH="data/interim/actual_ulster_candidates_with_route_samples.gpkg"
 fi
