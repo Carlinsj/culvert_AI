@@ -15,6 +15,7 @@ const NEARBY_FOCUS_LIMIT = 12;
 const FIELD_CONTEXT_RADIUS_M = 100;
 const PREDICTION_HIT_RADIUS_M = 10;
 const SELECTED_POINT_ZOOM = 16;
+const SELECTED_POINT_MAX_ZOOM_STEP = 1;
 const SELECTION_POPUP_DELAY_MS = 460;
 const LOCATION_FOCUS_ZOOM = 16;
 const LOCATION_MIN_MOVE_M = 4;
@@ -686,9 +687,10 @@ function scrollDetailIntoViewOnMobile() {
 
 function centerMapOnPoint(latLng) {
   state.map.stop();
-  const zoom = Math.max(state.map.getZoom(), SELECTED_POINT_ZOOM);
+  const currentZoom = state.map.getZoom();
+  const zoom = selectedPointTargetZoom(currentZoom);
   const mobile = isMobileViewport();
-  if (mobile && state.map.getZoom() >= SELECTED_POINT_ZOOM) {
+  if (mobile && currentZoom >= SELECTED_POINT_ZOOM) {
     state.map.panTo(latLng, {
       animate: true,
       duration: 0.18,
@@ -699,9 +701,14 @@ function centerMapOnPoint(latLng) {
 
   state.map.flyTo(latLng, zoom, {
     animate: true,
-    duration: mobile ? 0.2 : 0.32,
-    easeLinearity: 0.3,
+    duration: mobile ? 0.28 : 0.42,
+    easeLinearity: 0.25,
   });
+}
+
+function selectedPointTargetZoom(currentZoom) {
+  if (currentZoom >= SELECTED_POINT_ZOOM) return currentZoom;
+  return Math.min(SELECTED_POINT_ZOOM, currentZoom + SELECTED_POINT_MAX_ZOOM_STEP);
 }
 
 function openSelectedPopup(marker, delayed) {
@@ -1229,13 +1236,19 @@ function createCandidateCanvasLayer() {
       this._canvas.setAttribute("aria-hidden", "true");
       map.getPanes().overlayPane.appendChild(this._canvas);
       this._bringToFront();
-      map.on("move zoom resize zoomend moveend viewreset", this._scheduleRedraw, this);
+      map.on("resize zoomend moveend viewreset", this._scheduleRedraw, this);
+      if (map.options.zoomAnimation && L.Browser.any3d) {
+        map.on("zoomanim", this._animateZoom, this);
+      }
       map.on("click", this._handleClick, this);
       this._scheduleRedraw();
     },
 
     onRemove(map) {
-      map.off("move zoom resize zoomend moveend viewreset", this._scheduleRedraw, this);
+      map.off("resize zoomend moveend viewreset", this._scheduleRedraw, this);
+      if (map.options.zoomAnimation && L.Browser.any3d) {
+        map.off("zoomanim", this._animateZoom, this);
+      }
       map.off("click", this._handleClick, this);
       if (this._frame) {
         window.cancelAnimationFrame(this._frame);
@@ -1261,6 +1274,17 @@ function createCandidateCanvasLayer() {
       if (this._canvas?.parentNode) {
         this._canvas.parentNode.appendChild(this._canvas);
       }
+    },
+
+    _animateZoom(event) {
+      if (!this._map || !this._canvas) return;
+      const scale = this._map.getZoomScale(event.zoom);
+      const offset = this._map._latLngBoundsToNewLayerBounds(
+        this._map.getBounds(),
+        event.zoom,
+        event.center,
+      ).min;
+      L.DomUtil.setTransform(this._canvas, offset, scale);
     },
 
     _scheduleRedraw() {
