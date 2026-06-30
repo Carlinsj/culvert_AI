@@ -150,15 +150,20 @@ function setupMap() {
   state.map = L.map("map", {
     zoomControl: true,
     preferCanvas: true,
-    zoomDelta: 0.5,
-    zoomSnap: 0.5,
-    wheelDebounceTime: 80,
-    wheelPxPerZoomLevel: 180,
+    zoomAnimation: true,
+    markerZoomAnimation: true,
+    zoomDelta: 1,
+    zoomSnap: 1,
+    wheelDebounceTime: 90,
+    wheelPxPerZoomLevel: 240,
   }).setView([41.73, -74.03], 12);
 
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: MAP_MAX_ZOOM,
     maxNativeZoom: OSM_MAX_NATIVE_ZOOM,
+    updateWhenIdle: true,
+    updateWhenZooming: false,
+    keepBuffer: 4,
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
   }).addTo(state.map);
 
@@ -701,8 +706,8 @@ function centerMapOnPoint(latLng) {
 
   state.map.flyTo(latLng, zoom, {
     animate: true,
-    duration: mobile ? 0.28 : 0.42,
-    easeLinearity: 0.25,
+    duration: mobile ? 0.34 : 0.5,
+    easeLinearity: 0.18,
   });
 }
 
@@ -1236,7 +1241,9 @@ function createCandidateCanvasLayer() {
       this._canvas.setAttribute("aria-hidden", "true");
       map.getPanes().overlayPane.appendChild(this._canvas);
       this._bringToFront();
-      map.on("resize zoomend moveend viewreset", this._scheduleRedraw, this);
+      map.on("resize moveend viewreset", this._scheduleRedraw, this);
+      map.on("zoomstart", this._handleZoomStart, this);
+      map.on("zoomend", this._handleZoomEnd, this);
       if (map.options.zoomAnimation && L.Browser.any3d) {
         map.on("zoomanim", this._animateZoom, this);
       }
@@ -1245,7 +1252,9 @@ function createCandidateCanvasLayer() {
     },
 
     onRemove(map) {
-      map.off("resize zoomend moveend viewreset", this._scheduleRedraw, this);
+      map.off("resize moveend viewreset", this._scheduleRedraw, this);
+      map.off("zoomstart", this._handleZoomStart, this);
+      map.off("zoomend", this._handleZoomEnd, this);
       if (map.options.zoomAnimation && L.Browser.any3d) {
         map.off("zoomanim", this._animateZoom, this);
       }
@@ -1274,6 +1283,23 @@ function createCandidateCanvasLayer() {
       if (this._canvas?.parentNode) {
         this._canvas.parentNode.appendChild(this._canvas);
       }
+    },
+
+    _handleZoomStart() {
+      if (this._canvas) {
+        L.DomUtil.addClass(this._canvas, "is-zooming");
+      }
+    },
+
+    _handleZoomEnd() {
+      this._scheduleRedraw();
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          if (this._canvas) {
+            L.DomUtil.removeClass(this._canvas, "is-zooming");
+          }
+        });
+      });
     },
 
     _animateZoom(event) {

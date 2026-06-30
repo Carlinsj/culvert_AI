@@ -997,6 +997,21 @@ output {
   pointer-events: none;
 }
 
+.candidate-canvas {
+  opacity: 1;
+  transition: opacity 90ms ease-out;
+  will-change: opacity, transform;
+}
+
+.candidate-canvas.is-zooming {
+  opacity: 0;
+}
+
+.leaflet-tile-container,
+.leaflet-zoom-animated {
+  will-change: transform;
+}
+
 .known-marker .marker-dot {
   border-color: #111;
   opacity: 0.78;
