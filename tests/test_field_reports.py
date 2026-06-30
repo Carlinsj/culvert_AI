@@ -149,3 +149,4 @@ def test_append_field_report_candidates_continues_existing_field_ids(tmp_path):
 
     combined = read_vector(output_path)
     assert combined["candidate_id"].tolist() == ["cand_000001", "field_000012", "field_000013"]
+    assert pd.isna(combined.iloc[-1]["road_stream_distance_m"])

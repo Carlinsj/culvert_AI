@@ -22,6 +22,10 @@ const LOCATION_LIST_THROTTLE_MS = 650;
 const LOCATION_RECENTER_THRESHOLD_M = 120;
 const OSM_MAX_NATIVE_ZOOM = 19;
 const MAP_MAX_ZOOM = 20;
+const MAX_LIST_ITEMS = 250;
+const CANDIDATE_HIT_TOLERANCE_PX = 8;
+const CANDIDATE_LABEL_MIN_ZOOM = 18;
+const CANDIDATE_LABEL_MAX_POINTS = 260;
 
 const MARKER_COLORS = {
   very_high: "#8f8a00",
@@ -35,23 +39,25 @@ const state = {
   features: [],
   filtered: [],
   observations: [],
-  markers: new Map(),
+  featureById: new Map(),
+  candidateLayer: null,
   observationMarkers: new Map(),
   selectedId: null,
   selectedObservationId: null,
   listView: "ranked",
-  layer: null,
-  knownLayer: null,
   observationLayer: null,
   locationLayer: null,
-  scoreLabelLayer: null,
+  draftPointLayer: null,
   map: null,
   placingPoint: false,
+  draftPointMarker: null,
+  draftPointFieldId: "",
   locationWatchId: null,
   userLocation: null,
   locationMarker: null,
   locationAccuracyCircle: null,
   lastLocationListRenderAt: 0,
+  listDiscoveryCount: 0,
   shouldFocusLocationOnNextUpdate: false,
   modelSummary: null,
 };
@@ -105,9 +111,11 @@ async function init() {
   updateBackendStatus();
 
   try {
+    const dataUrls = hasApiBackend() ? DATA_URLS : ["data/findings.geojson"];
+    const summaryUrls = hasApiBackend() ? SUMMARY_URLS : ["data/summary.json"];
     const [geojson, summary, observations, modelSummary] = await Promise.all([
-      fetchFirst(DATA_URLS),
-      fetchFirst(SUMMARY_URLS),
+      fetchFirst(dataUrls),
+      fetchFirst(summaryUrls),
       fetchObservations(),
       fetchFirstOptional(MODEL_SUMMARY_URLS),
     ]);
@@ -125,6 +133,7 @@ function applyDashboardData(geojson, summary, observations, options = {}) {
   const selectedObservationId = options.preserveSelection ? state.selectedObservationId : null;
   const observationFeatures = Array.isArray(observations) ? observations : observations?.features || [];
   state.features = (geojson.features || []).map(normalizeFeature);
+  state.featureById = new Map(state.features.map((feature) => [idOf(feature), feature]));
   state.filtered = state.features;
   state.observations = mergeObservations([...observationFeatures, ...loadLocalObservations()]);
   state.selectedId = selectedId && state.features.some((feature) => idOf(feature) === selectedId) ? selectedId : null;
@@ -140,6 +149,10 @@ function setupMap() {
   state.map = L.map("map", {
     zoomControl: true,
     preferCanvas: true,
+    zoomDelta: 0.5,
+    zoomSnap: 0.5,
+    wheelDebounceTime: 80,
+    wheelPxPerZoomLevel: 180,
   }).setView([41.73, -74.03], 12);
 
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -148,11 +161,10 @@ function setupMap() {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
   }).addTo(state.map);
 
-  state.layer = L.layerGroup().addTo(state.map);
-  state.knownLayer = L.layerGroup().addTo(state.map);
+  state.candidateLayer = createCandidateCanvasLayer().addTo(state.map);
   state.observationLayer = L.layerGroup().addTo(state.map);
   state.locationLayer = L.layerGroup().addTo(state.map);
-  state.scoreLabelLayer = createScoreLabelLayer().addTo(state.map);
+  state.draftPointLayer = L.layerGroup().addTo(state.map);
   state.map.on("click", handleMapClick);
   state.map.on("moveend", updateRecenterLocationButton);
   requestAnimationFrame(() => state.map.invalidateSize());
@@ -282,6 +294,10 @@ async function fetchFirstOptional(urls) {
 
 async function fetchObservations() {
   let remote = [];
+  if (!hasApiBackend()) {
+    return mergeObservations(loadLocalObservations());
+  }
+
   try {
     const collection = await fetchJson(OBSERVATIONS_URL);
     remote = Array.isArray(collection.features) ? collection.features : [];
@@ -349,6 +365,10 @@ function mergeObservations(features) {
 
 async function updateBackendStatus() {
   if (!els.backendStatus) return;
+  if (!hasApiBackend()) {
+    els.backendStatus.textContent = "Static preview";
+    return;
+  }
 
   try {
     const health = await fetchJson(HEALTH_URL);
@@ -358,6 +378,13 @@ async function updateBackendStatus() {
   } catch {
     els.backendStatus.textContent = "Static preview";
   }
+}
+
+function hasApiBackend() {
+  const hostname = window.location.hostname;
+  const port = window.location.port;
+  if (window.location.protocol === "file:") return false;
+  return !["127.0.0.1", "localhost"].includes(hostname) || port !== "8080";
 }
 
 function normalizeFeature(feature) {
@@ -385,7 +412,8 @@ function renderSummary(summary) {
   const score = Number(summary.max_score ?? 0);
   els.maxScore.textContent = Number.isFinite(score) ? Math.round(score) : "0";
   if (els.fieldLabels) {
-    els.fieldLabels.textContent = summary.known_field_matches ?? 0;
+    els.fieldLabels.textContent =
+      state.modelSummary?.training_points ?? state.modelSummary?.positive_labels ?? summary.known_field_matches ?? 0;
   }
   renderModelQuality();
 }
@@ -450,10 +478,15 @@ function render() {
       return false;
     })
     .sort(compareFeaturesForList);
+  state.listDiscoveryCount = state.filtered.filter((feature) => !feature.properties.knownFieldMatch).length;
 
   updateVisibleCount();
   renderMarkers();
   renderList();
+
+  if (state.placingPoint) {
+    return;
+  }
 
   const shouldAutoSelect = !isMobileViewport();
   if (!state.selectedId && state.filtered.length && shouldAutoSelect) {
@@ -467,43 +500,37 @@ function render() {
   }
 }
 
-function renderMarkers() {
-  state.layer.clearLayers();
-  state.knownLayer.clearLayers();
-  state.markers.clear();
-
-  state.filtered.filter((feature) => !feature.properties.knownFieldMatch).forEach((feature) => {
-    const props = feature.properties;
-    if (!Number.isFinite(props.latitude) || !Number.isFinite(props.longitude)) return;
-
-    const marker = createCandidateMarker([props.latitude, props.longitude], props);
-    marker.bindPopup(popupHtml(props), selectedPopupOptions());
-    marker.on("click", () => selectFeature(idOf(feature), { pan: true }));
-    marker.addTo(state.layer);
-    state.markers.set(idOf(feature), marker);
-  });
-
-  knownFeatures().forEach((feature) => {
-    const props = feature.properties;
-    if (!Number.isFinite(props.latitude) || !Number.isFinite(props.longitude)) return;
-
-    const marker = createKnownMarker([props.latitude, props.longitude], props);
-    marker.bindPopup(popupHtml(props), selectedPopupOptions());
-    marker.on("click", () => selectFeature(idOf(feature), { pan: true }));
-    marker.addTo(state.knownLayer);
-    state.markers.set(idOf(feature), marker);
-  });
-
-  renderObservationMarkers();
-  updateScoreLabelLayer();
-  updateSelectedMarkerClass();
+function mapRenderableFeatures() {
+  const selectedFeature = state.selectedId ? state.featureById.get(state.selectedId) : null;
+  const byId = new Map();
+  for (const feature of state.filtered) {
+    byId.set(idOf(feature), feature);
+  }
+  for (const feature of knownFeatures()) {
+    byId.set(idOf(feature), feature);
+  }
+  if (selectedFeature) {
+    byId.set(idOf(selectedFeature), selectedFeature);
+  }
+  return [...byId.values()];
 }
 
-function updateScoreLabelLayer() {
-  state.scoreLabelLayer?.setFeatures([
-    ...state.filtered.filter((feature) => !feature.properties.knownFieldMatch),
-    ...knownFeatures(),
-  ]);
+function listRenderableFeatures() {
+  const features = state.filtered.slice(0, MAX_LIST_ITEMS);
+  if (!state.selectedId) return features;
+
+  const selectedFeature = state.filtered.find((feature) => idOf(feature) === state.selectedId);
+  if (!selectedFeature || features.some((feature) => idOf(feature) === state.selectedId)) {
+    return features;
+  }
+
+  return [selectedFeature, ...features.slice(0, Math.max(0, MAX_LIST_ITEMS - 1))];
+}
+
+function renderMarkers() {
+  state.candidateLayer?.setFeatures(mapRenderableFeatures());
+  renderObservationMarkers();
+  updateSelectedMarkerClass();
 }
 
 function renderList() {
@@ -517,7 +544,8 @@ function renderList() {
 
   const fragment = document.createDocumentFragment();
 
-  state.filtered.forEach((feature) => {
+  const listFeatures = listRenderableFeatures();
+  listFeatures.forEach((feature) => {
     const props = feature.properties;
     const item = els.template.content.firstElementChild.cloneNode(true);
     const button = item.querySelector(".candidate-button");
@@ -531,6 +559,13 @@ function renderList() {
     pill.classList.add(props.knownFieldMatch ? "known-score" : `bucket-${props.bucket}`);
     fragment.append(item);
   });
+
+  if (state.filtered.length > listFeatures.length) {
+    const more = document.createElement("li");
+    more.className = "list-more";
+    more.textContent = `${state.filtered.length.toLocaleString()} matching locations available. The map declutters nearby points until close zoom; use search or filters to narrow the list.`;
+    fragment.append(more);
+  }
 
   els.list.append(fragment);
 }
@@ -586,25 +621,27 @@ function updateListViewControls() {
 }
 
 function selectFeature(candidateId, options = { pan: true }) {
-  const feature = state.features.find((item) => idOf(item) === candidateId);
+  const feature = state.featureById.get(String(candidateId));
   if (!feature) return;
+  if (state.placingPoint) {
+    cancelPlacePointMode();
+  }
   setMobileDrawerOpen(false);
   state.shouldFocusLocationOnNextUpdate = false;
   state.selectedId = candidateId;
   state.selectedObservationId = null;
   renderDetail(feature);
   renderList();
-  updateSelectedMarkerClass();
+  renderMarkers();
 
-  const marker = state.markers.get(candidateId);
   const latLng = featureLatLng(feature);
   const shouldCenter = options.pan !== false && latLng;
   if (shouldCenter) {
     centerMapOnPoint(latLng);
   }
 
-  if (marker && options.openPopup !== false && !isMobileViewport()) {
-    openSelectedPopup(marker, shouldCenter);
+  if (options.openPopup !== false && !isMobileViewport()) {
+    openSelectedFeaturePopup(feature, shouldCenter);
   }
 
   if (options.pan !== false) {
@@ -615,6 +652,9 @@ function selectFeature(candidateId, options = { pan: true }) {
 function selectObservation(observationId, options = { pan: true }) {
   const feature = state.observations.find((item) => observationIdOf(item) === observationId);
   if (!feature) return;
+  if (state.placingPoint) {
+    cancelPlacePointMode();
+  }
   setMobileDrawerOpen(false);
   state.shouldFocusLocationOnNextUpdate = false;
   state.selectedId = null;
@@ -677,6 +717,25 @@ function openSelectedPopup(marker, delayed) {
   }, SELECTION_POPUP_DELAY_MS);
 }
 
+function openSelectedFeaturePopup(feature, delayed) {
+  const latLng = featureLatLng(feature);
+  if (!latLng || !state.map) return;
+  const open = () => {
+    L.popup(selectedPopupOptions())
+      .setLatLng(latLng)
+      .setContent(popupHtml(feature.properties))
+      .openOn(state.map);
+    updateSelectedMarkerClass();
+  };
+
+  if (!delayed) {
+    open();
+    return;
+  }
+
+  window.setTimeout(open, SELECTION_POPUP_DELAY_MS);
+}
+
 function selectedPopupOptions() {
   return {
     autoPan: false,
@@ -685,9 +744,7 @@ function selectedPopupOptions() {
 }
 
 function updateSelectedMarkerClass() {
-  state.markers.forEach((marker, markerId) => {
-    setMarkerSelected(marker, markerId === state.selectedId);
-  });
+  state.candidateLayer?.setSelectedId(state.selectedId);
   state.observationMarkers.forEach((marker, markerId) => {
     setMarkerSelected(marker, markerId === state.selectedObservationId);
   });
@@ -835,8 +892,7 @@ function showDetailPanel() {
 function hideDetailPanel(options = {}) {
   const clearSelection = options.clearSelection !== false;
   if (state.placingPoint) {
-    state.placingPoint = false;
-    updatePlacePointButton();
+    cancelPlacePointMode();
   }
   if (clearSelection) {
     state.selectedId = null;
@@ -1158,82 +1214,29 @@ function featureLatLng(feature) {
   return [lat, lon];
 }
 
-function createCandidateMarker(latLng, props) {
-  if (isMobileViewport()) {
-    return canvasPointMarker(latLng, props);
-  }
-  return L.marker(latLng, {
-    icon: markerIcon(props),
-    riseOnHover: true,
-  });
-}
-
-function createKnownMarker(latLng, props) {
-  if (isMobileViewport()) {
-    return canvasPointMarker(latLng, props, { known: true });
-  }
-  const marker = L.marker(latLng, {
-    icon: knownMarkerIcon(props),
-    riseOnHover: true,
-    zIndexOffset: 700,
-  });
-  marker.bindTooltip(knownCulvertLabel(props), {
-    permanent: true,
-    direction: "top",
-    offset: [0, -18],
-    className: "known-culvert-label",
-  });
-  return marker;
-}
-
-function canvasPointMarker(latLng, props, options = {}) {
-  const baseStyle = canvasMarkerStyle(props, options);
-  const selectedStyle = {
-    ...baseStyle,
-    radius: baseStyle.radius + 3,
-    weight: 4,
-    color: "#0b3d2e",
-    fillOpacity: 0.95,
-  };
-  const marker = L.circleMarker(latLng, baseStyle);
-  marker._culvertBaseStyle = baseStyle;
-  marker._culvertSelectedStyle = selectedStyle;
-  return marker;
-}
-
-function canvasMarkerStyle(props, options = {}) {
-  const bucket = props.bucket || "low";
-  const fillColor = options.known ? MARKER_COLORS.known : MARKER_COLORS[bucket] || MARKER_COLORS.low;
-  return {
-    radius: options.known ? 16 : 17,
-    color: "#ffffff",
-    fillColor,
-    fillOpacity: 0.92,
-    opacity: 0.95,
-    weight: 3,
-    interactive: true,
-  };
-}
-
-function createScoreLabelLayer() {
-  const ScoreLabelLayer = L.Layer.extend({
+function createCandidateCanvasLayer() {
+  const CandidateCanvasLayer = L.Layer.extend({
     initialize() {
       this._features = [];
       this._frame = null;
+      this._hitItems = [];
+      this._selectedId = null;
     },
 
     onAdd(map) {
       this._map = map;
-      this._canvas = L.DomUtil.create("canvas", "score-label-canvas leaflet-zoom-animated");
+      this._canvas = L.DomUtil.create("canvas", "candidate-canvas leaflet-zoom-animated");
       this._canvas.setAttribute("aria-hidden", "true");
       map.getPanes().overlayPane.appendChild(this._canvas);
       this._bringToFront();
       map.on("move zoom resize zoomend moveend viewreset", this._scheduleRedraw, this);
+      map.on("click", this._handleClick, this);
       this._scheduleRedraw();
     },
 
     onRemove(map) {
       map.off("move zoom resize zoomend moveend viewreset", this._scheduleRedraw, this);
+      map.off("click", this._handleClick, this);
       if (this._frame) {
         window.cancelAnimationFrame(this._frame);
         this._frame = null;
@@ -1246,6 +1249,11 @@ function createScoreLabelLayer() {
     setFeatures(features) {
       this._features = Array.isArray(features) ? features : [];
       this._bringToFront();
+      this._scheduleRedraw();
+    },
+
+    setSelectedId(selectedId) {
+      this._selectedId = selectedId ? String(selectedId) : null;
       this._scheduleRedraw();
     },
 
@@ -1278,52 +1286,168 @@ function createScoreLabelLayer() {
       const context = this._canvas.getContext("2d");
       context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
       context.clearRect(0, 0, size.x, size.y);
-      if (!isMobileViewport()) return;
 
-      context.textAlign = "center";
-      context.textBaseline = "middle";
-      context.font = "800 11px Inter, system-ui, sans-serif";
-      context.lineWidth = 3;
-      context.strokeStyle = "rgba(0, 0, 0, 0.34)";
-      context.fillStyle = "#ffffff";
+      const zoom = this._map.getZoom();
+      const items = [];
 
       for (const feature of this._features) {
         const props = feature.properties || {};
         const latLng = featureLatLng(feature);
         if (!latLng) continue;
         const point = this._map.latLngToContainerPoint(latLng);
-        if (point.x < -24 || point.y < -24 || point.x > size.x + 24 || point.y > size.y + 24) continue;
-        const label = props.knownFieldMatch ? knownCulvertShortLabel(props) : String(Math.round(props.score));
-        context.strokeText(label, point.x, point.y);
-        context.fillText(label, point.x, point.y);
+        if (point.x < -32 || point.y < -32 || point.x > size.x + 32 || point.y > size.y + 32) continue;
+        const selected = idOf(feature) === this._selectedId;
+        items.push({
+          feature,
+          props,
+          point,
+          selected,
+          radius: candidateCanvasRadius(props, zoom, selected),
+        });
+      }
+
+      items.sort((a, b) => {
+        if (a.selected !== b.selected) return a.selected ? 1 : -1;
+        if (a.props.knownFieldMatch !== b.props.knownFieldMatch) return a.props.knownFieldMatch ? 1 : -1;
+        return Number(b.props.rank || 999999) - Number(a.props.rank || 999999);
+      });
+
+      const drawItems = declutterCanvasItems(items, zoom);
+      for (const item of drawItems) {
+        drawCandidateCanvasPoint(context, item);
+      }
+
+      const labelItems =
+        zoom >= CANDIDATE_LABEL_MIN_ZOOM && drawItems.length <= CANDIDATE_LABEL_MAX_POINTS
+          ? drawItems
+          : drawItems.filter((item) => item.selected || isFieldObservedKnown(item.props));
+      drawCandidateCanvasLabels(context, labelItems, zoom);
+      this._hitItems = drawItems;
+    },
+
+    _handleClick(event) {
+      if (state.placingPoint || !this._map || !this._hitItems.length) return;
+      const clickPoint = this._map.latLngToContainerPoint(event.latlng);
+      let best = null;
+      let bestDistance = Infinity;
+
+      for (let index = this._hitItems.length - 1; index >= 0; index -= 1) {
+        const item = this._hitItems[index];
+        const distance = Math.hypot(item.point.x - clickPoint.x, item.point.y - clickPoint.y);
+        const tolerance = Math.max(CANDIDATE_HIT_TOLERANCE_PX, item.radius + 5);
+        if (distance <= tolerance && distance < bestDistance) {
+          best = item;
+          bestDistance = distance;
+        }
+      }
+
+      if (best) {
+        selectFeature(idOf(best.feature), { pan: false });
       }
     },
   });
 
-  return new ScoreLabelLayer();
+  return new CandidateCanvasLayer();
 }
 
-function markerIcon(props) {
-  const bucket = props.bucket || "low";
-  const html = `<span class="marker-dot bucket-${bucket}">${Math.round(props.score)}</span>`;
-  return L.divIcon({
-    className: `priority-marker${props.knownFieldMatch ? " known-marker" : ""}`,
-    html,
-    iconSize: [34, 34],
-    iconAnchor: [17, 17],
-    popupAnchor: [0, -16],
-  });
+function candidateCanvasRadius(props, zoom, selected) {
+  const base = zoom >= 17 ? 5.5 : zoom >= 15 ? 4.5 : zoom >= 13 ? 3.8 : 3.2;
+  const knownBoost = props.knownFieldMatch ? 1.4 : 0;
+  return selected ? base + knownBoost + 4 : base + knownBoost;
 }
 
-function knownMarkerIcon(props) {
-  const label = knownCulvertShortLabel(props);
-  return L.divIcon({
-    className: "known-culvert-marker",
-    html: `<span class="known-marker-dot">${escapeHtml(label)}</span>`,
-    iconSize: [38, 38],
-    iconAnchor: [19, 19],
-    popupAnchor: [0, -18],
-  });
+function declutterCanvasItems(items, zoom) {
+  if (zoom >= 18) return items;
+
+  const cellSize = zoom >= 17 ? 36 : zoom >= 15 ? 52 : zoom >= 13 ? 66 : 82;
+  const selected = [];
+  const known = [];
+  const candidatesByCell = new Map();
+
+  for (const item of items) {
+    if (item.selected) {
+      selected.push(item);
+      continue;
+    }
+
+    if (item.props.knownFieldMatch) {
+      known.push(item);
+      continue;
+    }
+
+    const key = `${Math.floor(item.point.x / cellSize)}:${Math.floor(item.point.y / cellSize)}`;
+    const current = candidatesByCell.get(key);
+    if (!current || compareCanvasCandidatePriority(item, current) < 0) {
+      candidatesByCell.set(key, item);
+    }
+  }
+
+  return [...candidatesByCell.values(), ...known, ...selected];
+}
+
+function compareCanvasCandidatePriority(a, b) {
+  const rankA = Number(a.props.rank || 999999);
+  const rankB = Number(b.props.rank || 999999);
+  if (rankA !== rankB) return rankA - rankB;
+  return Number(b.props.score || 0) - Number(a.props.score || 0);
+}
+
+function candidateCanvasColor(props) {
+  return props.knownFieldMatch
+    ? MARKER_COLORS.known
+    : MARKER_COLORS[props.bucket || "low"] || MARKER_COLORS.low;
+}
+
+function drawCandidateCanvasPoint(context, item) {
+  const { point, radius, selected, props } = item;
+  if (selected) {
+    context.beginPath();
+    context.arc(point.x, point.y, radius + 5, 0, Math.PI * 2);
+    context.fillStyle = "rgba(255, 255, 255, 0.9)";
+    context.fill();
+    context.lineWidth = 3;
+    context.strokeStyle = "rgba(31, 111, 87, 0.52)";
+    context.stroke();
+  }
+
+  context.beginPath();
+  context.arc(point.x, point.y, radius, 0, Math.PI * 2);
+  context.fillStyle = candidateCanvasColor(props);
+  context.globalAlpha = props.knownFieldMatch ? 0.96 : 0.9;
+  context.fill();
+  context.globalAlpha = 1;
+  context.lineWidth = selected ? 3 : 1.6;
+  context.strokeStyle = "#ffffff";
+  context.stroke();
+}
+
+function drawCandidateCanvasLabels(context, items, zoom) {
+  if (!items.length) return;
+
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.lineWidth = 3;
+  context.strokeStyle = "rgba(0, 0, 0, 0.34)";
+  context.fillStyle = "#ffffff";
+
+  for (const item of items) {
+    const label = candidateCanvasLabel(item, zoom);
+    if (!label) continue;
+    context.font = item.props.knownFieldMatch
+      ? "900 10px Inter, system-ui, sans-serif"
+      : `${zoom >= 18 ? "900 11px" : "800 10px"} Inter, system-ui, sans-serif`;
+    context.strokeText(label, item.point.x, item.point.y);
+    context.fillText(label, item.point.x, item.point.y);
+  }
+}
+
+function candidateCanvasLabel(item, zoom) {
+  if (item.props.knownFieldMatch) {
+    if (isFieldObservedKnown(item.props)) return "ABU";
+    return item.selected && zoom >= 16 ? "K" : "";
+  }
+  if (item.selected) return String(Math.round(item.props.score));
+  return zoom >= CANDIDATE_LABEL_MIN_ZOOM ? String(Math.round(item.props.score)) : "";
 }
 
 function renderObservationMarkers() {
@@ -1388,9 +1512,22 @@ function knownCulvertLabel(props) {
 }
 
 function knownCulvertShortLabel(props) {
+  if (isFieldObservedKnown(props)) return "ABU";
   const label = formatReadableId(knownCulvertLabel(props));
   if (/^sc[-_]?\d+/i.test(label)) return label.replace(/^sc/i, "SC").slice(0, 7);
   return "K";
+}
+
+function isFieldObservedKnown(props) {
+  const source = [
+    props.nearest_field_report_source_file,
+    props.field_report_source_file,
+    props.nearest_field_report_culvert_id,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return source.includes("field_observations.geojson") || /\bfc-\d{8}-/i.test(source);
 }
 
 function fieldFeedbackHtml(title) {
@@ -1488,6 +1625,12 @@ async function saveObservationAtPoint(latLng, status, notes, options = {}) {
 async function saveObservation(payload) {
   const feature = observationFeatureFromPayload(payload);
 
+  if (!hasApiBackend()) {
+    storeLocalObservation(feature);
+    addObservation(feature);
+    return { feature, storage: "browser" };
+  }
+
   try {
     const response = await fetch(OBSERVATIONS_URL, {
       method: "POST",
@@ -1523,6 +1666,7 @@ async function saveObservation(payload) {
 }
 
 async function syncLocalObservationsToServer() {
+  if (!hasApiBackend()) return;
   const local = loadLocalObservations();
   if (!local.length) return;
 
@@ -1567,6 +1711,12 @@ async function deleteObservationById(observationId, button) {
   if (button) {
     button.disabled = true;
     button.textContent = "Deleting...";
+  }
+
+  if (!hasApiBackend()) {
+    removeLocalObservation(id);
+    removeObservation(id);
+    return;
   }
 
   try {
@@ -1635,8 +1785,10 @@ function removeObservation(observationId) {
 }
 
 function updateVisibleCount() {
-  const visiblePredictions = state.filtered.filter((feature) => !feature.properties.knownFieldMatch);
-  els.visible.textContent = visiblePredictions.length + knownFeatures().length + state.observations.length;
+  const visiblePredictions = Number.isFinite(state.listDiscoveryCount)
+    ? state.listDiscoveryCount
+    : state.filtered.filter((feature) => !feature.properties.knownFieldMatch).length;
+  els.visible.textContent = visiblePredictions;
 }
 
 function observationFeatureFromPayload(payload) {
@@ -1791,7 +1943,7 @@ function mapContextForPoint(latLng) {
     return {
       withinRadius: false,
       layoutSource: "manual_map_point",
-      summary: "No current map candidate was close enough, so only the clicked coordinates and your field label will be used.",
+      summary: "No current map candidate was close enough, so only the selected coordinates and your field label will be used.",
     };
   }
 
@@ -1813,7 +1965,7 @@ function mapContextForPoint(latLng) {
     nearestDisplayId,
     layoutSource: withinRadius ? "nearest_map_candidate" : "manual_map_point",
     summary: withinRadius
-      ? `${isPredictionHit ? "Copied" : "Recorded miss against"} road, drainage, rank, and estimate context from ${nearestDisplayId}, ${formatNumber(nearest.distanceMeters, "m")} from the clicked point.`
+      ? `${isPredictionHit ? "Copied" : "Recorded miss against"} road, drainage, rank, and estimate context from ${nearestDisplayId}, ${formatNumber(nearest.distanceMeters, "m")} from the selected point.`
       : `Nearest map candidate is ${formatNumber(nearest.distanceMeters, "m")} away, outside the ${FIELD_CONTEXT_RADIUS_M} m context radius, so the point will be saved without inferred road/drainage context.`,
   };
 }
@@ -1850,22 +2002,36 @@ function nearestFeatureToPoint(latLng) {
 }
 
 function togglePlacePointMode() {
-  state.placingPoint = !state.placingPoint;
-  updatePlacePointButton();
   if (state.placingPoint) {
-    setMobileDrawerOpen(false);
-    state.selectedId = null;
-    renderList();
-    showDetailPanel();
-    els.detail.innerHTML = `
-      <div class="detail-panel-header">
-        <h3>Add culvert point</h3>
-        <button type="button" class="detail-close" data-close-detail aria-label="Close details">Close</button>
-      </div>
-      <p>Click the map at the culvert location. The app will assign an ID and use nearby map context for the training record.</p>
-    `;
-    bindDetailCloseAction();
+    cancelPlacePointMode();
+    hideDetailPanel({ clearSelection: false });
+    return;
   }
+  startPlacePointMode();
+}
+
+function startPlacePointMode() {
+  state.placingPoint = true;
+  state.draftPointFieldId = makeFieldCulvertId();
+  updatePlacePointButton();
+  setMobileDrawerOpen(false);
+  state.selectedId = null;
+  state.selectedObservationId = null;
+  renderList();
+
+  const latLng = draftPointStartLatLng();
+  renderDraftPointMarker(latLng);
+  renderDraftPointDetail(latLng);
+  if (state.userLocation) {
+    centerMapOnPoint([latLng.lat, latLng.lng]);
+  }
+}
+
+function cancelPlacePointMode() {
+  state.placingPoint = false;
+  state.draftPointFieldId = "";
+  removeDraftPointMarker();
+  updatePlacePointButton();
 }
 
 function updatePlacePointButton() {
@@ -1878,9 +2044,137 @@ function updatePlacePointButton() {
 
 function handleMapClick(event) {
   if (!state.placingPoint) return;
-  state.placingPoint = false;
-  updatePlacePointButton();
-  renderManualPointDetail(event.latlng);
+  renderDraftPointMarker(event.latlng);
+  renderDraftPointDetail(event.latlng);
+}
+
+function draftPointStartLatLng() {
+  if (state.userLocation) {
+    return L.latLng(state.userLocation.lat, state.userLocation.lng);
+  }
+  const center = state.map.getCenter();
+  return L.latLng(center.lat, center.lng);
+}
+
+function renderDraftPointMarker(latLng) {
+  const point = L.latLng(latLng);
+  if (!state.draftPointMarker) {
+    state.draftPointMarker = L.marker(point, {
+      autoPan: true,
+      draggable: true,
+      icon: draftPointIcon(),
+      keyboard: true,
+      riseOnHover: true,
+      zIndexOffset: 1400,
+      title: "New culvert point",
+    });
+    state.draftPointMarker.on("dragend", () => {
+      renderDraftPointDetail(state.draftPointMarker.getLatLng());
+    });
+    state.draftPointMarker.on("click", () => {
+      renderDraftPointDetail(state.draftPointMarker.getLatLng());
+    });
+    state.draftPointMarker.addTo(state.draftPointLayer);
+    return;
+  }
+  state.draftPointMarker.setLatLng(point);
+}
+
+function removeDraftPointMarker() {
+  if (state.draftPointMarker) {
+    state.draftPointMarker.remove();
+  }
+  state.draftPointMarker = null;
+  state.draftPointLayer?.clearLayers();
+}
+
+function draftPointIcon() {
+  return L.divIcon({
+    className: "draft-point-marker",
+    html: `<span class="draft-pin"><span class="draft-pin-dot">+</span></span>`,
+    iconSize: [48, 58],
+    iconAnchor: [24, 52],
+    popupAnchor: [0, -44],
+  });
+}
+
+function renderDraftPointDetail(latLng) {
+  state.selectedId = null;
+  state.selectedObservationId = null;
+  renderList();
+  const fieldId = state.draftPointFieldId || makeFieldCulvertId();
+  state.draftPointFieldId = fieldId;
+  const context = mapContextForPoint(latLng);
+  const existingNotes = els.detail?.querySelector("#field-notes")?.value || "";
+  const notesOpen = Boolean(els.detail?.querySelector(".notes-disclosure")?.open);
+  showDetailPanel();
+  els.detail.innerHTML = `
+    <div class="detail-panel-header">
+      <h3>New culvert ${escapeHtml(fieldId)}</h3>
+      <button type="button" class="detail-close" data-close-detail aria-label="Close details">Close</button>
+    </div>
+    <p>Lat ${formatNumber(latLng.lat, "")}, Lon ${formatNumber(latLng.lng, "")}</p>
+    ${fieldCulvertContextHtml(fieldId, context)}
+    ${draftPointSaveHtml(existingNotes, notesOpen)}
+  `;
+  bindDetailCloseAction();
+  bindDraftPointActions(fieldId);
+  window.requestAnimationFrame(scrollDetailIntoViewOnMobile);
+}
+
+function draftPointSaveHtml(notes = "", notesOpen = false) {
+  return `
+    <section class="field-feedback draft-point-feedback" aria-label="Save added culvert">
+      <h4>Drop point</h4>
+      <details class="notes-disclosure"${notesOpen ? " open" : ""}>
+        <summary>Add optional notes</summary>
+        <label for="field-notes">Field notes</label>
+        <textarea id="field-notes" rows="2" placeholder="Optional notes from inspection">${escapeHtml(notes)}</textarea>
+      </details>
+      <div class="feedback-buttons draft-feedback-buttons">
+        <button type="button" data-draft-save>Save culvert here</button>
+        <button type="button" data-draft-cancel>Cancel</button>
+      </div>
+      <p id="feedback-status" class="feedback-status"></p>
+    </section>
+  `;
+}
+
+function bindDraftPointActions(fieldId) {
+  const saveButton = els.detail.querySelector("[data-draft-save]");
+  const cancelButton = els.detail.querySelector("[data-draft-cancel]");
+  const statusOutput = els.detail.querySelector("#feedback-status");
+  const notesInput = els.detail.querySelector("#field-notes");
+
+  cancelButton?.addEventListener("click", () => {
+    cancelPlacePointMode();
+    hideDetailPanel({ clearSelection: false });
+  });
+
+  saveButton?.addEventListener("click", async () => {
+    const latLng = state.draftPointMarker?.getLatLng();
+    if (!latLng) return;
+    const notes = notesInput?.value || "";
+    const context = mapContextForPoint(latLng);
+    saveButton.disabled = true;
+    if (statusOutput) statusOutput.textContent = "Saving field observation...";
+    try {
+      const result = await saveObservationAtPoint(latLng, "confirmed_culvert", notes, {
+        fieldId,
+        context,
+      });
+      const observationId = observationIdOf(result.feature);
+      cancelPlacePointMode();
+      if (observationId) {
+        selectObservation(observationId, { pan: false, openPopup: false });
+      }
+    } catch (error) {
+      if (statusOutput) {
+        statusOutput.textContent = `Could not save observation: ${error.message || error}`;
+      }
+      saveButton.disabled = false;
+    }
+  });
 }
 
 function renderManualPointDetail(latLng) {

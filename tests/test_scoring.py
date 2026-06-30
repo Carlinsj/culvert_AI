@@ -134,9 +134,11 @@ def test_score_unlabeled_candidates_promotes_field_confirmed_corridor():
 
     scored = score_unlabeled_candidates(features)
 
-    assert scored.iloc[0]["candidate_id"] == "near-abu-corridor"
-    assert scored.iloc[0]["field_corridor_support_score"] > 0
-    assert "field-confirmed culvert corridor" in scored.iloc[0]["evidence_summary"]
+    by_id = scored.set_index("candidate_id")
+
+    assert by_id.loc["near-abu-corridor", "field_corridor_support_score"] == 0
+    assert by_id.loc["far-route-sample", "field_corridor_support_score"] == 0
+    assert "field-confirmed culvert corridor" not in by_id.loc["near-abu-corridor", "evidence_summary"]
 
 
 def test_discovery_ranking_prioritizes_undiscovered_candidates():
@@ -180,7 +182,7 @@ def test_discovery_ranking_prioritizes_undiscovered_candidates():
     assert ranked.iloc[1]["discovery_status"] == "known_field_match"
 
 
-def test_discovery_ranking_applies_field_corridor_floor_to_route_samples():
+def test_discovery_ranking_does_not_apply_known_corridor_floor_to_route_samples():
     evidence = gpd.GeoDataFrame(
         [
             {
@@ -212,8 +214,8 @@ def test_discovery_ranking_applies_field_corridor_floor_to_route_samples():
 
     ranked = build_discovery_ranking(evidence, known_radius_m=10).set_index("candidate_id")
 
-    assert ranked.loc["corridor", "discovery_score"] >= 62
-    assert ranked.loc["corridor", "discovery_score"] > ranked.loc["other", "discovery_score"]
+    assert ranked.loc["corridor", "discovery_score"] == 35.0
+    assert ranked.loc["corridor", "discovery_score"] < ranked.loc["other", "discovery_score"]
 
 
 def test_discovery_ranking_does_not_count_50m_as_known_match():

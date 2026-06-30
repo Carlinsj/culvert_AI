@@ -346,6 +346,17 @@ output {
   box-shadow: 0 0 0 3px rgba(31, 111, 87, 0.13);
 }
 
+.list-more {
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  color: var(--muted);
+  background: #fbfcfa;
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
 .abu-list-item {
   min-width: 0;
 }
@@ -943,6 +954,16 @@ output {
   opacity: 0.66;
 }
 
+.draft-feedback-buttons {
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 0.8fr);
+}
+
+.draft-feedback-buttons [data-draft-save] {
+  border-color: var(--accent);
+  color: #fff;
+  background: var(--accent);
+}
+
 .feedback-status {
   min-height: 1.2em;
   margin: 8px 0 0;
@@ -969,6 +990,7 @@ output {
   font-weight: 900;
 }
 
+.candidate-canvas,
 .score-label-canvas {
   position: absolute;
   z-index: 1;
@@ -1023,6 +1045,38 @@ output {
   width: 40px;
   height: 40px;
   font-size: 0.62rem;
+}
+
+.draft-point-marker {
+  touch-action: none;
+}
+
+.draft-pin {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border: 3px solid #fff;
+  border-radius: 50% 50% 50% 0;
+  background: var(--very-high);
+  box-shadow:
+    0 0 0 5px rgba(180, 35, 24, 0.18),
+    0 7px 18px rgba(0, 0, 0, 0.34);
+  transform: rotate(-45deg);
+}
+
+.draft-pin-dot {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  color: var(--very-high);
+  background: #fff;
+  font-size: 1rem;
+  font-weight: 900;
+  line-height: 1;
+  transform: rotate(45deg);
 }
 
 .observation-confirmed_culvert .observation-dot {

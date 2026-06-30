@@ -19,8 +19,6 @@ DEFAULT_WEIGHTS = {
     "road_context_score": 0.05,
     "dem_route_drainage_score": 0.18,
     "osm_culvert_tag_score": 0.04,
-    "field_report_support_score": 0.08,
-    "field_corridor_support_score": 0.12,
 }
 
 
@@ -63,14 +61,14 @@ def score_unlabeled_candidates(
         20 * scored["non_culvert_structure_penalty"]
     )
     scored["culvert_likelihood_score"] = scored["culvert_likelihood_score"].clip(0, 100)
+    denied = pd.Series(False, index=scored.index)
     if "field_denied" in scored.columns:
         denied = pd.to_numeric(scored["field_denied"], errors="coerce").fillna(0).astype(int) == 1
-        scored.loc[denied, "culvert_likelihood_score"] = 0
     if "is_culvert" in scored.columns:
         known = pd.to_numeric(scored["is_culvert"], errors="coerce").fillna(0).astype(int) == 1
-        scored.loc[known, "culvert_likelihood_score"] = scored.loc[
-            known, "culvert_likelihood_score"
-        ].clip(lower=95)
+        scored.loc[known | denied, "culvert_likelihood_score"] = 0
+    else:
+        scored.loc[denied, "culvert_likelihood_score"] = 0
     scored = scored.sort_values("culvert_likelihood_score", ascending=False).reset_index(drop=True)
     scored["priority_rank"] = np.arange(1, len(scored) + 1)
     scored["priority_percentile"] = 1.0 - ((scored["priority_rank"] - 1) / max(len(scored), 1))
@@ -136,14 +134,7 @@ def build_discovery_ranking(
     ranked["model_probability_score"] = (model_probability.fillna(0.0) * 100).clip(0, 100)
     ranked["model_rank_score"] = (model_rank_score.fillna(0.0) * 100).clip(0, 100)
     ranked["discovery_score"] = (blended.fillna(evidence_score).fillna(0.0) * 100).clip(0, 100)
-    corridor_score = _score_0_to_1(ranked, "field_corridor_support_score", scale=1.0).fillna(0.0)
-    route_signal = _route_sample_signal(ranked)
-    corridor_floor = ((0.45 + 0.35 * corridor_score) * route_signal * 100).clip(0, 100)
-    unknown = ~(denied | known)
-    ranked.loc[unknown, "discovery_score"] = np.maximum(
-        ranked.loc[unknown, "discovery_score"],
-        corridor_floor.loc[unknown],
-    )
+    ranked.loc[known, "discovery_score"] = 0
     ranked.loc[denied, ["evidence_score", "model_probability_score", "model_rank_score", "discovery_score"]] = 0
 
     sort_table = ranked.assign(_known_sort=known.astype(int))
@@ -406,41 +397,13 @@ def _osm_culvert_tag_score(table: pd.DataFrame) -> pd.Series:
 
 
 def _field_report_support_score(table: pd.DataFrame) -> pd.Series:
-    pieces = []
     if "is_culvert" in table.columns:
-        pieces.append(pd.to_numeric(table["is_culvert"], errors="coerce").fillna(0).clip(0, 1))
-    if "dist_to_known_culvert_m" in table.columns:
-        distance = pd.to_numeric(table["dist_to_known_culvert_m"], errors="coerce")
-        pieces.append((1.0 / (1.0 + distance.clip(lower=0) / 35.0)).fillna(0.0).clip(0, 1))
-    return _mean_score(table, pieces)
+        return pd.to_numeric(table["is_culvert"], errors="coerce").fillna(0).clip(0, 1)
+    return _zero(table)
 
 
 def _field_corridor_support_score(table: pd.DataFrame) -> pd.Series:
-    if "dist_to_known_culvert_m" not in table.columns:
-        return _zero(table)
-
-    distance = pd.to_numeric(table["dist_to_known_culvert_m"], errors="coerce")
-    route_signal = _route_sample_signal(table)
-    field_observation = _nearest_source_contains(table, "field_observations.geojson")
-    max_distance = pd.Series(np.where(field_observation, 1500.0, 500.0), index=table.index)
-    scale = pd.Series(np.where(field_observation, 300.0, 150.0), index=table.index)
-    score = (1.0 / (1.0 + distance.clip(lower=0) / scale)).where(distance <= max_distance, 0.0)
-    return (route_signal * score.fillna(0.0)).clip(0, 1)
-
-
-def _nearest_source_contains(table: pd.DataFrame, needle: str) -> pd.Series:
-    columns = [
-        column
-        for column in ("nearest_field_report_source_file", "field_report_source_file")
-        if column in table.columns
-    ]
-    if not columns:
-        return pd.Series(False, index=table.index)
-
-    result = pd.Series(False, index=table.index)
-    for column in columns:
-        result |= table[column].fillna("").astype(str).str.contains(needle, case=False, regex=False)
-    return result
+    return _zero(table)
 
 
 def _attach_supervised_probability(

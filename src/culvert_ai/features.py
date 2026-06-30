@@ -141,9 +141,41 @@ def add_known_culvert_labels(
     labeled["dist_to_known_culvert_m"] = labeled.geometry.apply(
         lambda geom: float(geom.distance(known_union))
     )
-    labeled["is_culvert"] = (labeled["dist_to_known_culvert_m"] <= positive_radius_m).astype(int)
+    labeled["is_culvert"] = 0
+    for known_geom in known_culverts.geometry:
+        distances = labeled.geometry.distance(known_geom)
+        nearby = distances[distances <= positive_radius_m]
+        if nearby.empty:
+            continue
+        selected_index = _best_training_match(labeled.loc[nearby.index], nearby)
+        labeled.at[selected_index, "is_culvert"] = 1
     labeled = add_nearest_known_culvert_metadata(labeled, known_culverts)
     return labeled
+
+
+def _best_training_match(candidates: gpd.GeoDataFrame, distances: pd.Series):
+    source_priority = _known_label_source_priority(candidates)
+    order = pd.DataFrame(
+        {
+            "distance": distances,
+            "source_priority": source_priority,
+        },
+        index=candidates.index,
+    ).sort_values(["distance", "source_priority"], kind="mergesort")
+    return order.index[0]
+
+
+def _known_label_source_priority(candidates: gpd.GeoDataFrame) -> pd.Series:
+    if "source" not in candidates.columns:
+        return pd.Series(5, index=candidates.index)
+
+    source = candidates["source"].fillna("").astype(str)
+    priority = pd.Series(5, index=candidates.index)
+    priority.loc[source == "field_report_observed_culvert"] = 0
+    priority.loc[source == "exact_road_stream_intersection"] = 1
+    priority.loc[source == "nearest_road_stream_approach"] = 2
+    priority.loc[source == "route_interval_sample"] = 3
+    return priority
 
 
 def add_nearest_known_culvert_metadata(

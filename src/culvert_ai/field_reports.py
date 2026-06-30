@@ -179,7 +179,7 @@ def append_field_report_candidates(
             .fillna("")
             .replace("", "Field observed culvert"),
             "source": "field_report_observed_culvert",
-            "road_stream_distance_m": 0.0,
+            "road_stream_distance_m": np.nan,
             "crossing_angle_degrees": np.nan,
             "field_report_source_file": field_points.get(
                 "source_file",

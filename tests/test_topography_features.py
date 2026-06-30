@@ -226,6 +226,51 @@ def test_missed_prediction_negative_does_not_deny_true_culvert_geometry():
     assert features.loc["true-culvert", "is_culvert"] == 1
 
 
+def test_known_culvert_labels_one_training_point_per_known_culvert():
+    candidates = gpd.GeoDataFrame(
+        [
+            {
+                "candidate_id": "near-route",
+                "source": "route_interval_sample",
+                "geometry": Point(4, 0),
+            },
+            {
+                "candidate_id": "near-crossing",
+                "source": "exact_road_stream_intersection",
+                "geometry": Point(2, 0),
+            },
+            {
+                "candidate_id": "field-point",
+                "source": "field_report_observed_culvert",
+                "geometry": Point(0, 0),
+            },
+            {
+                "candidate_id": "far",
+                "source": "route_interval_sample",
+                "geometry": Point(50, 0),
+            },
+        ],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+    known = gpd.GeoDataFrame(
+        [{"culvert_id": "known-1", "geometry": Point(0, 0)}],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+
+    features = build_feature_table(
+        candidates,
+        known_culverts=known,
+        positive_radius_m=10,
+    ).set_index("candidate_id")
+
+    assert int(features["is_culvert"].sum()) == 1
+    assert features.loc["field-point", "is_culvert"] == 1
+    assert features.loc["near-crossing", "is_culvert"] == 0
+    assert features.loc["near-route", "is_culvert"] == 0
+
+
 def test_training_sample_weights_prioritize_abu_inputs():
     features = gpd.GeoDataFrame(
         [
