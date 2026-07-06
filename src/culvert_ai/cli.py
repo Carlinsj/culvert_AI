@@ -445,6 +445,7 @@ def build_parser() -> argparse.ArgumentParser:
             "gradient_boosting",
             "hist_gradient_boosting",
             "balanced_hist_gradient_boosting",
+            "soft_voting_ensemble",
         ],
         help="Use auto to compare models, or force a specific model family.",
     )

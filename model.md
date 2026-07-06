@@ -1,6 +1,6 @@
 # Culvert Prediction Model
 
-Last updated: 2026-06-24
+Last updated: 2026-07-06
 
 This file explains how the culvert prediction model is built, how field labels
 are used, and how the final map score is calculated.
@@ -27,14 +27,17 @@ culvert. High scores mean "check here first."
 
 The current rebuilt model artifacts report:
 
-- Selected model: `hist_gradient_boosting`
-- Candidate rows: `14,565`
-- Positive labels: `210`
-- Negative labels: `14,355`
-- Training point rows: `140`
-- Feature count: `70`
-- Spatial holdout average precision: `0.645`
+- Selected model: `soft_voting_ensemble`
+- Candidate rows: `112,811`
+- Positive labels: `144`
+- Negative labels: `112,667`
+- Training point rows: `145`
+- Feature count: `81`
+- Spatial holdout average precision: `0.837`
 - Spatial holdout precision at 10: `1.000`
+- Spatial holdout precision at 25: `0.960`
+- Field success check before web declustering: `16 / 17` confirmed culverts
+  within `15 m`
 
 The source of truth for the latest run is `web/data/model_summary.json`.
 
@@ -92,7 +95,10 @@ main feature groups are:
 - road and stream tag flags such as bridge, tunnel, or culvert,
 - whether road, stream, or route names are present,
 - field-report support and distance to known culvert labels,
-- optional DEM terrain features,
+- optional DEM terrain features, including a composite
+  `dem_culvert_terrain_score`,
+- approved-known culvert context from document-approved and ABU/user-confirmed
+  positives, including same-route and nearby-corridor support,
 - optional flow-accumulation features,
 - optional drainage-area features.
 
@@ -124,10 +130,20 @@ The training code compares several model families:
 - `gradient_boosting`
 - `hist_gradient_boosting`
 - `balanced_hist_gradient_boosting`
+- `soft_voting_ensemble`
+
+The actual Ulster pipeline defaults to `soft_voting_ensemble`, a weighted soft
+vote across regularized histogram gradient boosting, balanced histogram gradient
+boosting, and a lighter extra-trees member. Set `CULVERT_MODEL_FAMILY` to a
+specific family for a forced run, or to `auto` when you want the trainer to
+compare all candidate families.
 
 Only numeric feature columns are used. The code excludes target, coordinate,
 label, rank, and already-computed score columns so the model does not train on
-the answer or on UI ranking outputs.
+the answer or on UI ranking outputs. Columns beginning with `approved_known_`
+or `nearest_known_` are also excluded from supervised training because they are
+derived from approved positive labels. They are used only by the interpretable
+evidence ranking.
 
 Model selection uses this priority:
 
@@ -175,14 +191,15 @@ The component weights are:
 
 | Component | Weight |
 | --- | ---: |
-| `road_stream_proximity_score` | `0.25` |
-| `drainage_strength_score` | `0.20` |
-| `valley_position_score` | `0.16` |
-| `crossing_geometry_score` | `0.10` |
-| `terrain_break_score` | `0.13` |
-| `road_context_score` | `0.10` |
-| `osm_culvert_tag_score` | `0.06` |
-| `field_report_support_score` | `0.08` |
+| `road_stream_proximity_score` | `0.16` |
+| `drainage_strength_score` | `0.16` |
+| `valley_position_score` | `0.15` |
+| `crossing_geometry_score` | `0.05` |
+| `terrain_break_score` | `0.12` |
+| `road_context_score` | `0.05` |
+| `dem_route_drainage_score` | `0.18` |
+| `osm_culvert_tag_score` | `0.04` |
+| `field_corridor_support_score` | `0.08` |
 
 Each component is normalized to `0..1` where possible. The evidence score is:
 
@@ -197,8 +214,15 @@ Then it is clipped to `0..100`.
 Special rules:
 
 - field-denied candidates are forced to `0`,
-- known culvert labels are clipped to at least `95`,
+- known culvert labels are forced to `0` in the field-review queue so they do
+  not consume discovery priority,
 - the evidence summary names the strongest visible signals.
+
+`field_corridor_support_score` comes from approved-known culvert pattern
+columns built in `features.py`. It is intentionally bounded and small: a
+candidate near an approved ABU or document-confirmed culvert on the same route
+gets support, but it still needs drainage, DEM, crossing geometry, or model
+agreement to become a top discovery candidate.
 
 ## Final Discovery Score
 
@@ -253,10 +277,15 @@ web/data/summary.json
 web/data/model_summary.json
 ```
 
-The map export keeps:
+The current map export keeps:
 
-- the top `1,000` unchecked discovery candidates,
-- all known field matches needed for context and validation.
+- declustered unchecked discovery candidates up to the configured web limit,
+- summary counts for known field matches.
+
+Known and denied rows are filtered from `findings.geojson` so the browser map
+stays focused on field-review targets. Use the full discovery layer in
+`data/processed/actual_ulster_discovery_predictions.gpkg` for validation and
+known-match audit work.
 
 The Leaflet app displays those rows and uses Vercel observations to refresh the
 served ranking immediately after field feedback.
@@ -291,6 +320,8 @@ Adding the confirmed ABU points helps in two ways:
 
 - the exact culvert locations become positive labels,
 - nearby missed predicted candidates can become negative or missed labels.
+- nearby and same-route candidates receive bounded approved-known pattern
+  support in the evidence ranking.
 
 The next retrain can then rank similar geography higher, but only for candidate
 locations that the pipeline creates. If the issue is missing candidates, the fix

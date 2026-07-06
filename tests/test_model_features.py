@@ -1,6 +1,13 @@
+import geopandas as gpd
 import pandas as pd
+from shapely.geometry import Point
 
-from culvert_ai.model import _precision_floor_operating_point, select_feature_columns
+from culvert_ai.model import (
+    _precision_floor_operating_point,
+    predict_culvert_probability,
+    select_feature_columns,
+    train_model,
+)
 
 
 def test_select_feature_columns_excludes_labels_and_coordinates():
@@ -14,6 +21,7 @@ def test_select_feature_columns_excludes_labels_and_coordinates():
             "latitude": [41.1, 41.2],
             "road_stream_distance_m": [0.0, 12.0],
             "stream_density_m_per_sqkm": [100.0, 20.0],
+            "dem_culvert_terrain_score": [0.8, 0.2],
             "source_route_interval_sample": [1, 0],
             "source_exact_intersection": [0, 1],
             "has_matched_route": [1, 0],
@@ -21,6 +29,10 @@ def test_select_feature_columns_excludes_labels_and_coordinates():
             "route_lateral_offset_m": [8.0, 0.0],
             "priority_seed": [0.0, 1.0],
             "training_sample_weight": [18.0, 0.25],
+            "approved_known_culvert_pattern_score": [0.7, 0.0],
+            "approved_known_culvert_count_500m": [1, 0],
+            "nearest_known_culvert_distance_decay": [0.6, 0.0],
+            "nearest_known_route_match": [1, 0],
             "road_id": [10, 11],
         }
     )
@@ -28,6 +40,7 @@ def test_select_feature_columns_excludes_labels_and_coordinates():
     assert select_feature_columns(table) == [
         "road_stream_distance_m",
         "stream_density_m_per_sqkm",
+        "dem_culvert_terrain_score",
     ]
 
 
@@ -42,3 +55,43 @@ def test_precision_floor_operating_point_finds_60_percent_cutoff():
     assert operating_point["precision"] >= 0.60
     assert operating_point["threshold"] == 0.65
     assert operating_point["predicted_positive_count"] == 5
+
+
+def test_train_model_supports_soft_voting_ensemble(tmp_path):
+    rows = []
+    for index in range(24):
+        is_culvert = int(index % 3 == 0)
+        rows.append(
+            {
+                "candidate_id": f"cand-{index}",
+                "is_culvert": is_culvert,
+                "road_stream_distance_m": 2.0 if is_culvert else 60.0 + index,
+                "stream_density_m_per_sqkm": 90.0 if is_culvert else 10.0 + index,
+                "dem_culvert_terrain_score": 0.85 if is_culvert else 0.15,
+                "training_sample_weight": 4.0 if is_culvert else 0.5,
+                "geometry": Point(float(index), float(index % 4)),
+            }
+        )
+    features = gpd.GeoDataFrame(rows, geometry="geometry", crs="EPSG:32618")
+    model_path = tmp_path / "ensemble.joblib"
+    metrics_path = tmp_path / "metrics.json"
+    importance_path = tmp_path / "importance.csv"
+
+    metrics = train_model(
+        features,
+        model_output=model_path,
+        metrics_output=metrics_path,
+        importance_output=importance_path,
+        model_family="soft_voting_ensemble",
+        spatial_cv=False,
+        test_size=0.25,
+    )
+    predictions = predict_culvert_probability(features, model_path)
+
+    assert metrics["selected_model"] == "soft_voting_ensemble"
+    assert model_path.exists()
+    assert metrics_path.exists()
+    assert importance_path.exists()
+    assert "culvert_probability" in predictions.columns
+    assert predictions["culvert_probability"].between(0, 1).all()
+    assert metrics["feature_importance"][0]["method"] == "ensemble_component_feature_importance"

@@ -98,7 +98,7 @@ def test_score_unlabeled_candidates_promotes_dem_route_drainage_signal():
     assert "DEM road low point" in scored.iloc[0]["evidence_summary"]
 
 
-def test_score_unlabeled_candidates_promotes_field_confirmed_corridor():
+def test_score_unlabeled_candidates_promotes_approved_known_corridor_pattern():
     features = gpd.GeoDataFrame(
         [
             {
@@ -107,6 +107,7 @@ def test_score_unlabeled_candidates_promotes_field_confirmed_corridor():
                 "road_stream_distance_m": np.nan,
                 "dist_to_known_culvert_m": 450.0,
                 "nearest_field_report_source_file": "field_observations.geojson",
+                "approved_known_culvert_pattern_score": 0.65,
                 "valley_depth_9x9_m": 1.0,
                 "stream_density_250m_m_per_sqkm": 20,
                 "road_density_250m_m_per_sqkm": 20,
@@ -120,6 +121,7 @@ def test_score_unlabeled_candidates_promotes_field_confirmed_corridor():
                 "road_stream_distance_m": np.nan,
                 "dist_to_known_culvert_m": 2500.0,
                 "nearest_field_report_source_file": "field_observations.geojson",
+                "approved_known_culvert_pattern_score": 0.0,
                 "valley_depth_9x9_m": 1.0,
                 "stream_density_250m_m_per_sqkm": 20,
                 "road_density_250m_m_per_sqkm": 20,
@@ -136,9 +138,14 @@ def test_score_unlabeled_candidates_promotes_field_confirmed_corridor():
 
     by_id = scored.set_index("candidate_id")
 
-    assert by_id.loc["near-abu-corridor", "field_corridor_support_score"] == 0
+    assert by_id.loc["near-abu-corridor", "field_corridor_support_score"] > 0
     assert by_id.loc["far-route-sample", "field_corridor_support_score"] == 0
-    assert "field-confirmed culvert corridor" not in by_id.loc["near-abu-corridor", "evidence_summary"]
+    assert by_id.loc["near-abu-corridor", "culvert_likelihood_score"] > by_id.loc[
+        "far-route-sample", "culvert_likelihood_score"
+    ]
+    assert "approved culvert corridor pattern" in by_id.loc[
+        "near-abu-corridor", "evidence_summary"
+    ]
 
 
 def test_discovery_ranking_prioritizes_undiscovered_candidates():

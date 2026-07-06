@@ -45,6 +45,7 @@ def test_build_feature_table_adds_dem_hydrology_proxies(tmp_path):
     assert "elevation_m" in features.columns
     assert "topographic_wetness_proxy_9x9" in features.columns
     assert "terrain_break_score_proxy_31x31" in features.columns
+    assert "dem_culvert_terrain_score" in features.columns
     assert "crossing_geometry_signal" in features.columns
     assert features.iloc[0]["source_exact_intersection"] == 1
 
@@ -269,6 +270,78 @@ def test_known_culvert_labels_one_training_point_per_known_culvert():
     assert features.loc["field-point", "is_culvert"] == 1
     assert features.loc["near-crossing", "is_culvert"] == 0
     assert features.loc["near-route", "is_culvert"] == 0
+
+
+def test_known_culvert_pattern_features_use_approved_abu_and_doc_points():
+    candidates = gpd.GeoDataFrame(
+        [
+            {
+                "candidate_id": "known-abu",
+                "source": "field_report_observed_culvert",
+                "matched_route": "NY28",
+                "road_name": "State Rte 28",
+                "geometry": Point(0, 0),
+            },
+            {
+                "candidate_id": "near-abu-route",
+                "source": "route_interval_sample",
+                "matched_route": "NY28",
+                "road_name": "State Rte 28",
+                "geometry": Point(450, 0),
+            },
+            {
+                "candidate_id": "near-doc-route",
+                "source": "route_interval_sample",
+                "matched_route": "NY212",
+                "road_name": "State Rte 212",
+                "geometry": Point(2400, 0),
+            },
+            {
+                "candidate_id": "far-route",
+                "source": "route_interval_sample",
+                "matched_route": "NY28",
+                "road_name": "State Rte 28",
+                "geometry": Point(5000, 0),
+            },
+        ],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+    known = gpd.GeoDataFrame(
+        [
+            {
+                "culvert_id": "ABU-1",
+                "route": "NY28",
+                "source_file": "field_observations.geojson",
+                "label_confidence": 1.0,
+                "geometry": Point(0, 0),
+            },
+            {
+                "culvert_id": "DOC-1",
+                "route": "NY212",
+                "source_file": "team_report.pdf",
+                "label_confidence": 0.85,
+                "geometry": Point(2000, 0),
+            },
+        ],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+
+    features = build_feature_table(
+        candidates,
+        known_culverts=known,
+        positive_radius_m=10,
+    ).set_index("candidate_id")
+
+    assert features.loc["known-abu", "is_culvert"] == 1
+    assert features.loc["known-abu", "approved_known_culvert_pattern_score"] == 0
+    assert features.loc["near-abu-route", "nearest_known_route_match"] == 1
+    assert features.loc["near-abu-route", "nearest_known_source_abu"] == 1
+    assert features.loc["near-doc-route", "nearest_known_source_doc"] == 1
+    assert features.loc["near-abu-route", "approved_known_culvert_pattern_score"] > features.loc[
+        "far-route", "approved_known_culvert_pattern_score"
+    ]
 
 
 def test_training_sample_weights_prioritize_abu_inputs():

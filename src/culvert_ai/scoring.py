@@ -19,6 +19,7 @@ DEFAULT_WEIGHTS = {
     "road_context_score": 0.05,
     "dem_route_drainage_score": 0.18,
     "osm_culvert_tag_score": 0.04,
+    "field_corridor_support_score": 0.08,
 }
 
 
@@ -242,6 +243,14 @@ def _drainage_strength_score(table: pd.DataFrame) -> pd.Series:
 
 def _valley_position_score(table: pd.DataFrame) -> pd.Series:
     pieces = []
+    for column in (
+        "dem_valley_position_score",
+        "dem_valley_position_score_9x9",
+        "dem_valley_position_score_15x15",
+        "dem_valley_position_score_31x31",
+    ):
+        if column in table.columns:
+            pieces.append(_score_dem_route_column(table[column]))
     if "valley_depth_9x9_m" in table.columns:
         pieces.append(_percentile(table["valley_depth_9x9_m"]))
     if "topographic_position_9x9_m" in table.columns:
@@ -270,6 +279,14 @@ def _crossing_geometry_score(table: pd.DataFrame) -> pd.Series:
 
 def _terrain_break_score(table: pd.DataFrame) -> pd.Series:
     pieces = []
+    for column in (
+        "dem_terrain_break_score",
+        "dem_terrain_break_score_9x9",
+        "dem_terrain_break_score_15x15",
+        "dem_terrain_break_score_31x31",
+    ):
+        if column in table.columns:
+            pieces.append(_score_dem_route_column(table[column]))
     for column in (
         "slope_degrees",
         "elevation_relief_3x3_m",
@@ -309,6 +326,9 @@ def _dem_route_drainage_score(table: pd.DataFrame) -> pd.Series:
 
     pieces = []
     for column in (
+        "dem_culvert_terrain_score",
+        "dem_valley_position_score",
+        "dem_terrain_break_score",
         "valley_position_score",
         "terrain_break_score",
         "drainage_strength_score",
@@ -371,7 +391,7 @@ def _evidence_summary(row: pd.Series) -> str:
         ("dem_route_drainage_score", "DEM road low point or drainage dip", 0.6),
         ("osm_culvert_tag_score", "mapped culvert/tunnel signal", 0.6),
         ("field_report_support_score", "field report match", 0.6),
-        ("field_corridor_support_score", "field-confirmed culvert corridor", 0.3),
+        ("field_corridor_support_score", "approved culvert corridor pattern", 0.35),
     ]
     for column, label, threshold in thresholds:
         if float(row.get(column, 0) or 0) >= threshold:
@@ -403,7 +423,14 @@ def _field_report_support_score(table: pd.DataFrame) -> pd.Series:
 
 
 def _field_corridor_support_score(table: pd.DataFrame) -> pd.Series:
-    return _zero(table)
+    pieces = []
+    for column in (
+        "approved_known_culvert_pattern_score",
+        "approved_known_culvert_corridor_score",
+    ):
+        if column in table.columns:
+            pieces.append(pd.to_numeric(table[column], errors="coerce").fillna(0.0).clip(0, 1))
+    return _mean_score(table, pieces)
 
 
 def _attach_supervised_probability(

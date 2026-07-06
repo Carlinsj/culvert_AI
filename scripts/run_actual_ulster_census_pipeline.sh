@@ -288,7 +288,7 @@ PY
       --model-output models/actual_ulster_field_report_model.joblib \
       --metrics-output reports/actual_ulster_field_report_metrics.json \
       --importance-output reports/actual_ulster_field_report_feature_importance.csv \
-      --model-family "${CULVERT_MODEL_FAMILY:-hist_gradient_boosting}" \
+      --model-family "${CULVERT_MODEL_FAMILY:-soft_voting_ensemble}" \
       --spatial-block-size-m 2500
 
     scripts/python.sh -m culvert_ai.cli predict \

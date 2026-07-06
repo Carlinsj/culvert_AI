@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Iterable
 
@@ -9,6 +10,13 @@ import pandas as pd
 from rasterio.windows import Window
 
 from culvert_ai.io import add_wgs84_coordinates, clean_geometry, project_layers_to_metric
+
+
+KNOWN_PATTERN_RADII_M = (250.0, 500.0, 1000.0)
+ROUTE_TOKEN_RE = re.compile(
+    r"\b(?P<prefix>NY|US|I|CR)\s*-?\s*(?P<number>\d+[A-Z]?)\b",
+    re.IGNORECASE,
+)
 
 
 def build_feature_table(
@@ -33,10 +41,16 @@ def build_feature_table(
     features = add_candidate_derived_features(features)
 
     density_radii = _density_radii(density_radius_m, density_radii_m)
+    known_m = None
 
     if known_culverts is not None:
         known_m = clean_geometry(known_culverts).to_crs(metric_crs)
         features = add_known_culvert_labels(features, known_m, positive_radius_m)
+        features = add_known_culvert_pattern_features(
+            features,
+            known_m,
+            positive_radius_m=positive_radius_m,
+        )
 
     if negative_culverts is not None:
         negative_m = clean_geometry(negative_culverts).to_crs(metric_crs)
@@ -63,6 +77,13 @@ def build_feature_table(
     if dem_path:
         features = add_raster_samples(features, dem_path, prefix="dem")
         features = add_dem_hydrology_proxies(features)
+        features = add_dem_culvert_terrain_features(features)
+        if known_m is not None:
+            features = add_approved_known_dem_similarity_features(
+                features,
+                positive_radius_m=positive_radius_m,
+            )
+            features = add_known_culvert_pattern_score(features)
 
     if flow_accumulation_path:
         features = add_raster_samples(features, flow_accumulation_path, prefix="flow_accumulation")
@@ -205,6 +226,140 @@ def add_nearest_known_culvert_metadata(
             if source_column in nearest.index and pd.notna(nearest[source_column]):
                 enriched.at[row_index, output_column] = str(nearest[source_column])
 
+    return enriched
+
+
+def add_known_culvert_pattern_features(
+    candidates: gpd.GeoDataFrame,
+    known_culverts: gpd.GeoDataFrame,
+    positive_radius_m: float,
+    radii_m: tuple[float, ...] = KNOWN_PATTERN_RADII_M,
+) -> gpd.GeoDataFrame:
+    """Add bounded support from approved known culvert neighborhoods.
+
+    These columns describe context around already-approved culverts. They are
+    useful for evidence ranking, but supervised training excludes them to avoid
+    learning direct proximity to labels.
+    """
+
+    enriched = candidates.copy()
+    radii = tuple(sorted(float(radius) for radius in radii_m if float(radius) > 0))
+    for radius in radii:
+        radius_label = _radius_label(radius)
+        enriched[f"approved_known_culvert_count_{radius_label}m"] = 0
+        enriched[f"approved_known_culvert_density_{radius_label}m_per_sqkm"] = 0.0
+    enriched["nearest_known_culvert_distance_decay"] = 0.0
+    enriched["nearest_known_route_match"] = 0
+    enriched["nearest_known_source_abu"] = 0
+    enriched["nearest_known_source_doc"] = 0
+    enriched["approved_known_source_score"] = 0.0
+    enriched["approved_known_culvert_corridor_score"] = 0.0
+    enriched["approved_known_culvert_pattern_score"] = 0.0
+
+    if known_culverts.empty:
+        return enriched
+
+    known_reset = known_culverts.reset_index(drop=True)
+    known_routes = [_known_route_tokens(row) for _, row in known_reset.iterrows()]
+    known_source_scores = [_known_source_score(row) for _, row in known_reset.iterrows()]
+    known_is_abu = [_known_source_is_abu(row) for _, row in known_reset.iterrows()]
+    known_is_doc = [_known_source_is_doc(row) for _, row in known_reset.iterrows()]
+
+    count_values = {radius: [] for radius in radii}
+    density_values = {radius: [] for radius in radii}
+    decay_values: list[float] = []
+    route_match_values: list[int] = []
+    source_score_values: list[float] = []
+    abu_values: list[int] = []
+    doc_values: list[int] = []
+    corridor_scores: list[float] = []
+
+    positive_radius = max(0.0, float(positive_radius_m))
+    for _, row in enriched.iterrows():
+        geometry = row.geometry
+        if geometry is None or geometry.is_empty:
+            for radius in radii:
+                count_values[radius].append(0)
+                density_values[radius].append(0.0)
+            decay_values.append(0.0)
+            route_match_values.append(0)
+            source_score_values.append(0.0)
+            abu_values.append(0)
+            doc_values.append(0)
+            corridor_scores.append(0.0)
+            continue
+
+        distances = known_reset.geometry.distance(geometry)
+        nearest_index = int(distances.idxmin())
+        nearest_distance = float(distances.iloc[nearest_index])
+        outside_known_match = nearest_distance > positive_radius
+
+        for radius in radii:
+            count = int((distances <= radius).sum())
+            area_sqkm = np.pi * radius * radius / 1_000_000
+            count_values[radius].append(count)
+            density_values[radius].append(count / area_sqkm if area_sqkm else 0.0)
+
+        distance_decay = (
+            float(np.exp(-((nearest_distance - positive_radius) / 650.0)))
+            if outside_known_match
+            else 0.0
+        )
+        distance_decay = float(np.clip(distance_decay, 0.0, 1.0))
+        candidate_routes = _candidate_route_tokens(row)
+        route_match = int(bool(candidate_routes & known_routes[nearest_index]))
+        source_score = known_source_scores[nearest_index]
+
+        count_500 = int((distances <= 500.0).sum())
+        count_1000 = int((distances <= 1000.0).sum())
+        density_signal = min(
+            (0.50 * min(count_500, 2) / 2.0)
+            + (0.50 * min(count_1000, 4) / 4.0),
+            1.0,
+        )
+        route_signal = distance_decay if route_match else 0.0
+        corridor_score = (
+            source_score
+            * (0.55 * distance_decay + 0.25 * density_signal + 0.20 * route_signal)
+            if outside_known_match
+            else 0.0
+        )
+
+        decay_values.append(distance_decay)
+        route_match_values.append(route_match)
+        source_score_values.append(source_score)
+        abu_values.append(int(known_is_abu[nearest_index]))
+        doc_values.append(int(known_is_doc[nearest_index]))
+        corridor_scores.append(float(np.clip(corridor_score, 0.0, 1.0)))
+
+    for radius in radii:
+        radius_label = _radius_label(radius)
+        enriched[f"approved_known_culvert_count_{radius_label}m"] = count_values[radius]
+        enriched[f"approved_known_culvert_density_{radius_label}m_per_sqkm"] = density_values[
+            radius
+        ]
+    enriched["nearest_known_culvert_distance_decay"] = decay_values
+    enriched["nearest_known_route_match"] = route_match_values
+    enriched["nearest_known_source_abu"] = abu_values
+    enriched["nearest_known_source_doc"] = doc_values
+    enriched["approved_known_source_score"] = source_score_values
+    enriched["approved_known_culvert_corridor_score"] = corridor_scores
+    return add_known_culvert_pattern_score(enriched)
+
+
+def add_known_culvert_pattern_score(points: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    enriched = points.copy()
+    corridor = _numeric_score(enriched, "approved_known_culvert_corridor_score")
+    dem_similarity = _numeric_score(enriched, "approved_known_dem_similarity_score")
+    if corridor.max() <= 0 and dem_similarity.max() <= 0:
+        if "approved_known_culvert_pattern_score" not in enriched.columns:
+            enriched["approved_known_culvert_pattern_score"] = 0.0
+        return enriched
+
+    pattern = corridor.copy()
+    if dem_similarity.max() > 0:
+        pattern = (0.82 * corridor + 0.18 * corridor * dem_similarity).clip(0, 1)
+    enriched["approved_known_culvert_pattern_score"] = pattern.fillna(0.0).clip(0, 1)
     return enriched
 
 
@@ -368,6 +523,101 @@ def add_dem_hydrology_proxies(points: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     return enriched
 
 
+def add_dem_culvert_terrain_features(points: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Build label-free terrain composites from DEM local statistics."""
+
+    enriched = points.copy()
+    valley_scores = []
+    terrain_scores = []
+    for window_size in (3, 9, 15, 31):
+        valley_pieces = []
+        for column in (
+            f"valley_depth_{window_size}x{window_size}_m",
+            f"negative_tpi_{window_size}x{window_size}_m",
+            f"topographic_wetness_proxy_{window_size}x{window_size}",
+        ):
+            if column in enriched.columns:
+                valley_pieces.append(_robust_0_to_1(enriched[column]))
+        low_slope_col = f"low_slope_valley_score_{window_size}x{window_size}"
+        if low_slope_col in enriched.columns:
+            valley_pieces.append(_numeric_score(enriched, low_slope_col))
+
+        valley_col = f"dem_valley_position_score_{window_size}x{window_size}"
+        enriched[valley_col] = _mean_numeric_pieces(enriched, valley_pieces)
+        valley_scores.append(enriched[valley_col])
+
+        terrain_pieces = []
+        for column in (
+            f"terrain_break_score_proxy_{window_size}x{window_size}",
+            f"elevation_relief_{window_size}x{window_size}_m",
+            f"terrain_roughness_{window_size}x{window_size}_m",
+        ):
+            if column in enriched.columns:
+                terrain_pieces.append(_robust_0_to_1(enriched[column]))
+
+        terrain_col = f"dem_terrain_break_score_{window_size}x{window_size}"
+        enriched[terrain_col] = _mean_numeric_pieces(enriched, terrain_pieces)
+        terrain_scores.append(enriched[terrain_col])
+
+    enriched["dem_valley_position_score"] = _mean_numeric_pieces(enriched, valley_scores)
+    enriched["dem_terrain_break_score"] = _mean_numeric_pieces(enriched, terrain_scores)
+    enriched["dem_culvert_terrain_score"] = (
+        0.65 * enriched["dem_valley_position_score"]
+        + 0.35 * enriched["dem_terrain_break_score"]
+    ).clip(0, 1)
+    return enriched
+
+
+def add_approved_known_dem_similarity_features(
+    points: gpd.GeoDataFrame,
+    positive_radius_m: float,
+) -> gpd.GeoDataFrame:
+    """Compare candidate DEM terrain to the approved known culvert terrain profile."""
+
+    enriched = points.copy()
+    enriched["approved_known_dem_similarity_score"] = 0.0
+    if "is_culvert" not in enriched.columns:
+        return enriched
+
+    pattern_columns = [
+        column
+        for column in (
+            "dem_culvert_terrain_score",
+            "dem_valley_position_score",
+            "dem_terrain_break_score",
+            "dem_valley_position_score_9x9",
+            "dem_valley_position_score_15x15",
+            "dem_valley_position_score_31x31",
+            "dem_terrain_break_score_9x9",
+            "dem_terrain_break_score_15x15",
+            "dem_terrain_break_score_31x31",
+        )
+        if column in enriched.columns
+    ]
+    if not pattern_columns:
+        return enriched
+
+    known = pd.to_numeric(enriched["is_culvert"], errors="coerce").fillna(0).astype(int) == 1
+    known_values = enriched.loc[known, pattern_columns].apply(pd.to_numeric, errors="coerce")
+    known_values = known_values.dropna(how="all")
+    if known_values.empty:
+        return enriched
+
+    profile = known_values.median(axis=0)
+    candidate_values = enriched[pattern_columns].apply(pd.to_numeric, errors="coerce").fillna(
+        profile
+    )
+    difference = (candidate_values - profile).abs().mean(axis=1)
+    similarity = (1.0 - difference).clip(0, 1).fillna(0.0)
+
+    if "dist_to_known_culvert_m" in enriched.columns:
+        distance = pd.to_numeric(enriched["dist_to_known_culvert_m"], errors="coerce")
+        similarity = similarity.where(distance > float(positive_radius_m), 0.0)
+
+    enriched["approved_known_dem_similarity_score"] = similarity
+    return enriched
+
+
 def add_hydrology_raster_features(points: gpd.GeoDataFrame, prefix: str) -> gpd.GeoDataFrame:
     enriched = points.copy()
     value_col = f"{prefix}_value"
@@ -450,6 +700,10 @@ def _density_column(layer: str, radius_m: float) -> str:
     return f"{layer}_density_{radius_label}m_m_per_sqkm"
 
 
+def _radius_label(radius_m: float) -> str:
+    return str(int(radius_m)) if float(radius_m).is_integer() else str(radius_m).replace(".", "_")
+
+
 def _nearest_distance(points: Iterable, targets: gpd.GeoDataFrame) -> list[float]:
     if targets.empty:
         return [np.nan for _point in points]
@@ -498,6 +752,100 @@ def _robust_0_to_1(values: pd.Series) -> pd.Series:
     if pd.isna(low) or pd.isna(high) or high <= low:
         return pd.Series(0.0, index=values.index)
     return ((numeric - low) / (high - low)).clip(0, 1).fillna(0.0)
+
+
+def _numeric_score(table: pd.DataFrame, column: str) -> pd.Series:
+    if column not in table.columns:
+        return pd.Series(0.0, index=table.index)
+    return pd.to_numeric(table[column], errors="coerce").fillna(0.0).clip(0, 1)
+
+
+def _mean_numeric_pieces(table: pd.DataFrame, pieces: list[pd.Series]) -> pd.Series:
+    if not pieces:
+        return pd.Series(0.0, index=table.index)
+    stacked = pd.concat(pieces, axis=1)
+    return stacked.mean(axis=1).fillna(0.0).clip(0, 1)
+
+
+def _candidate_route_tokens(row: pd.Series) -> set[str]:
+    tokens: set[str] = set()
+    for column in ("matched_route", "road_name", "road_id", "nearest_field_report_route"):
+        if column in row.index and pd.notna(row[column]):
+            tokens |= _route_tokens_from_value(row[column])
+    return tokens
+
+
+def _known_route_tokens(row: pd.Series) -> set[str]:
+    tokens: set[str] = set()
+    for column in ("route", "road_name", "culvert_id", "field_culvert_id"):
+        if column in row.index and pd.notna(row[column]):
+            tokens |= _route_tokens_from_value(row[column])
+    return tokens
+
+
+def _route_tokens_from_value(value) -> set[str]:
+    text = _normalized_route_text(value)
+    tokens = {
+        f"{match.group('prefix').upper()}{match.group('number').upper()}"
+        for match in ROUTE_TOKEN_RE.finditer(text)
+    }
+    if tokens:
+        return tokens
+
+    bare = re.fullmatch(r"\s*(\d+[A-Z]?)\s*", text)
+    return {bare.group(1).upper()} if bare else set()
+
+
+def _normalized_route_text(value) -> str:
+    text = str(value or "").upper()
+    replacements = [
+        (r"\bU\.S\.\b", "US"),
+        (r"\bUS\s+ROUTE\b", "US"),
+        (r"\bUNITED\s+STATES\s+ROUTE\b", "US"),
+        (r"\bINTERSTATE\b", "I"),
+        (r"\bI\s*-\s*", "I"),
+        (r"\bSTATE\s+(?:RTE|RT|ROUTE)\b", "NY"),
+        (r"\bNYS\s+(?:RTE|RT|ROUTE)\b", "NY"),
+        (r"\bNEW\s+YORK\s+(?:RTE|RT|ROUTE)\b", "NY"),
+        (r"\bCOUNTY\s+(?:ROAD|ROUTE|RTE|RT)\b", "CR"),
+        (r"\bCO\s*(?:RD|RTE|RT)\b", "CR"),
+    ]
+    for pattern, replacement in replacements:
+        text = re.sub(pattern, replacement, text)
+    return re.sub(r"[^A-Z0-9]+", " ", text).strip()
+
+
+def _known_source_score(row: pd.Series) -> float:
+    confidence = (
+        _optional_float(row.get("label_confidence"))
+        if "label_confidence" in row.index
+        else None
+    )
+    if _known_source_is_abu(row):
+        return 1.0
+    if _known_source_is_doc(row):
+        return float(np.clip(max(confidence or 0.0, 0.85), 0.0, 1.0))
+    return float(np.clip(confidence if confidence is not None else 0.80, 0.0, 1.0))
+
+
+def _known_source_is_abu(row: pd.Series) -> bool:
+    text = " ".join(
+        str(row.get(column, "") or "")
+        for column in ("source_file", "label", "observation_id", "field_culvert_id")
+    ).lower()
+    return (
+        "field_observations.geojson" in text
+        or "confirmed_field_observation" in text
+        or str(row.get("field_culvert_id", "") or "").strip() != ""
+        or str(row.get("observation_id", "") or "").strip() != ""
+    )
+
+
+def _known_source_is_doc(row: pd.Series) -> bool:
+    if _known_source_is_abu(row):
+        return False
+    source_file = str(row.get("source_file", "") or "").strip()
+    return source_file != ""
 
 
 def _sample_value(src, x: float, y: float) -> float:

@@ -16,6 +16,7 @@ from sklearn.ensemble import (
     GradientBoostingClassifier,
     HistGradientBoostingClassifier,
     RandomForestClassifier,
+    VotingClassifier,
 )
 from sklearn.inspection import permutation_importance
 from sklearn.linear_model import LogisticRegression
@@ -77,6 +78,11 @@ DEFAULT_EXCLUDED_FEATURES = {
     "has_matched_route",
 }
 
+DEFAULT_EXCLUDED_FEATURE_PREFIXES = (
+    "approved_known_",
+    "nearest_known_",
+)
+
 
 def select_feature_columns(
     table: pd.DataFrame,
@@ -93,6 +99,7 @@ def select_feature_columns(
         column
         for column in numeric_columns
         if column not in excluded and not column.lower().endswith("_id")
+        and not column.startswith(DEFAULT_EXCLUDED_FEATURE_PREFIXES)
     ]
 
 
@@ -273,14 +280,7 @@ def _candidate_models(random_state: int) -> dict:
             random_state=random_state,
             n_jobs=1,
         ),
-        "spatial_regularized_extra_trees": ExtraTreesClassifier(
-            n_estimators=600,
-            min_samples_leaf=6,
-            max_features=0.7,
-            class_weight="balanced",
-            random_state=random_state,
-            n_jobs=1,
-        ),
+        "spatial_regularized_extra_trees": _spatial_regularized_extra_trees(random_state),
         "gradient_boosting": GradientBoostingClassifier(
             n_estimators=350,
             learning_rate=0.035,
@@ -289,23 +289,94 @@ def _candidate_models(random_state: int) -> dict:
             subsample=0.8,
             random_state=random_state,
         ),
-        "hist_gradient_boosting": HistGradientBoostingClassifier(
-            learning_rate=0.05,
-            max_iter=300,
-            max_leaf_nodes=15,
-            l2_regularization=0.1,
-            random_state=random_state,
-        ),
-        "balanced_hist_gradient_boosting": HistGradientBoostingClassifier(
-            learning_rate=0.035,
-            max_iter=450,
-            max_leaf_nodes=12,
-            min_samples_leaf=12,
-            l2_regularization=0.25,
-            class_weight="balanced",
-            random_state=random_state,
-        ),
+        "hist_gradient_boosting": _hist_gradient_boosting(random_state),
+        "balanced_hist_gradient_boosting": _balanced_hist_gradient_boosting(random_state),
+        "soft_voting_ensemble": _soft_voting_ensemble(random_state),
     }
+
+
+def _hist_gradient_boosting(random_state: int) -> HistGradientBoostingClassifier:
+    return HistGradientBoostingClassifier(
+        learning_rate=0.05,
+        max_iter=300,
+        max_leaf_nodes=15,
+        l2_regularization=0.1,
+        random_state=random_state,
+    )
+
+
+def _balanced_hist_gradient_boosting(random_state: int) -> HistGradientBoostingClassifier:
+    return HistGradientBoostingClassifier(
+        learning_rate=0.035,
+        max_iter=450,
+        max_leaf_nodes=12,
+        min_samples_leaf=12,
+        l2_regularization=0.25,
+        class_weight="balanced",
+        random_state=random_state,
+    )
+
+
+def _spatial_regularized_extra_trees(random_state: int) -> ExtraTreesClassifier:
+    return ExtraTreesClassifier(
+        n_estimators=600,
+        min_samples_leaf=6,
+        max_features=0.7,
+        class_weight="balanced",
+        random_state=random_state,
+        n_jobs=1,
+    )
+
+
+def _soft_voting_ensemble(random_state: int) -> VotingClassifier:
+    return VotingClassifier(
+        estimators=[
+            ("hist_gradient_boosting", _ensemble_hist_gradient_boosting(random_state)),
+            (
+                "balanced_hist_gradient_boosting",
+                _ensemble_balanced_hist_gradient_boosting(random_state),
+            ),
+            ("extra_trees", _ensemble_extra_trees(random_state)),
+        ],
+        voting="soft",
+        weights=[3, 2, 2],
+        n_jobs=1,
+    )
+
+
+def _ensemble_hist_gradient_boosting(random_state: int) -> HistGradientBoostingClassifier:
+    return HistGradientBoostingClassifier(
+        learning_rate=0.055,
+        max_iter=220,
+        max_leaf_nodes=15,
+        l2_regularization=0.1,
+        random_state=random_state,
+    )
+
+
+def _ensemble_balanced_hist_gradient_boosting(
+    random_state: int,
+) -> HistGradientBoostingClassifier:
+    return HistGradientBoostingClassifier(
+        learning_rate=0.04,
+        max_iter=300,
+        max_leaf_nodes=12,
+        min_samples_leaf=12,
+        l2_regularization=0.25,
+        class_weight="balanced",
+        random_state=random_state,
+    )
+
+
+def _ensemble_extra_trees(random_state: int) -> ExtraTreesClassifier:
+    return ExtraTreesClassifier(
+        n_estimators=220,
+        min_samples_leaf=8,
+        max_features=0.7,
+        class_weight="balanced",
+        random_state=random_state,
+        n_jobs=-1,
+    )
 
 
 def _compare_models(
@@ -557,6 +628,9 @@ def _feature_importance(
     if hasattr(model, "feature_importances_"):
         values = model.feature_importances_
         method = "model_feature_importance"
+    elif hasattr(model, "named_estimators_"):
+        values = _ensemble_feature_importance(model, feature_columns)
+        method = "ensemble_component_feature_importance" if values is not None else None
     elif hasattr(model, "named_steps"):
         final_step = list(model.named_steps.values())[-1]
         if hasattr(final_step, "coef_"):
@@ -598,6 +672,37 @@ def _feature_importance(
             }
         )
     return rows
+
+
+def _ensemble_feature_importance(model, feature_columns: list[str]) -> np.ndarray | None:
+    if not hasattr(model, "named_estimators_"):
+        return None
+
+    model_weights = model.weights or [1.0] * len(model.estimators)
+    weighted_values = np.zeros(len(feature_columns), dtype=float)
+    total_weight = 0.0
+    for (name, _estimator), weight in zip(model.estimators, model_weights, strict=False):
+        fitted = model.named_estimators_.get(name)
+        values = _estimator_feature_importance(fitted)
+        if values is None or len(values) != len(feature_columns):
+            continue
+        model_weight = float(weight)
+        weighted_values += model_weight * np.asarray(values, dtype=float)
+        total_weight += model_weight
+
+    if total_weight <= 0:
+        return None
+    return weighted_values / total_weight
+
+
+def _estimator_feature_importance(estimator) -> np.ndarray | None:
+    if hasattr(estimator, "feature_importances_"):
+        return np.asarray(estimator.feature_importances_, dtype=float)
+    if hasattr(estimator, "named_steps"):
+        final_step = list(estimator.named_steps.values())[-1]
+        if hasattr(final_step, "coef_"):
+            return np.abs(final_step.coef_[0])
+    return None
 
 
 def _prepare_features(
