@@ -22,6 +22,9 @@ DEFAULT_WEIGHTS = {
     "field_corridor_support_score": 0.08,
 }
 
+FIELD_RECALL_MIN_CORRIDOR_SCORE = 0.35
+FIELD_RECALL_MAX_SCORE = 0.70
+
 
 def score_unlabeled_candidates(
     features: gpd.GeoDataFrame,
@@ -109,6 +112,7 @@ def build_discovery_ranking(
     evidence_score = _score_0_to_1(ranked, "culvert_likelihood_score", scale=100.0)
     model_probability = _score_0_to_1(ranked, "culvert_probability", scale=1.0)
     model_rank_score = _model_rank_score(model_probability)
+    field_recall_score = _field_recall_score(ranked, evidence_score, model_rank_score)
     has_model = model_rank_score.notna()
 
     blended = evidence_score.copy()
@@ -122,6 +126,10 @@ def build_discovery_ranking(
     blended.loc[has_model] = (
         0.55 * agreement_signal + 0.25 * evidence_score.loc[has_model] + 0.20 * weighted_signal
     ).clip(0, 1)
+    blended = pd.Series(
+        np.maximum(blended.fillna(0.0).to_numpy(), field_recall_score.to_numpy()),
+        index=ranked.index,
+    )
 
     denied = _field_denied_mask(ranked, known_radius_m=known_radius_m)
     known = _known_field_match_mask(ranked, known_radius_m=known_radius_m) & ~denied
@@ -134,9 +142,19 @@ def build_discovery_ranking(
     ranked["evidence_score"] = (evidence_score.fillna(0.0) * 100).clip(0, 100)
     ranked["model_probability_score"] = (model_probability.fillna(0.0) * 100).clip(0, 100)
     ranked["model_rank_score"] = (model_rank_score.fillna(0.0) * 100).clip(0, 100)
+    ranked["field_recall_score"] = (field_recall_score.fillna(0.0) * 100).clip(0, 100)
     ranked["discovery_score"] = (blended.fillna(evidence_score).fillna(0.0) * 100).clip(0, 100)
-    ranked.loc[known, "discovery_score"] = 0
-    ranked.loc[denied, ["evidence_score", "model_probability_score", "model_rank_score", "discovery_score"]] = 0
+    ranked.loc[known, ["field_recall_score", "discovery_score"]] = 0
+    ranked.loc[
+        denied,
+        [
+            "evidence_score",
+            "model_probability_score",
+            "model_rank_score",
+            "field_recall_score",
+            "discovery_score",
+        ],
+    ] = 0
 
     sort_table = ranked.assign(_known_sort=known.astype(int))
     sort_table = sort_table.sort_values(
@@ -462,6 +480,26 @@ def _model_rank_score(model_probability: pd.Series) -> pd.Series:
     if model_probability.notna().sum() <= 1:
         return model_probability
     return model_probability.rank(pct=True).fillna(0.0).clip(0, 1)
+
+
+def _field_recall_score(
+    table: pd.DataFrame,
+    evidence_score: pd.Series,
+    model_rank_score: pd.Series,
+) -> pd.Series:
+    route_signal = _route_sample_signal(table)
+    corridor = _score_0_to_1(table, "field_corridor_support_score", scale=1.0).fillna(0.0)
+    dem_route = _score_0_to_1(table, "dem_route_drainage_score", scale=1.0).fillna(0.0)
+    model_signal = model_rank_score.fillna(0.0).clip(0, 1)
+    evidence_signal = evidence_score.fillna(0.0).clip(0, 1)
+    eligible = (route_signal > 0) & (corridor >= FIELD_RECALL_MIN_CORRIDOR_SCORE)
+    recall = (
+        0.60 * corridor
+        + 0.25 * model_signal
+        + 0.10 * evidence_signal
+        + 0.05 * dem_route
+    ).clip(0, FIELD_RECALL_MAX_SCORE)
+    return recall.where(eligible, 0.0).fillna(0.0)
 
 
 def _known_field_match_mask(table: pd.DataFrame, known_radius_m: float) -> pd.Series:

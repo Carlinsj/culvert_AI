@@ -39,6 +39,58 @@ def test_limit_for_web_exports_discovery_candidates_only():
     assert set(limited["candidate_id"]) == {"top"}
 
 
+def test_limit_for_web_reserves_field_recall_candidates():
+    predictions = gpd.GeoDataFrame(
+        [
+            {
+                "candidate_id": "top-1",
+                "discovery_status": "undiscovered_candidate",
+                "discovery_rank": 1,
+                "discovery_score": 90.0,
+                "field_recall_score": 0.0,
+                "dist_to_known_culvert_m": 500.0,
+                "geometry": Point(0, 0),
+            },
+            {
+                "candidate_id": "top-2",
+                "discovery_status": "undiscovered_candidate",
+                "discovery_rank": 2,
+                "discovery_score": 89.0,
+                "field_recall_score": 0.0,
+                "dist_to_known_culvert_m": 500.0,
+                "geometry": Point(0.01, 0),
+            },
+            {
+                "candidate_id": "top-3",
+                "discovery_status": "undiscovered_candidate",
+                "discovery_rank": 3,
+                "discovery_score": 88.0,
+                "field_recall_score": 0.0,
+                "dist_to_known_culvert_m": 500.0,
+                "geometry": Point(0.02, 0),
+            },
+            {
+                "candidate_id": "field-corridor",
+                "discovery_status": "undiscovered_candidate",
+                "discovery_rank": 99,
+                "discovery_score": 55.0,
+                "field_recall_score": 60.0,
+                "dist_to_known_culvert_m": 500.0,
+                "source": "route_interval_sample",
+                "matched_route": "9W",
+                "geometry": Point(0.03, 0),
+            },
+        ],
+        geometry="geometry",
+        crs="EPSG:4326",
+    )
+
+    limited = _limit_for_web(predictions, limit=3)
+
+    assert "field-corridor" in set(limited["candidate_id"])
+    assert len(limited) == 3
+
+
 def test_prediction_export_pool_removes_known_and_denied_rows():
     predictions = gpd.GeoDataFrame(
         [

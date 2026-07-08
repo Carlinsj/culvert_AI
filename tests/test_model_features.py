@@ -29,6 +29,7 @@ def test_select_feature_columns_excludes_labels_and_coordinates():
             "route_lateral_offset_m": [8.0, 0.0],
             "priority_seed": [0.0, 1.0],
             "training_sample_weight": [18.0, 0.25],
+            "field_recall_score": [65.0, 0.0],
             "approved_known_culvert_pattern_score": [0.7, 0.0],
             "approved_known_culvert_count_500m": [1, 0],
             "nearest_known_culvert_distance_decay": [0.6, 0.0],

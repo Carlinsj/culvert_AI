@@ -189,13 +189,14 @@ def test_discovery_ranking_prioritizes_undiscovered_candidates():
     assert ranked.iloc[1]["discovery_status"] == "known_field_match"
 
 
-def test_discovery_ranking_does_not_apply_known_corridor_floor_to_route_samples():
+def test_discovery_ranking_applies_bounded_field_recall_to_route_samples():
     evidence = gpd.GeoDataFrame(
         [
             {
                 "candidate_id": "corridor",
                 "source": "route_interval_sample",
                 "culvert_likelihood_score": 35.0,
+                "dem_route_drainage_score": 0.30,
                 "field_corridor_support_score": 0.50,
                 "is_culvert": 0,
                 "dist_to_known_culvert_m": 450.0,
@@ -207,6 +208,7 @@ def test_discovery_ranking_does_not_apply_known_corridor_floor_to_route_samples(
                 "candidate_id": "other",
                 "source": "route_interval_sample",
                 "culvert_likelihood_score": 48.0,
+                "dem_route_drainage_score": 0.30,
                 "field_corridor_support_score": 0.0,
                 "is_culvert": 0,
                 "dist_to_known_culvert_m": 3000.0,
@@ -218,11 +220,33 @@ def test_discovery_ranking_does_not_apply_known_corridor_floor_to_route_samples(
         geometry="geometry",
         crs="EPSG:4326",
     )
+    supervised = gpd.GeoDataFrame(
+        [
+            {
+                "candidate_id": "corridor",
+                "culvert_probability": 0.90,
+                "geometry": Point(-73.94, 42.12),
+            },
+            {
+                "candidate_id": "other",
+                "culvert_probability": 0.20,
+                "geometry": Point(-73.95, 42.13),
+            },
+        ],
+        geometry="geometry",
+        crs="EPSG:4326",
+    )
 
-    ranked = build_discovery_ranking(evidence, known_radius_m=10).set_index("candidate_id")
+    ranked = build_discovery_ranking(
+        evidence,
+        supervised_predictions=supervised,
+        known_radius_m=10,
+    ).set_index("candidate_id")
 
-    assert ranked.loc["corridor", "discovery_score"] == 35.0
-    assert ranked.loc["corridor", "discovery_score"] < ranked.loc["other", "discovery_score"]
+    assert 50.0 < ranked.loc["corridor", "field_recall_score"] <= 70.0
+    assert ranked.loc["corridor", "discovery_score"] > 35.0
+    assert ranked.loc["corridor", "discovery_score"] > ranked.loc["other", "discovery_score"]
+    assert ranked.loc["other", "field_recall_score"] == 0
 
 
 def test_discovery_ranking_does_not_count_50m_as_known_match():

@@ -376,6 +376,7 @@ def build_parser() -> argparse.ArgumentParser:
     road_candidates.add_argument("--routes", nargs="*", help="Routes such as NY28, NY32, I87.")
     road_candidates.add_argument(
         "--routes-from",
+        action="append",
         help="Optional field report point layer containing a route column.",
     )
     road_candidates.add_argument(
@@ -705,10 +706,11 @@ def _build_candidates(args) -> dict:
 def _build_road_candidates(args) -> dict:
     roads = read_vector(args.roads)
     routes = list(args.routes or [])
-    if args.routes_from:
-        route_points = read_vector(args.routes_from)
-        if "route" in route_points.columns:
-            routes.extend(str(route) for route in route_points["route"].dropna().unique())
+    for routes_from in args.routes_from or []:
+        route_points = read_vector(routes_from)
+        for column in ("route", "road_name", "matched_route"):
+            if column in route_points.columns:
+                routes.extend(str(route) for route in route_points[column].dropna().unique())
     output = generate_road_route_candidates(
         roads,
         routes=routes,

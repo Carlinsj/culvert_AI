@@ -19,6 +19,7 @@ WEB_COLUMNS = [
     "evidence_score",
     "model_probability_score",
     "model_rank_score",
+    "field_recall_score",
     "priority_rank",
     "priority_bucket",
     "culvert_likelihood_score",
@@ -81,6 +82,10 @@ WEB_COLUMNS = [
 KNOWN_EXPORT_EXCLUSION_RADIUS_M = 15.0
 WEB_EXPORT_MIN_SPACING_M = 100.0
 WEB_EXPORT_MAX_PER_ROAD = 250
+WEB_EXPORT_FIELD_RECALL_SHARE = 0.35
+WEB_EXPORT_FIELD_RECALL_MIN_SCORE = 45.0
+WEB_EXPORT_FIELD_RECALL_MIN_SPACING_M = 15.0
+WEB_EXPORT_FIELD_RECALL_MAX_PER_ROAD = 1000
 
 
 def export_web_data(
@@ -146,16 +151,30 @@ def _limit_for_web(predictions: gpd.GeoDataFrame, limit: int) -> gpd.GeoDataFram
     if "discovery_status" not in predictions.columns:
         return predictions.head(limit)
 
+    pool = _prediction_export_pool(predictions)
+    recall = _field_recall_export_pool(pool)
+    recall_limit = int(round(limit * WEB_EXPORT_FIELD_RECALL_SHARE))
+    recall = _decluster_for_web(
+        recall,
+        limit=recall_limit,
+        min_spacing_m=WEB_EXPORT_FIELD_RECALL_MIN_SPACING_M,
+        max_per_road=WEB_EXPORT_FIELD_RECALL_MAX_PER_ROAD,
+    )
+
+    remaining = _drop_exported_candidates(pool, recall)
     discovery = _decluster_for_web(
-        _prediction_export_pool(predictions),
+        remaining,
         limit=limit,
         min_spacing_m=WEB_EXPORT_MIN_SPACING_M,
         max_per_road=WEB_EXPORT_MAX_PER_ROAD,
     )
-    combined = pd.concat([discovery], ignore_index=True)
+    remaining_slots = max(0, limit - len(recall))
+    discovery = discovery.head(remaining_slots)
+    combined = pd.concat([recall, discovery], ignore_index=True)
     if "candidate_id" in combined.columns:
         combined = combined.drop_duplicates("candidate_id")
-    return gpd.GeoDataFrame(combined, geometry="geometry", crs=predictions.crs)
+    combined = gpd.GeoDataFrame(combined, geometry="geometry", crs=predictions.crs)
+    return _sort_for_web(combined).head(limit)
 
 
 def _prediction_export_pool(predictions: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
@@ -173,6 +192,50 @@ def _prediction_export_pool(predictions: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         source = filtered["source"].fillna("").astype(str)
         filtered = filtered[source != "field_report_observed_culvert"]
     return gpd.GeoDataFrame(filtered, geometry="geometry", crs=predictions.crs)
+
+
+def _field_recall_export_pool(predictions: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    if predictions.empty or "field_recall_score" not in predictions.columns:
+        return predictions.head(0)
+
+    score = pd.to_numeric(predictions["field_recall_score"], errors="coerce").fillna(0.0)
+    recall = predictions[score >= WEB_EXPORT_FIELD_RECALL_MIN_SCORE].copy()
+    if recall.empty:
+        return recall
+
+    sort_columns = [
+        column
+        for column in ("field_recall_score", "discovery_score", "culvert_likelihood_score")
+        if column in recall.columns
+    ]
+    if sort_columns:
+        recall = recall.sort_values(sort_columns, ascending=[False] * len(sort_columns))
+    return gpd.GeoDataFrame(recall, geometry="geometry", crs=predictions.crs)
+
+
+def _drop_exported_candidates(
+    predictions: gpd.GeoDataFrame,
+    exported: gpd.GeoDataFrame,
+) -> gpd.GeoDataFrame:
+    if exported.empty:
+        return predictions
+    if "candidate_id" in predictions.columns and "candidate_id" in exported.columns:
+        exported_ids = set(exported["candidate_id"].fillna("").astype(str))
+        return predictions[~predictions["candidate_id"].fillna("").astype(str).isin(exported_ids)]
+    return predictions.drop(index=exported.index.intersection(predictions.index), errors="ignore")
+
+
+def _sort_for_web(predictions: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    if predictions.empty:
+        return predictions
+    if "discovery_rank" in predictions.columns:
+        return predictions.sort_values("discovery_rank")
+    sort_column = _score_column(predictions)
+    if sort_column:
+        return predictions.sort_values(sort_column, ascending=False)
+    if "priority_rank" in predictions.columns:
+        return predictions.sort_values("priority_rank")
+    return predictions
 
 
 def _decluster_for_web(

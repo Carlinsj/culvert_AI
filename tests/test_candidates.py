@@ -1,8 +1,11 @@
+from types import SimpleNamespace
+
 import geopandas as gpd
 import pytest
-from shapely.geometry import LineString
+from shapely.geometry import LineString, Point
 
 from culvert_ai.candidates import generate_road_route_candidates, _route_tokens_from_text
+from culvert_ai.cli import _build_road_candidates
 
 
 def test_route_tokens_parse_numbered_highway_names():
@@ -101,3 +104,47 @@ def test_build_road_route_candidates_still_requires_a_route_without_numbered_mod
 
     with pytest.raises(ValueError, match="At least one usable route"):
         generate_road_route_candidates(roads, routes=[], interval_m=40)
+
+
+def test_build_road_candidates_reads_routes_from_road_name_column(tmp_path):
+    roads_path = tmp_path / "roads.geojson"
+    routes_path = tmp_path / "observations.geojson"
+    output_path = tmp_path / "route_candidates.geojson"
+    roads = gpd.GeoDataFrame(
+        [
+            {
+                "FULLNAME": "US Hwy 9w",
+                "geometry": LineString([(0, 0), (120, 0)]),
+            },
+            {
+                "FULLNAME": "Local Rd",
+                "geometry": LineString([(0, 100), (120, 100)]),
+            },
+        ],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+    observations = gpd.GeoDataFrame(
+        [{"road_name": "US Hwy 9w", "geometry": Point(0, 0)}],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+    roads.to_file(roads_path, driver="GeoJSON")
+    observations.to_file(routes_path, driver="GeoJSON")
+
+    result = _build_road_candidates(
+        SimpleNamespace(
+            roads=str(roads_path),
+            output=str(output_path),
+            routes=[],
+            routes_from=[str(routes_path)],
+            interval_m=40,
+            all_numbered_roads=False,
+            lateral_offsets_m=[0.0],
+        )
+    )
+    candidates = gpd.read_file(output_path)
+
+    assert result["rows"] == 3
+    assert set(candidates["road_name"]) == {"US Hwy 9w"}
+    assert set(candidates["matched_route"]) == {"9W"}

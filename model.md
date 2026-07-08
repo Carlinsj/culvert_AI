@@ -258,6 +258,13 @@ discovery_score =
   )
 ```
 
+Route-sampled candidates also get a bounded field-recall check. If a route
+candidate has strong `field_corridor_support_score`, the ranking can lift it
+with `field_recall_score`, capped at `70`, using corridor support, model rank,
+GIS evidence, and DEM route-drainage evidence. This is meant to keep learned
+field corridors visible on the map instead of dropping them below the web export
+cutoff.
+
 If no supervised model output is available, the discovery score falls back to the
 evidence score.
 

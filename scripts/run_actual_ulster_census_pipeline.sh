@@ -139,10 +139,16 @@ if [ "$BUILD_NUMBERED_ROAD_CANDIDATES" = "1" ] || { [ -n "$EXTRACTED_POINTS_PATH
     OBSERVED_ROUTE_CANDIDATE_ARGS=(
       --roads data/raw/roads.gpkg
       --interval-m "${ROUTE_CORRIDOR_SAMPLE_INTERVAL_M:-10}"
-      --lateral-offsets-m ${ROUTE_CORRIDOR_SAMPLE_OFFSETS_M:--8 8}
+      --lateral-offsets-m ${ROUTE_CORRIDOR_SAMPLE_OFFSETS_M:--40 -20 0 20 40}
       --output data/interim/actual_ulster_observed_route_candidates.gpkg
       --routes "${ROUTE_CORRIDOR_ARGS[@]}"
     )
+    if [ -n "$EXTRACTED_POINTS_PATH" ] && [ -f "$EXTRACTED_POINTS_PATH" ]; then
+      OBSERVED_ROUTE_CANDIDATE_ARGS+=(--routes-from "$EXTRACTED_POINTS_PATH")
+    fi
+    if [ -f data/processed/field_observations.geojson ]; then
+      OBSERVED_ROUTE_CANDIDATE_ARGS+=(--routes-from data/processed/field_observations.geojson)
+    fi
     scripts/python.sh -m culvert_ai.cli build-road-candidates "${OBSERVED_ROUTE_CANDIDATE_ARGS[@]}"
     ROUTE_CANDIDATE_INPUTS+=(data/interim/actual_ulster_observed_route_candidates.gpkg)
   fi

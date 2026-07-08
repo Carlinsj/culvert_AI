@@ -62,6 +62,7 @@ DEFAULT_EXCLUDED_FEATURES = {
     "evidence_score",
     "model_probability_score",
     "model_rank_score",
+    "field_recall_score",
     "label_confidence",
     "nearest_field_report_label_confidence",
     "training_sample_weight",
