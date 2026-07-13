@@ -23,6 +23,10 @@ const LOCATION_FOCUS_ZOOM = 16;
 const LOCATION_MIN_MOVE_M = 4;
 const LOCATION_LIST_THROTTLE_MS = 650;
 const LOCATION_RECENTER_THRESHOLD_M = 120;
+const ROUTE_TARGET_AUTO_RADIUS_M = 1000;
+const ROUTE_TARGET_AUTO_MIN_MOVE_M = 90;
+const ROUTE_TARGET_AUTO_DEBOUNCE_MS = 900;
+const ROUTE_TARGET_AUTO_TOP_N = 60;
 const OSM_MAX_NATIVE_ZOOM = 19;
 const MAP_MAX_ZOOM = 20;
 const MAX_LIST_ITEMS = 250;
@@ -65,6 +69,8 @@ const state = {
   locationMarker: null,
   locationAccuracyCircle: null,
   lastLocationListRenderAt: 0,
+  lastRouteTargetAutoLocation: null,
+  routeTargetAutoTimer: null,
   listDiscoveryCount: 0,
   shouldFocusLocationOnNextUpdate: false,
   modelSummary: null,
@@ -187,7 +193,7 @@ function setupMap() {
   state.routeCountLayer = L.layerGroup().addTo(state.map);
   state.draftPointLayer = L.layerGroup().addTo(state.map);
   state.map.on("click", handleMapClick);
-  state.map.on("moveend", updateRecenterLocationButton);
+  state.map.on("moveend", handleMapMoveEnd);
   requestAnimationFrame(() => state.map.invalidateSize());
 }
 
@@ -258,6 +264,13 @@ function bindControls() {
       els.detailModal.close();
     }
   });
+}
+
+function handleMapMoveEnd() {
+  updateRecenterLocationButton();
+  if (state.locationWatchId !== null && state.userLocation) {
+    scheduleAutoRouteTargets();
+  }
 }
 
 function toggleFilterPanel() {
@@ -524,12 +537,16 @@ async function runRouteCount(options = {}) {
     url.searchParams.set("topN", String(topN));
     const report = await fetchRouteCount(url);
     if (requestId === state.routeCountRequestId) {
-      renderRouteCountResult(report);
+      renderRouteCountResult(report, options.viewLabel);
       renderRouteCountTargetsOnMap(report.top_clusters || []);
       if (options.statusMessage) {
         const count = Number(report.recommended?.predicted_count ?? 0);
         const targetCount = Array.isArray(report.top_clusters) ? report.top_clusters.length : 0;
-        setLocationStatus(`${count.toLocaleString()} predicted in this view. Showing ${targetCount} route-count targets.`);
+        const completeMessage =
+          typeof options.completeStatusMessage === "function"
+            ? options.completeStatusMessage(report, targetCount)
+            : `${count.toLocaleString()} predicted in this view. Showing ${targetCount} route-count targets.`;
+        setLocationStatus(completeMessage);
       }
     }
   } catch (error) {
@@ -565,6 +582,10 @@ function runMobileRouteCount() {
     topN: 50,
     pendingMessage: "Loading targets for this map view...",
     statusMessage: "Loading route-count targets for this map view...",
+    completeStatusMessage: (report, targetCount) => {
+      const count = Number(report.recommended?.predicted_count ?? 0);
+      return `${count.toLocaleString()} predicted in this view. Showing ${targetCount} route-count targets.`;
+    },
   });
 }
 
@@ -574,6 +595,57 @@ function routeCountRouteForMobile() {
   const search = String(els.search?.value || "").trim();
   if (routeSearchTokens(search).length) return search;
   return "";
+}
+
+function scheduleAutoRouteTargets(options = {}) {
+  if (!state.userLocation || window.location.protocol === "file:") return;
+
+  const previous = state.lastRouteTargetAutoLocation;
+  const movedMeters = previous
+    ? distanceMeters(previous.lat, previous.lng, state.userLocation.lat, state.userLocation.lng)
+    : Infinity;
+  if (!options.force && movedMeters < ROUTE_TARGET_AUTO_MIN_MOVE_M) return;
+
+  window.clearTimeout(state.routeTargetAutoTimer);
+  state.routeTargetAutoTimer = window.setTimeout(() => {
+    if (!state.userLocation) return;
+    const { lat, lng } = state.userLocation;
+    state.lastRouteTargetAutoLocation = { lat, lng };
+    runRouteCount({
+      route: routeCountRouteForMobile(),
+      bbox: bboxAroundLatLng(lat, lng, ROUTE_TARGET_AUTO_RADIUS_M),
+      topN: ROUTE_TARGET_AUTO_TOP_N,
+      viewLabel: "near you",
+      pendingMessage: "Loading route-count targets near you...",
+      statusMessage: "Loading route-count targets near you...",
+      completeStatusMessage: (report, targetCount) => {
+        const count = Number(report.recommended?.predicted_count ?? 0);
+        return `${count.toLocaleString()} predicted near you. Showing ${targetCount} nearby targets.`;
+      },
+    });
+  }, options.immediate ? 0 : ROUTE_TARGET_AUTO_DEBOUNCE_MS);
+}
+
+function bboxAroundLatLng(latitude, longitude, radiusMeters) {
+  const latDelta = radiusMeters / 111320;
+  const lonScale = Math.max(Math.cos((latitude * Math.PI) / 180), 0.12);
+  const lonDelta = radiusMeters / (111320 * lonScale);
+  return [
+    clampLongitude(longitude - lonDelta),
+    clampLatitude(latitude - latDelta),
+    clampLongitude(longitude + lonDelta),
+    clampLatitude(latitude + latDelta),
+  ]
+    .map((value) => Number(value).toFixed(6))
+    .join(",");
+}
+
+function clampLatitude(value) {
+  return Math.min(90, Math.max(-90, value));
+}
+
+function clampLongitude(value) {
+  return Math.min(180, Math.max(-180, value));
 }
 
 function runKingstonRouteCount() {
@@ -625,7 +697,7 @@ function currentMapBbox() {
     .join(",");
 }
 
-function renderRouteCountResult(report) {
+function renderRouteCountResult(report, viewLabelOverride = "") {
   if (!els.routeCountResult) return;
   const recommended = report.recommended || {};
   const predictedCount = Number(recommended.predicted_count ?? 0);
@@ -633,7 +705,7 @@ function renderRouteCountResult(report) {
   const interval = Array.isArray(recommended.prediction_interval_90)
     ? recommended.prediction_interval_90
     : [0, 0];
-  const viewLabel = report.bbox ? "current view" : "full route";
+  const viewLabel = viewLabelOverride || (report.bbox ? "current view" : "full route");
   const routeLabel = report.route ? escapeHtml(report.route) : "all routes";
   const sourceRows = Number(report.data_source?.rows ?? report.source_rows ?? 0);
   const coverage = report.data_source?.complete
@@ -1409,6 +1481,9 @@ function stopLocationTracking() {
   state.locationMarker = null;
   state.locationAccuracyCircle = null;
   state.lastLocationListRenderAt = 0;
+  state.lastRouteTargetAutoLocation = null;
+  window.clearTimeout(state.routeTargetAutoTimer);
+  state.routeTargetAutoTimer = null;
   state.shouldFocusLocationOnNextUpdate = false;
   state.locationLayer?.clearLayers();
   updateLocationButton(false);
@@ -1448,6 +1523,7 @@ function handleLocationSuccess(position) {
   updateLocationButton(true);
   updateRecenterLocationButton();
   setLocationStatus("Tracking is on. Nearby list updates as your position changes.");
+  scheduleAutoRouteTargets({ force: !previousLocation });
 }
 
 function handleLocationError(error) {
@@ -1459,6 +1535,9 @@ function handleLocationError(error) {
     navigator.geolocation.clearWatch(state.locationWatchId);
   }
   state.locationWatchId = null;
+  state.lastRouteTargetAutoLocation = null;
+  window.clearTimeout(state.routeTargetAutoTimer);
+  state.routeTargetAutoTimer = null;
   state.shouldFocusLocationOnNextUpdate = false;
   updateLocationButton(false);
   updateRecenterLocationButton();

@@ -14,6 +14,7 @@ const requiredFiles = [
   "web/data/summary.json",
   "web/data/model_summary.json",
   "api/findings.js",
+  "api/health.js",
   "api/observations.js",
   "api/route-count.js",
   "api/cron/retrain.js",
@@ -62,6 +63,7 @@ console.log(
 
 await Promise.all([
   import("../api/findings.js"),
+  import("../api/health.js"),
   import("../api/observations.js"),
   import("../api/route-count.js"),
   import("../api/cron/retrain.js"),
