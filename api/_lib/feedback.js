@@ -345,6 +345,7 @@ function applyObservationToFeature(feature, observation) {
   props.field_feedback_observation_id = obs.observation_id;
   props.field_feedback_at = obs.observed_at;
   props.field_feedback_notes = obs.notes || "";
+  props.field_feedback_source = obs.source || "";
 
   if (status === "confirmed_culvert") {
     props.is_known_field_match = 1;
@@ -452,6 +453,7 @@ function featureFromConfirmedObservation(observation) {
       field_feedback_observation_id: obs.observation_id,
       field_feedback_at: obs.observed_at,
       field_feedback_notes: obs.notes || "",
+      field_feedback_source: obs.source || "",
     },
     geometry: {
       type: "Point",

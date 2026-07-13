@@ -13,6 +13,16 @@ const OBSERVATION_STATUSES = {
   uncertain: "Needs another look",
 };
 const CONFIRMED_FIELD_LABEL = "CBU";
+const CONFIRMED_FIELD_VIEW = "cbu";
+const CONFIRMED_FIELD_ID_PREFIX = "CBU";
+const FIELD_OBSERVATION_VIEWS = new Set(["incorrect", CONFIRMED_FIELD_VIEW, "mvd", "abu"]);
+const FIELD_VIEW_LABELS = {
+  ranked: "Targets",
+  incorrect: "Incorrect",
+  [CONFIRMED_FIELD_VIEW]: CONFIRMED_FIELD_LABEL,
+  mvd: "MVD",
+  abu: "ABU",
+};
 const MOBILE_VIEWPORT_QUERY = "(max-width: 1180px)";
 const NEARBY_FOCUS_LIMIT = 12;
 const FIELD_CONTEXT_RADIUS_M = 100;
@@ -27,11 +37,12 @@ const LOCATION_RECENTER_THRESHOLD_M = 120;
 const ROUTE_TARGET_AUTO_RADIUS_M = 500;
 const ROUTE_TARGET_AUTO_MIN_MOVE_M = 70;
 const ROUTE_TARGET_AUTO_DEBOUNCE_MS = 900;
-const ROUTE_TARGET_AUTO_TOP_N = 16;
-const ROUTE_TARGET_AUTO_MAP_LIMIT = 10;
-const ROUTE_TARGET_MANUAL_TOP_N = 24;
-const ROUTE_TARGET_MANUAL_MAP_LIMIT = 16;
-const ROUTE_TARGET_MAP_MIN_GAP_PX = 52;
+const ROUTE_TARGET_AUTO_TOP_N = 14;
+const ROUTE_TARGET_AUTO_MAP_LIMIT = 6;
+const ROUTE_TARGET_MANUAL_TOP_N = 18;
+const ROUTE_TARGET_MANUAL_MAP_LIMIT = 8;
+const ROUTE_TARGET_MAP_MIN_GAP_PX = 74;
+const ROUTE_TARGET_MANUAL_COOLDOWN_MS = 30000;
 const OSM_MAX_NATIVE_ZOOM = 19;
 const MAP_MAX_ZOOM = 20;
 const MAX_LIST_ITEMS = 250;
@@ -64,6 +75,7 @@ const state = {
   observationLayer: null,
   locationLayer: null,
   movedOffsetLayer: null,
+  draftMovedOffsetLayer: null,
   movedOffsetRenderer: null,
   routeCountLayer: null,
   draftPointLayer: null,
@@ -79,6 +91,7 @@ const state = {
   locationAccuracyCircle: null,
   lastLocationListRenderAt: 0,
   lastRouteTargetAutoLocation: null,
+  lastManualRouteTargetAt: 0,
   routeTargetAutoTimer: null,
   listDiscoveryCount: 0,
   shouldFocusLocationOnNextUpdate: false,
@@ -95,7 +108,7 @@ const els = {
   list: document.querySelector("#candidate-list"),
   listHeading: document.querySelector("#list-heading"),
   listViewButtons: [...document.querySelectorAll("[data-list-view]")],
-  abuTab: document.querySelector("#abu-tab"),
+  cbuTab: document.querySelector("#cbu-tab"),
   template: document.querySelector("#candidate-template"),
   search: document.querySelector("#search-input"),
   score: document.querySelector("#score-range"),
@@ -171,9 +184,7 @@ function applyDashboardData(geojson, summary, observations, options = {}) {
     selectedObservationId && state.observations.some((feature) => observationIdOf(feature) === selectedObservationId)
       ? selectedObservationId
       : null;
-  if (!state.selectedObservationId) {
-    clearMovedOffsetOverlay();
-  }
+  clearMovedOffsetOverlay();
   renderSummary(summary);
   render();
 }
@@ -203,6 +214,7 @@ function setupMap() {
   state.observationLayer = L.layerGroup().addTo(state.map);
   state.locationLayer = L.layerGroup().addTo(state.map);
   state.movedOffsetLayer = L.layerGroup().addTo(state.map);
+  state.draftMovedOffsetLayer = L.layerGroup().addTo(state.map);
   state.movedOffsetRenderer = L.svg({ padding: 0.5 });
   state.routeCountLayer = L.layerGroup().addTo(state.map);
   state.draftPointLayer = L.layerGroup().addTo(state.map);
@@ -330,8 +342,8 @@ function setMobileDrawerOpen(open) {
 }
 
 function setListView(view) {
-  state.listView = view === "abu" ? "abu" : "ranked";
-  if (state.listView === "abu") {
+  state.listView = FIELD_OBSERVATION_VIEWS.has(view) ? view : "ranked";
+  if (state.listView !== "ranked") {
     setFilterPanelOpen(false);
   }
   updateListViewControls();
@@ -560,6 +572,9 @@ async function runRouteCount(options = {}) {
   if (options.statusMessage) {
     setLocationStatus(options.statusMessage);
   }
+  if (options.clearTargetsOnStart !== false) {
+    state.routeCountLayer?.clearLayers();
+  }
 
   try {
     const url = new URL(ROUTE_COUNT_URL, window.location.href);
@@ -609,11 +624,13 @@ async function runRouteCount(options = {}) {
 }
 
 function runMobileRouteCount() {
+  if (els.mobileRouteCount?.disabled) return;
   const bbox = currentMapBbox();
   if (!bbox) {
     setLocationStatus("Move the map to the route area before loading targets.");
     return;
   }
+  state.lastManualRouteTargetAt = Date.now();
   const route = routeCountRouteForMobile();
   runRouteCount({
     route,
@@ -639,6 +656,7 @@ function routeCountRouteForMobile() {
 
 function scheduleAutoRouteTargets(options = {}) {
   if (!state.userLocation || window.location.protocol === "file:") return;
+  if (Date.now() - state.lastManualRouteTargetAt < ROUTE_TARGET_MANUAL_COOLDOWN_MS) return;
 
   const previous = state.lastRouteTargetAutoLocation;
   const movedMeters = previous
@@ -830,7 +848,7 @@ function renderRouteCountTargetsOnMap(targets, options = {}) {
     });
     marker.addTo(state.routeCountLayer);
   });
-  refreshSelectedMovedOffsetOverlay();
+  renderSavedMovedOffsetOverlays();
   return visibleTargets.length;
 }
 
@@ -1196,8 +1214,8 @@ function renderList() {
   els.list.replaceChildren();
   updateListViewControls();
 
-  if (state.listView === "abu") {
-    renderAbuList();
+  if (FIELD_OBSERVATION_VIEWS.has(state.listView)) {
+    renderFieldObservationList(state.listView);
     return;
   }
 
@@ -1229,14 +1247,15 @@ function renderList() {
   els.list.append(fragment);
 }
 
-function renderAbuList() {
+function renderFieldObservationList(view) {
   const fragment = document.createDocumentFragment();
-  const observations = abuObservations();
+  const observations = fieldObservationsForView(view);
+  const label = FIELD_VIEW_LABELS[view] || "Field";
 
   if (!observations.length) {
     const empty = document.createElement("li");
     empty.className = "list-empty";
-    empty.textContent = `No ${CONFIRMED_FIELD_LABEL} points saved yet.`;
+    empty.textContent = `No ${label} points saved yet.`;
     fragment.append(empty);
     els.list.append(fragment);
     return;
@@ -1246,20 +1265,20 @@ function renderAbuList() {
     const props = feature.properties || {};
     const observationId = observationIdOf(feature);
     const item = document.createElement("li");
-    item.className = "abu-list-item";
+    item.className = "cbu-list-item";
     item.innerHTML = `
-      <div class="abu-card">
-        <button type="button" class="abu-select${observationId === state.selectedObservationId ? " active" : ""}">
+      <div class="cbu-card">
+        <button type="button" class="cbu-select${observationId === state.selectedObservationId ? " active" : ""}">
           <span class="rank">${escapeHtml(observationListBadge(props))}</span>
           <span class="candidate-main">
             <strong class="candidate-title">${escapeHtml(observationTitle(props))} ${escapeHtml(String(index + 1))}</strong>
             <span class="candidate-subtitle">${escapeHtml(observationSubtitle(props))}</span>
           </span>
         </button>
-        <button type="button" class="abu-delete" data-observation-delete="${escapeAttr(observationId)}">Delete</button>
+        <button type="button" class="cbu-delete" data-observation-delete="${escapeAttr(observationId)}">Delete</button>
       </div>
     `;
-    item.querySelector(".abu-select")?.addEventListener("click", () => selectObservation(observationId, { pan: true }));
+    item.querySelector(".cbu-select")?.addEventListener("click", () => selectObservation(observationId, { pan: true }));
     fragment.append(item);
   });
 
@@ -1268,15 +1287,20 @@ function renderAbuList() {
 
 function updateListViewControls() {
   if (els.listHeading) {
-    els.listHeading.textContent = state.listView === "abu" ? `${CONFIRMED_FIELD_LABEL} points` : "Ranked locations";
+    const label = FIELD_VIEW_LABELS[state.listView] || "Ranked";
+    els.listHeading.textContent = state.listView === "ranked" ? "Targets" : `${label} points`;
   }
   els.listViewButtons.forEach((button) => {
-    button.setAttribute("aria-selected", String(button.dataset.listView === state.listView));
+    const view = button.dataset.listView || "ranked";
+    button.setAttribute("aria-selected", String(view === state.listView));
+    const label = FIELD_VIEW_LABELS[view] || button.textContent.trim();
+    if (FIELD_OBSERVATION_VIEWS.has(view)) {
+      const count = fieldObservationsForView(view).length;
+      button.textContent = count ? `${label} (${count})` : label;
+    } else {
+      button.textContent = label;
+    }
   });
-  if (els.abuTab) {
-    const count = abuObservations().length;
-    els.abuTab.textContent = count ? `${CONFIRMED_FIELD_LABEL} (${count})` : CONFIRMED_FIELD_LABEL;
-  }
 }
 
 function selectFeature(candidateId, options = { pan: true }) {
@@ -2157,8 +2181,8 @@ function drawCandidateCanvasLabels(context, items, zoom) {
 
 function candidateCanvasLabel(item, zoom) {
   if (item.props.knownFieldMatch) {
-    if (isMovedObservation(item.props)) return "MVD";
-    if (isFieldObservedKnown(item.props)) return CONFIRMED_FIELD_LABEL;
+    const code = knownFieldObservationCode(item.props);
+    if (code) return code;
     return item.selected && zoom >= 16 ? "K" : "";
   }
   if (item.selected) return String(Math.round(item.props.score));
@@ -2185,18 +2209,13 @@ function renderObservationMarkers() {
     marker.addTo(state.observationLayer);
     state.observationMarkers.set(observationId, marker);
   });
+  renderSavedMovedOffsetOverlays();
 }
 
 function observationIcon(props) {
   const normalized = observationStatus(props?.status);
   const moved = isMovedObservation(props);
-  const text = moved
-    ? "MVD"
-    : normalized === "confirmed_culvert"
-      ? CONFIRMED_FIELD_LABEL
-      : normalized === "no_culvert"
-        ? "NO"
-        : "?";
+  const text = observationDisplayCode(props);
   return L.divIcon({
     className: `observation-marker observation-${normalized}${moved ? " observation-moved" : ""}`,
     html: `<span class="observation-dot">${text}</span>`,
@@ -2234,10 +2253,22 @@ function knownCulvertLabel(props) {
 }
 
 function knownCulvertShortLabel(props) {
-  if (isFieldObservedKnown(props)) return CONFIRMED_FIELD_LABEL;
+  const code = knownFieldObservationCode(props);
+  if (code) return code;
   const label = formatReadableId(knownCulvertLabel(props));
   if (/^sc[-_]?\d+/i.test(label)) return label.replace(/^sc/i, "SC").slice(0, 7);
   return "K";
+}
+
+function knownFieldObservationCode(props) {
+  if (!isFieldObservedKnown(props)) return "";
+  const layoutSource = String(props?.layout_source || props?.field_layout_source || "");
+  const feedbackSource = String(props?.field_feedback_source || props?.source || "");
+  if (layoutSource === "moved_route_count_target") return "MVD";
+  if (layoutSource === "route_count_target_review" || feedbackSource === "prediction_review") {
+    return CONFIRMED_FIELD_LABEL;
+  }
+  return "ABU";
 }
 
 function isFieldObservedKnown(props) {
@@ -2245,11 +2276,12 @@ function isFieldObservedKnown(props) {
     props.nearest_field_report_source_file,
     props.field_report_source_file,
     props.nearest_field_report_culvert_id,
+    props.field_added_culvert_id,
   ]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
-  return source.includes("field_observations.geojson") || /\bfc-\d{8}-/i.test(source);
+  return source.includes("field_observations") || /\b(?:cbu|fc)-\d{8}-/i.test(source);
 }
 
 function fieldFeedbackHtml(title) {
@@ -2589,8 +2621,36 @@ function observationIdOf(feature) {
   return String(feature?.properties?.observation_id || "");
 }
 
-function abuObservations() {
-  return state.observations.filter((feature) => observationStatus(feature.properties?.status) === "confirmed_culvert");
+function fieldObservationsForView(view) {
+  return state.observations.filter((feature) => fieldObservationView(feature.properties || {}) === view);
+}
+
+function fieldObservationView(props) {
+  const status = observationStatus(props?.status);
+  if (status === "no_culvert") return "incorrect";
+  if (isMovedObservation(props)) return "mvd";
+  if (status === "confirmed_culvert") {
+    return isConfirmedPredictionObservation(props) ? CONFIRMED_FIELD_VIEW : "abu";
+  }
+  return "";
+}
+
+function isConfirmedPredictionObservation(props) {
+  return (
+    observationStatus(props?.status) === "confirmed_culvert" &&
+    !isMovedObservation(props) &&
+    (String(props?.source || "") === "prediction_review" ||
+      String(props?.layout_source || props?.field_layout_source || "") === "route_count_target_review")
+  );
+}
+
+function observationDisplayCode(props) {
+  const view = fieldObservationView(props);
+  if (view === "incorrect") return "INC";
+  if (view === CONFIRMED_FIELD_VIEW) return CONFIRMED_FIELD_LABEL;
+  if (view === "mvd") return "MVD";
+  if (view === "abu") return "ABU";
+  return "?";
 }
 
 function observationSubtitle(props) {
@@ -2609,6 +2669,7 @@ function renderObservationDetail(feature) {
   const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${props.latitude},${props.longitude}`;
   const moved = isMovedObservation(props);
   const offset = movedObservationOffsetMeters(props);
+  const deleteLabel = moved ? "Delete moved point" : `Delete ${observationDisplayCode(props)}`;
   showDetailPanel();
   els.detail.innerHTML = `
     <div class="detail-panel-header">
@@ -2627,7 +2688,7 @@ function renderObservationDetail(feature) {
     ${moved ? `<p class="context-note">${escapeHtml(movedObservationSummary(props))}</p>` : ""}
     <div class="actions location-actions">
       <a href="${escapeAttr(mapsUrl)}" target="_blank" rel="noreferrer">Google Maps</a>
-      <button type="button" class="danger-action" data-observation-delete="${escapeAttr(props.observation_id || "")}">${moved ? "Delete moved point" : `Delete ${CONFIRMED_FIELD_LABEL}`}</button>
+      <button type="button" class="danger-action" data-observation-delete="${escapeAttr(props.observation_id || "")}">${escapeHtml(deleteLabel)}</button>
     </div>
   `;
   bindDetailCloseAction();
@@ -2651,15 +2712,21 @@ function observationTitle(props) {
   if (isMovedObservation(props)) {
     return "Moved prediction";
   }
-  if (observationStatus(props?.status) === "confirmed_culvert" && props?.source === "field_added_culvert") {
+  const view = fieldObservationView(props);
+  if (view === "incorrect") {
+    return "Incorrect";
+  }
+  if (view === CONFIRMED_FIELD_VIEW) {
+    return "Confirmed culvert";
+  }
+  if (view === "abu") {
     return "Added by user";
   }
   return statusLabel(props?.status);
 }
 
 function observationListBadge(props) {
-  if (isMovedObservation(props)) return "MVD";
-  return observationStatus(props?.status) === "confirmed_culvert" ? CONFIRMED_FIELD_LABEL : "?";
+  return observationDisplayCode(props);
 }
 
 function isMovedObservation(props) {
@@ -2686,33 +2753,33 @@ function movedObservationSummary(props) {
   return `Moved from ${target}; actual point is ${offset} from the predicted location.`;
 }
 
-function refreshSelectedMovedOffsetOverlay() {
-  if (!state.selectedObservationId) return;
-  const feature = state.observations.find((item) => observationIdOf(item) === state.selectedObservationId);
+function renderMovedOffsetForObservation(feature) {
+  clearMovedOffsetOverlay();
   if (feature && isMovedObservation(feature.properties)) {
-    renderMovedOffsetForObservation(feature);
+    renderSavedMovedOffsetOverlays();
   }
 }
 
-function renderMovedOffsetForObservation(feature) {
-  const props = feature?.properties || {};
-  if (!isMovedObservation(props)) {
-    clearMovedOffsetOverlay();
-    return;
-  }
+function renderSavedMovedOffsetOverlays() {
+  if (!state.movedOffsetLayer) return;
+  state.movedOffsetLayer.clearLayers();
 
-  const actualLatLng = movedPredictionActualLatLng(props);
-  const originalLatLng = movedPredictionOriginalLatLng(props);
-  if (!actualLatLng || !originalLatLng) {
-    clearMovedOffsetOverlay();
-    return;
-  }
+  state.observations.forEach((feature) => {
+    const props = feature?.properties || {};
+    if (!isMovedObservation(props)) return;
 
-  renderMovedOffsetOverlay({
-    actualLatLng,
-    originalLatLng,
-    offsetMeters: movedObservationOffsetMeters(props),
-    originalLabel: formatReadableId(props.nearest_candidate_id || props.missed_candidate_id || "Prediction"),
+    const actualLatLng = movedPredictionActualLatLng(props);
+    const originalLatLng = movedPredictionOriginalLatLng(props);
+    if (!actualLatLng || !originalLatLng) return;
+
+    renderMovedOffsetOverlay({
+      actualLatLng,
+      originalLatLng,
+      offsetMeters: movedObservationOffsetMeters(props),
+      originalLabel: formatReadableId(props.nearest_candidate_id || props.missed_candidate_id || "Prediction"),
+      layer: state.movedOffsetLayer,
+      clearLayer: false,
+    });
   });
 }
 
@@ -2737,12 +2804,23 @@ function renderMovedOffsetForDraft(latLng, context) {
     originalLatLng,
     offsetMeters: context?.distanceMeters,
     originalLabel: formatReadableId(state.draftPointSourceTarget.candidate_id || "Prediction"),
+    layer: state.draftMovedOffsetLayer,
+    clearLayer: true,
   });
 }
 
-function renderMovedOffsetOverlay({ actualLatLng, originalLatLng, offsetMeters, originalLabel }) {
-  if (!state.movedOffsetLayer || !state.map) return;
-  state.movedOffsetLayer.clearLayers();
+function renderMovedOffsetOverlay({
+  actualLatLng,
+  originalLatLng,
+  offsetMeters,
+  originalLabel,
+  layer = state.draftMovedOffsetLayer,
+  clearLayer = true,
+}) {
+  if (!layer || !state.map) return;
+  if (clearLayer) {
+    layer.clearLayers();
+  }
 
   const offset = Number.isFinite(Number(offsetMeters))
     ? Number(offsetMeters)
@@ -2760,7 +2838,7 @@ function renderMovedOffsetOverlay({ actualLatLng, originalLatLng, offsetMeters, 
     opacity: 0.92,
     renderer: state.movedOffsetRenderer,
     weight: 3,
-  }).addTo(state.movedOffsetLayer);
+  }).addTo(layer);
 
   L.marker(originalLatLng, {
     icon: L.divIcon({
@@ -2772,7 +2850,7 @@ function renderMovedOffsetOverlay({ actualLatLng, originalLatLng, offsetMeters, 
     interactive: false,
     keyboard: false,
     zIndexOffset: 860,
-  }).addTo(state.movedOffsetLayer);
+  }).addTo(layer);
 
   L.marker(midpoint, {
     icon: L.divIcon({
@@ -2784,11 +2862,11 @@ function renderMovedOffsetOverlay({ actualLatLng, originalLatLng, offsetMeters, 
     interactive: false,
     keyboard: false,
     zIndexOffset: 880,
-  }).addTo(state.movedOffsetLayer);
+  }).addTo(layer);
 }
 
 function clearMovedOffsetOverlay() {
-  state.movedOffsetLayer?.clearLayers();
+  state.draftMovedOffsetLayer?.clearLayers();
 }
 
 function movedPredictionActualLatLng(props) {
@@ -3182,7 +3260,7 @@ function makeFieldCulvertId() {
     String(now.getMonth() + 1).padStart(2, "0"),
     String(now.getDate()).padStart(2, "0"),
   ].join("");
-  return `FC-${date}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+  return `${CONFIRMED_FIELD_ID_PREFIX}-${date}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 }
 
 function firstPresent(values) {

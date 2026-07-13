@@ -377,9 +377,9 @@ output {
 
 .list-tabs {
   display: inline-grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   overflow: hidden;
-  width: min(210px, 100%);
+  width: min(420px, 100%);
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #f7faf7;
@@ -388,11 +388,11 @@ output {
 .list-tabs button {
   min-width: 0;
   border: 0;
-  padding: 7px 10px;
+  padding: 7px 8px;
   color: var(--muted);
   background: transparent;
   cursor: pointer;
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   font-weight: 900;
 }
 
@@ -472,11 +472,11 @@ output {
   line-height: 1.35;
 }
 
-.abu-list-item {
+.cbu-list-item {
   min-width: 0;
 }
 
-.abu-card {
+.cbu-card {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
@@ -484,7 +484,7 @@ output {
   min-width: 0;
 }
 
-.abu-select {
+.cbu-select {
   display: grid;
   grid-template-columns: 42px minmax(0, 1fr);
   gap: 10px;
@@ -499,22 +499,22 @@ output {
   text-align: left;
 }
 
-.abu-select:hover,
-.abu-select:focus-visible,
-.abu-select.active {
+.cbu-select:hover,
+.cbu-select:focus-visible,
+.cbu-select.active {
   border-color: var(--accent);
   outline: none;
   box-shadow: 0 0 0 3px rgba(31, 111, 87, 0.13);
 }
 
-.abu-select .rank {
+.cbu-select .rank {
   width: 40px;
   color: #fff;
   background: var(--accent);
   font-size: 0.7rem;
 }
 
-.abu-delete,
+.cbu-delete,
 .danger-action {
   border: 1px solid rgba(180, 35, 24, 0.28);
   border-radius: 8px;
@@ -525,8 +525,8 @@ output {
   font-weight: 900;
 }
 
-.abu-delete:hover,
-.abu-delete:focus-visible,
+.cbu-delete:hover,
+.cbu-delete:focus-visible,
 .danger-action:hover,
 .danger-action:focus-visible {
   outline: none;
@@ -1756,7 +1756,8 @@ output {
 
   .list-tabs button {
     min-height: 42px;
-    padding: 9px 10px;
+    padding: 9px 6px;
+    font-size: 0.7rem;
   }
 
   .section-actions {
@@ -1776,8 +1777,8 @@ output {
   #route-count-kingston,
   .route-count-target,
   .candidate-button,
-  .abu-select,
-  .abu-delete {
+  .cbu-select,
+  .cbu-delete {
     min-height: 44px;
   }
 

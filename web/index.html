@@ -10,7 +10,7 @@
       integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
       crossorigin="anonymous"
     />
-    <link rel="stylesheet" href="styles.css?v=20260713-cbu-label" />
+    <link rel="stylesheet" href="styles.css?v=20260713-field-filters" />
   </head>
   <body>
     <main class="app-shell">
@@ -49,10 +49,19 @@
               <h2 id="list-heading">Ranked locations</h2>
               <div class="list-tabs" role="tablist" aria-label="Location list views">
                 <button id="ranked-tab" type="button" data-list-view="ranked" aria-selected="true">
-                  Ranked
+                  Targets
+                </button>
+                <button id="incorrect-tab" type="button" data-list-view="incorrect" aria-selected="false">
+                  Incorrect
+                </button>
+                <button id="cbu-tab" type="button" data-list-view="cbu" aria-selected="false">
+                  CBU
+                </button>
+                <button id="mvd-tab" type="button" data-list-view="mvd" aria-selected="false">
+                  MVD
                 </button>
                 <button id="abu-tab" type="button" data-list-view="abu" aria-selected="false">
-                  CBU
+                  ABU
                 </button>
               </div>
             </div>
@@ -184,6 +193,6 @@
       integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
       crossorigin="anonymous"
     ></script>
-    <script src="app.js?v=20260713-cbu-label"></script>
+    <script src="app.js?v=20260713-field-filters"></script>
   </body>
 </html>
