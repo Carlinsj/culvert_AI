@@ -5,12 +5,12 @@
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1054 nodes · 2542 edges · 51 communities (33 shown, 18 thin omitted)
-- Extraction: 91% EXTRACTED · 9% INFERRED · 0% AMBIGUOUS · INFERRED: 234 edges (avg confidence: 0.72)
+- 1054 nodes · 2528 edges · 52 communities (34 shown, 18 thin omitted)
+- Extraction: 91% EXTRACTED · 9% INFERRED · 0% AMBIGUOUS · INFERRED: 228 edges (avg confidence: 0.71)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `b8b80077`
+- Built from commit: `f4c44458`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -65,40 +65,39 @@
 - [[_COMMUNITY_Package Init|Package Init]]
 - [[_COMMUNITY_Project Root|Project Root]]
 - [[_COMMUNITY_normalizeLongitude|normalizeLongitude]]
+- [[_COMMUNITY_Soft Voting Ensemble|Soft Voting Ensemble]]
 
 ## God Nodes (most connected - your core abstractions)
 1. `build_parser()` - 30 edges
-2. `build_feature_table()` - 30 edges
+2. `build_feature_table()` - 29 edges
 3. `escapeHtml()` - 22 edges
 4. `write_vector()` - 22 edges
 5. `score_unlabeled_candidates()` - 22 edges
 6. `renderList()` - 21 edges
 7. `_records_from_text()` - 21 edges
-8. `bindControls()` - 20 edges
-9. `Culvert AI: Ulster County Pilot` - 20 edges
+8. `Culvert AI: Ulster County Pilot` - 20 edges
+9. `bindControls()` - 20 edges
 10. `scripts` - 20 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `Discovery Score` --semantically_similar_to--> `Discovery Score`  [INFERRED] [semantically similar]
-  outputs/culvert-ai-research-portfolio-contact-sheet.jpg → model.md
-- `Soft Voting Ensemble` --semantically_similar_to--> `Current Run Soft Voting Ensemble`  [INFERRED] [semantically similar]
-  outputs/culvert-ai-research-portfolio-contact-sheet.jpg → model.md
-- `Soft Voting Model Choice` --semantically_similar_to--> `Current Run Soft Voting Ensemble`  [INFERRED] [semantically similar]
-  outputs/culvert-ai-research-portfolio.pdf → model.md
 - `Spatial Candidate Workflow` --semantically_similar_to--> `Candidate Generation`  [INFERRED] [semantically similar]
   outputs/culvert-ai-research-portfolio.pdf → model.md
 - `Supervised Classification Task` --semantically_similar_to--> `Supervised Model`  [INFERRED] [semantically similar]
   outputs/culvert-ai-research-portfolio.pdf → model.md
+- `Data Needed` --semantically_similar_to--> `Accuracy Bottlenecks`  [INFERRED] [semantically similar]
+  docs/research_notes.md → README.md
+- `Model Improvement Query` --references--> `build_feature_table()`  [EXTRACTED]
+  graphify-out/memory/query_20260707_173049_now_how_to_improve_model_train_this_model_or_switc.md → src/culvert_ai/features.py
+- `Model Improvement Query` --references--> `score_unlabeled_candidates()`  [EXTRACTED]
+  graphify-out/memory/query_20260707_173049_now_how_to_improve_model_train_this_model_or_switc.md → src/culvert_ai/scoring.py
 
 ## Import Cycles
 - None detected.
 
 ## Hyperedges (group relationships)
-- **Culvert Prediction Review Pipeline** — model_candidate_generation, model_feature_table, model_supervised_model, model_discovery_score, outputs_culvert_ai_research_portfolio_field_review_interface [INFERRED 0.95]
-- **Model Improvement Levers** — graphify_out_memory_query_20260707_173049_now_how_to_improve_model_train_this_model_or_switc_data_quality_improvement_levers, model_data_and_validation_limitations, outputs_culvert_ai_research_portfolio_data_and_protocol_bottlenecks, outputs_culvert_ai_research_portfolio_deeper_validation_roadmap [INFERRED 0.85]
 - **Contact Sheet Validation Roadmap** — outputs_culvert_ai_research_portfolio_contact_sheet_soft_voting_ensemble, outputs_culvert_ai_research_portfolio_contact_sheet_discovery_score, outputs_culvert_ai_research_portfolio_contact_sheet_validation_roadmap [INFERRED 0.85]
 
-## Communities (51 total, 18 thin omitted)
+## Communities (52 total, 18 thin omitted)
 
 ### Community 0 - "Retraining API"
 Cohesion: 0.08
@@ -113,12 +112,12 @@ Cohesion: 0.14
 Nodes (33): build_route_count_report(), _cluster_predictions(), _cluster_probability_series(), _default_thresholds(), _empty_clusters(), _filter_by_segment(), _line_length_m(), _nearby_cluster_id() (+25 more)
 
 ### Community 3 - "Model Training"
-Cohesion: 0.12
-Nodes (42): ExtraTreesClassifier, Auto Model Family Comparison, HistGradientBoostingClassifier, ndarray, _balanced_hist_gradient_boosting(), _candidate_models(), _classification_metrics(), _compare_models() (+34 more)
+Cohesion: 0.11
+Nodes (44): ExtraTreesClassifier, Auto Model Family Comparison, Data Quality Improvement Levers, Model Improvement Query, HistGradientBoostingClassifier, ndarray, _balanced_hist_gradient_boosting(), _candidate_models() (+36 more)
 
 ### Community 4 - "Discovery Scoring"
-Cohesion: 0.13
-Nodes (46): Data Quality Improvement Levers, Model Improvement Query, Data and Validation Limitations, _attach_supervised_probability(), _boolean_score(), build_discovery_ranking(), _crossing_geometry_score(), _dem_route_drainage_score() (+38 more)
+Cohesion: 0.15
+Nodes (43): _attach_supervised_probability(), _boolean_score(), build_discovery_ranking(), _crossing_geometry_score(), _dem_route_drainage_score(), _discovery_evidence_summary(), _drainage_strength_score(), _evidence_summary() (+35 more)
 
 ### Community 5 - "Map App Core"
 Cohesion: 0.06
@@ -165,8 +164,8 @@ Cohesion: 0.13
 Nodes (30): LineString, _county_boundary(), _download_if_missing(), download_ulster_census_inputs(), _normalize_linear_water(), _normalize_roads(), GeoDataFrame, Path (+22 more)
 
 ### Community 16 - "LLM Label Import"
-Cohesion: 0.07
-Nodes (44): Example Candidate Generation Parameters, Example Feature Parameters, Example Model Parameters, Example Project Configuration, Ulster Candidate Generation Parameters, Ulster Model Parameters, Ulster Poughkeepsie Project Configuration, Candidate Generation (+36 more)
+Cohesion: 0.06
+Nodes (38): Example Candidate Generation Parameters, Example Feature Parameters, Example Model Parameters, Example Project Configuration, Ulster Candidate Generation Parameters, Ulster Model Parameters, Ulster Poughkeepsie Project Configuration, Candidate Generation (+30 more)
 
 ### Community 17 - "Draft Point UI"
 Cohesion: 0.12
@@ -208,6 +207,10 @@ Nodes (7): bearerToken(), constantTimeTokenEquals(), isAuthorizedBearer(), requi
 Cohesion: 0.21
 Nodes (15): bindDraftPointActions(), observationIdOf(), observationLatLng(), openSelectedFeaturePopup(), openSelectedPopup(), renderMovedOffsetForObservation(), renderObservationMarkers(), renderRouteCountTargetsOnMap() (+7 more)
 
+### Community 28 - "Continuous Learning Behavior"
+Cohesion: 0.33
+Nodes (6): Browser Based Field Review Queue, Candidate Prediction Pipeline, Culvert AI Research Portfolio Contact Sheet, Culvert AI, Discovery Score, Field Reviewer System
+
 ### Community 30 - "Field Data State"
 Cohesion: 0.22
 Nodes (8): Bottlenecks, Culvert AI Track, Current Data State, Current Goal, Current Model, How To Resume, Next Best Work, UI State
@@ -229,24 +232,24 @@ Cohesion: 0.23
 Nodes (13): bucketFromScore(), distanceMeters(), featureLatLng(), isUserLocationOffCenter(), latLngFromValues(), midpointLatLng(), movedObservationSavedOffsetMeters(), movedOffsetRenderContext() (+5 more)
 
 ## Knowledge Gaps
-- **126 isolated node(s):** `DATA_URLS`, `SUMMARY_URLS`, `MODEL_SUMMARY_URLS`, `OBSERVATION_STATUSES`, `FIELD_VIEW_LABELS` (+121 more)
+- **135 isolated node(s):** `What This Is`, `What This Is Not`, `Current Data State`, `Model Summary`, `Features Used` (+130 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **18 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `build_feature_table()` connect `Feature Engineering` to `LLM Label Import`, `CLI Pipeline`, `Discovery Scoring`, `Census Inputs`?**
-  _High betweenness centrality (0.030) - this node is a cross-community bridge._
-- **Why does `Feature Table` connect `LLM Label Import` to `Feature Engineering`?**
-  _High betweenness centrality (0.021) - this node is a cross-community bridge._
-- **Why does `train_model()` connect `Model Training` to `LLM Label Import`, `Discovery Scoring`, `Census Inputs`?**
-  _High betweenness centrality (0.019) - this node is a cross-community bridge._
+- **Why does `build_feature_table()` connect `Feature Engineering` to `CLI Pipeline`, `Model Training`, `Census Inputs`?**
+  _High betweenness centrality (0.014) - this node is a cross-community bridge._
+- **Why does `write_vector()` connect `Point Analysis` to `region.py`, `Census Inputs`?**
+  _High betweenness centrality (0.008) - this node is a cross-community bridge._
+- **Why does `Model Improvement Query` connect `Model Training` to `Feature Engineering`, `Discovery Scoring`?**
+  _High betweenness centrality (0.007) - this node is a cross-community bridge._
 - **Are the 27 inferred relationships involving `build_parser()` (e.g. with `_add_field_report_candidates()` and `_analyze_extracted_points()`) actually correct?**
   _`build_parser()` has 27 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 10 inferred relationships involving `build_feature_table()` (e.g. with `_build_features()` and `run_demo_pipeline()`) actually correct?**
   _`build_feature_table()` has 10 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 18 inferred relationships involving `write_vector()` (e.g. with `download_ulster_census_inputs()` and `create_demo_dataset()`) actually correct?**
   _`write_vector()` has 18 INFERRED edges - model-reasoned connections that need verification._
-- **What connects `DATA_URLS`, `SUMMARY_URLS`, `MODEL_SUMMARY_URLS` to the rest of the system?**
-  _144 weakly-connected nodes found - possible documentation gaps or missing edges._
+- **What connects `What This Is`, `What This Is Not`, `Current Data State` to the rest of the system?**
+  _153 weakly-connected nodes found - possible documentation gaps or missing edges._
