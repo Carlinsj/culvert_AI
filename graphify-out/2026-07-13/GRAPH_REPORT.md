@@ -1,16 +1,16 @@
 # Graph Report - culvert_AI  (2026-07-13)
 
 ## Corpus Check
-- 72 files · ~119,312 words
+- 72 files · ~119,355 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1054 nodes · 2542 edges · 51 communities (33 shown, 18 thin omitted)
+- 1054 nodes · 2545 edges · 49 communities (31 shown, 18 thin omitted)
 - Extraction: 91% EXTRACTED · 9% INFERRED · 0% AMBIGUOUS · INFERRED: 234 edges (avg confidence: 0.72)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `b8b80077`
+- Built from commit: `8b782a85`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -27,7 +27,6 @@
 - [[_COMMUNITY_Node Project Config|Node Project Config]]
 - [[_COMMUNITY_Visible Marker List|Visible Marker List]]
 - [[_COMMUNITY_Detail Feedback UI|Detail Feedback UI]]
-- [[_COMMUNITY_renderDetail|renderDetail]]
 - [[_COMMUNITY_Point Analysis|Point Analysis]]
 - [[_COMMUNITY_Web Export|Web Export]]
 - [[_COMMUNITY_Census Inputs|Census Inputs]]
@@ -50,7 +49,6 @@
 - [[_COMMUNITY_Series|Series]]
 - [[_COMMUNITY_Vercel Observation Pull|Vercel Observation Pull]]
 - [[_COMMUNITY_Web Build Verify|Web Build Verify]]
-- [[_COMMUNITY_region.py|region.py]]
 - [[_COMMUNITY_Python Wrapper|Python Wrapper]]
 - [[_COMMUNITY_Python Bootstrap|Python Bootstrap]]
 - [[_COMMUNITY_Actual Predictions Script|Actual Predictions Script]]
@@ -98,7 +96,7 @@
 - **Model Improvement Levers** — graphify_out_memory_query_20260707_173049_now_how_to_improve_model_train_this_model_or_switc_data_quality_improvement_levers, model_data_and_validation_limitations, outputs_culvert_ai_research_portfolio_data_and_protocol_bottlenecks, outputs_culvert_ai_research_portfolio_deeper_validation_roadmap [INFERRED 0.85]
 - **Contact Sheet Validation Roadmap** — outputs_culvert_ai_research_portfolio_contact_sheet_soft_voting_ensemble, outputs_culvert_ai_research_portfolio_contact_sheet_discovery_score, outputs_culvert_ai_research_portfolio_contact_sheet_validation_roadmap [INFERRED 0.85]
 
-## Communities (51 total, 18 thin omitted)
+## Communities (49 total, 18 thin omitted)
 
 ### Community 0 - "Retraining API"
 Cohesion: 0.08
@@ -125,12 +123,12 @@ Cohesion: 0.06
 Nodes (63): addObservation(), applyDashboardData(), bboxAroundLatLng(), buildSearchText(), candidateCanvasColor(), candidateCanvasLabel(), clampIntegerValue(), clampLatitude() (+55 more)
 
 ### Community 6 - "Field Report Parsing"
-Cohesion: 0.10
-Nodes (45): Match, append_field_report_candidates(), _clean_text_line(), CoordinateRecord, _culvert_ids(), _deduplicate_coordinate_records(), _deduplicate_records(), _docx_text() (+37 more)
+Cohesion: 0.07
+Nodes (59): Match, append_field_report_candidates(), _clean_text_line(), CoordinateRecord, _culvert_ids(), _deduplicate_coordinate_records(), _deduplicate_records(), _docx_text() (+51 more)
 
 ### Community 7 - "handleLocationSuccess"
-Cohesion: 0.14
-Nodes (27): cancelScheduledAutoRouteTargets(), clearRouteTargetMarkers(), currentMapBbox(), fetchRouteCount(), focusUserLocation(), handleLocationError(), handleLocationSuccess(), handleMapMoveEnd() (+19 more)
+Cohesion: 0.12
+Nodes (32): bindControls(), cancelScheduledAutoRouteTargets(), clearRouteTargetMarkers(), currentMapBbox(), fetchRouteCount(), focusRouteCountTarget(), focusUserLocation(), handleLocationError() (+24 more)
 
 ### Community 8 - "CLI Pipeline"
 Cohesion: 0.07
@@ -145,40 +143,36 @@ Cohesion: 0.11
 Nodes (33): appendObservation(), canRead(), DATA_DIR, deleteObservation(), __dirname, emptyFeatureCollection(), fileInfo(), handleRequest() (+25 more)
 
 ### Community 11 - "Detail Feedback UI"
-Cohesion: 0.15
-Nodes (30): detailCell(), escapeAttr(), escapeHtml(), fieldCulvertContextHtml(), fieldFeedbackHtml(), fieldObservationView(), formatNumber(), formatPercent() (+22 more)
-
-### Community 12 - "renderDetail"
-Cohesion: 0.16
-Nodes (19): compactEvidenceSummary(), definitionItem(), discoveryStatusLabel(), drainageLabel(), firstPresent(), formatReadableId(), formatScorePart(), formatScorePartFrom100() (+11 more)
+Cohesion: 0.10
+Nodes (44): bindFeedbackActions(), compactEvidenceSummary(), definitionItem(), detailCell(), discoveryStatusLabel(), drainageLabel(), escapeAttr(), escapeHtml() (+36 more)
 
 ### Community 13 - "Point Analysis"
 Cohesion: 0.06
-Nodes (79): Point, _actual_id(), evaluate_predictions(), evaluate_success_rate_at_actuals(), _optional_number(), GeoDataFrame, Path, Measure field success as actual culverts with a prediction within max_distance_m (+71 more)
+Nodes (82): Point, _county_boundary(), _download_if_missing(), download_ulster_census_inputs(), _normalize_linear_water(), _normalize_roads(), GeoDataFrame, Path (+74 more)
 
 ### Community 14 - "Web Export"
 Cohesion: 0.18
 Nodes (24): GeoDataFrame, Path, Series, _decluster_for_web(), _drop_exported_candidates(), _export_key_value(), export_web_data(), _field_recall_export_pool() (+16 more)
 
 ### Community 15 - "Census Inputs"
-Cohesion: 0.13
-Nodes (30): LineString, _county_boundary(), _download_if_missing(), download_ulster_census_inputs(), _normalize_linear_water(), _normalize_roads(), GeoDataFrame, Path (+22 more)
+Cohesion: 0.19
+Nodes (21): LineString, create_demo_dataset(), _demo_known_culverts(), _demo_roads(), _demo_streams(), _move_to_ulster_pilot(), GeoDataFrame, Path (+13 more)
 
 ### Community 16 - "LLM Label Import"
 Cohesion: 0.07
 Nodes (44): Example Candidate Generation Parameters, Example Feature Parameters, Example Model Parameters, Example Project Configuration, Ulster Candidate Generation Parameters, Ulster Model Parameters, Ulster Poughkeepsie Project Configuration, Candidate Generation (+36 more)
 
 ### Community 17 - "Draft Point UI"
-Cohesion: 0.12
-Nodes (38): bindControls(), cancelPlacePointMode(), centerMapOnPoint(), clearDetail(), clearMovedOffsetOverlay(), compareFeaturesForList(), FIELD_OBSERVATION_VIEWS, fieldObservationsForView() (+30 more)
+Cohesion: 0.13
+Nodes (35): bindDraftPointActions(), cancelPlacePointMode(), clearDetail(), clearMovedOffsetOverlay(), compareFeaturesForList(), hideDetailPanel(), isMobileDrawerOpen(), isMobileViewport() (+27 more)
 
 ### Community 18 - "DEM Acquisition"
 Cohesion: 0.23
 Nodes (13): dem_tiles_for_bounds(), _download_if_missing(), download_usgs_3dep_dem(), _expanded_bounds(), Path, Return USGS 3DEP tile IDs intersecting WGS84 bounds.      USGS 3DEP current elev, Download and mosaic USGS 3DEP DEM tiles covering a boundary layer., _tile_id() (+5 more)
 
 ### Community 19 - "Observation Labels"
-Cohesion: 0.18
-Nodes (17): bindDetailCloseAction(), bindFeedbackActions(), draftPointIcon(), draftPointSaveHtml(), draftPointStartLatLng(), handleMapClick(), makeFieldCulvertId(), normalizeLatLng() (+9 more)
+Cohesion: 0.19
+Nodes (18): bindDetailCloseAction(), centerMapOnPoint(), draftPointIcon(), draftPointSaveHtml(), draftPointStartLatLng(), handleMapClick(), isMissablePredictionCandidate(), makeFieldCulvertId() (+10 more)
 
 ### Community 20 - "Model Summary"
 Cohesion: 0.42
@@ -205,8 +199,8 @@ Cohesion: 0.27
 Nodes (7): bearerToken(), constantTimeTokenEquals(), isAuthorizedBearer(), requireFeedbackWriteAuth(), safeString(), handler(), previousEnv
 
 ### Community 26 - "renderMovedOffsetForObservation"
-Cohesion: 0.21
-Nodes (15): bindDraftPointActions(), observationIdOf(), observationLatLng(), openSelectedFeaturePopup(), openSelectedPopup(), renderMovedOffsetForObservation(), renderObservationMarkers(), renderRouteCountTargetsOnMap() (+7 more)
+Cohesion: 0.20
+Nodes (16): FIELD_OBSERVATION_VIEWS, fieldObservationsForView(), fieldObservationView(), isConfirmedPredictionObservation(), isMovedObservation(), latLngFromValues(), movedObservationSavedOffsetMeters(), movedOffsetRenderContext() (+8 more)
 
 ### Community 30 - "Field Data State"
 Cohesion: 0.22
@@ -220,13 +214,9 @@ Nodes (26): Data Needed, Field Search Time Bottleneck, LLM Role Boundary, Resear
 Cohesion: 0.29
 Nodes (6): findings, modelSummary, requiredFiles, root, routeCountSource, summary
 
-### Community 36 - "region.py"
-Cohesion: 0.38
-Nodes (8): filter_to_region(), get_region(), GeoDataFrame, Path, Region, region_boundary(), write_region_boundary(), test_filter_to_ulster_poughkeepsie_region()
-
 ### Community 50 - "normalizeLongitude"
-Cohesion: 0.23
-Nodes (13): bucketFromScore(), distanceMeters(), featureLatLng(), isUserLocationOffCenter(), latLngFromValues(), midpointLatLng(), movedObservationSavedOffsetMeters(), movedOffsetRenderContext() (+5 more)
+Cohesion: 0.19
+Nodes (14): bucketFromScore(), distanceMeters(), featureLatLng(), fitVisibleMarkers(), idOf(), isUserLocationOffCenter(), knownFeatures(), listRenderableFeatures() (+6 more)
 
 ## Knowledge Gaps
 - **126 isolated node(s):** `DATA_URLS`, `SUMMARY_URLS`, `MODEL_SUMMARY_URLS`, `OBSERVATION_STATUSES`, `FIELD_VIEW_LABELS` (+121 more)

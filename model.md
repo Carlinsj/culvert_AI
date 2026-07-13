@@ -48,7 +48,7 @@ The model target column is `is_culvert`.
 Positive labels come from:
 
 - verified field-report culvert coordinates,
-- confirmed ABU/user-added observations pulled from Vercel,
+- confirmed CBU/user-added observations pulled from Vercel,
 - confirmed field observations within the strict match radius.
 
 Negative labels come from:
@@ -62,7 +62,7 @@ Negative labels come from:
 The current strict match radius is `10 m`. A prediction 50 m from a confirmed
 field culvert is a miss, not a correct prediction.
 
-Confirmed ABU/user-added positives are included by default in retraining. Set
+Confirmed CBU/user-added positives are included by default in retraining. Set
 `INCLUDE_FIELD_OBSERVATIONS_AS_POSITIVES=0` only for a questionable field batch
 that should be displayed on the map but not learned yet.
 
@@ -97,7 +97,7 @@ main feature groups are:
 - field-report support and distance to known culvert labels,
 - optional DEM terrain features, including a composite
   `dem_culvert_terrain_score`,
-- approved-known culvert context from document-approved and ABU/user-confirmed
+- approved-known culvert context from document-approved and CBU/user-confirmed
   positives, including same-route and nearby-corridor support,
 - optional flow-accumulation features,
 - optional drainage-area features.
@@ -220,7 +220,7 @@ Special rules:
 
 `field_corridor_support_score` comes from approved-known culvert pattern
 columns built in `features.py`. It is intentionally bounded and small: a
-candidate near an approved ABU or document-confirmed culvert on the same route
+candidate near an approved CBU or document-confirmed culvert on the same route
 gets support, but it still needs drainage, DEM, crossing geometry, or model
 agreement to become a top discovery candidate.
 
@@ -323,7 +323,7 @@ one or more of these things is true:
 - the model has too few examples like that road,
 - the field culverts are in a pattern not yet represented by the training set.
 
-Adding the confirmed ABU points helps in two ways:
+Adding the confirmed CBU points helps in two ways:
 
 - the exact culvert locations become positive labels,
 - nearby missed predicted candidates can become negative or missed labels.

@@ -57,14 +57,14 @@ Current training artifacts:
 - `data/processed/field_report_culverts.gpkg`: extracted report coordinates.
 - `data/processed/extracted_points_analysis.geojson`: coordinate QC output.
 - `data/processed/high_confidence_training_points.gpkg`: report-derived positive labels.
-- `data/processed/field_observations.geojson`: local user/ABU observations.
+- `data/processed/field_observations.geojson`: local user/CBU observations.
 - `models/actual_ulster_field_report_model.joblib`: current supervised model bundle.
 
 Current spatial matching rule:
 
 - A field-report or field-observed culvert must match within `10 m`.
 - A `50 m` miss is no longer counted as correct.
-- Confirmed ABU/user-added points are used as positive training labels when the
+- Confirmed CBU/user-added points are used as positive training labels when the
   retrain pipeline runs. Set `INCLUDE_FIELD_OBSERVATIONS_AS_POSITIVES=0` only for
   a questionable observation batch that should be displayed but not learned yet.
 - `no_culvert` observations are stored as negative field labels and removed from
@@ -194,12 +194,12 @@ Implemented UI behavior:
 - List, Add, and Locate controls on mobile.
 - Ranked candidate drawer.
 - Candidate detail panel with coordinates and map links.
-- ABU marker labels for confirmed user-added culverts.
-- ABU tab listing all user-added confirmed culverts.
+- CBU marker labels for confirmed user-added culverts.
+- CBU tab listing all user-added confirmed culverts.
 - Add user observation from the map.
 - Delete incorrect user-added observations.
 - Deleted observations are removed from the served feedback set; with Blob configured,
-  the deployed ranking refreshes without that ABU/no-culvert/missed-prediction signal.
+  the deployed ranking refreshes without that CBU/no-culvert/missed-prediction signal.
   The next `npm run retrain:from-vercel` also excludes the deleted point.
 - Removed the old tracking-status text overlay.
 
@@ -209,7 +209,7 @@ Observation statuses supported by the API:
 - `no_culvert`
 - `uncertain`
 
-Confirmed user-added culverts are displayed as `ABU` for "Added By User".
+Confirmed user-added culverts are displayed as `CBU` for confirmed culvert.
 
 ## Persistence
 
@@ -245,7 +245,7 @@ CRON_SECRET
 
 Use `CULVERT_FEEDBACK_MATCH_RADIUS_M=10` for the current strict field rule. This
 is the hit/miss tolerance: a prediction within 10 m of the field point can be
-treated as the same culvert, while a farther confirmed ABU point is saved as the
+treated as the same culvert, while a farther confirmed CBU point is saved as the
 actual positive location and can mark the missed predicted candidate as a
 negative/missed training signal.
 
@@ -330,10 +330,10 @@ The main production-like workflow is:
 5. Add valid field-report coordinates as exact candidates.
 6. Analyze extracted points against roads, streams, candidates, and boundary.
 7. Build high-confidence training positives.
-8. Merge report-derived positives, confirmed ABU/user-added positives,
+8. Merge report-derived positives, confirmed CBU/user-added positives,
    persisted `no_culvert` observations, and missed-prediction labels into
    training labels.
-   Confirmed ABU/user positives are included unless explicitly disabled.
+   Confirmed CBU/user positives are included unless explicitly disabled.
 9. Build features from candidates, GIS layers, labels, and optional rasters.
 10. Score all candidates with interpretable evidence.
 11. Train and compare supervised models when enough positives and negatives exist.
@@ -501,7 +501,7 @@ should focus on data and validation:
 3. Compare spatial holdout, route holdout, and time-based holdout.
 4. Report precision at field-review budgets such as top 10, 25, and 50.
 5. Keep a strict audit trail from source report to extracted coordinate to label.
-6. Treat ABU observations as training data only after they are confirmed and synced.
+6. Treat CBU observations as training data only after they are confirmed and synced.
 
 ## Current Limitations
 

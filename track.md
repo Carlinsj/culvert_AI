@@ -9,7 +9,7 @@ Build a field-ready culvert discovery workflow for Ulster County:
 - extract verified field-report coordinates,
 - use valid coordinates as model training points,
 - rank likely undiscovered culvert locations,
-- let users add/delete ABU points from the map,
+- let users add/delete CBU points from the map,
 - keep model metrics honest with spatial validation.
 
 ## Current Data State
@@ -23,11 +23,11 @@ Build a field-ready culvert discovery workflow for Ulster County:
 - Dashboard export: 1,210 rows.
 - Discovery candidates shown: 1,000.
 - Known field matches shown: 210.
-- Local ABU/user observations: `data/processed/field_observations.geojson`.
+- Local CBU/user observations: `data/processed/field_observations.geojson`.
 - Deployed observation pull on 2026-06-24 returned 19 observations:
   13 confirmed culverts, 6 no-culvert labels, and 12 unique confirmed positives
   after duplicate field IDs are deduped.
-- User-confirmed ABU positives are included in retraining by default now that field
+- User-confirmed CBU positives are included in retraining by default now that field
   crews are intentionally adding missed culverts. Set
   `INCLUDE_FIELD_OBSERVATIONS_AS_POSITIVES=0` only for a questionable batch.
 - `scripts/pull_vercel_observations.js` can pull deployed observations through
@@ -39,7 +39,7 @@ Build a field-ready culvert discovery workflow for Ulster County:
   configured. The Python training still runs in an external worker with
   `npm run retrain:from-vercel`, then deploys rebuilt `web/data` files.
 - Current strict field match radius is 10 m. A 50 m miss is not counted as correct.
-- A confirmed ABU point farther than 10 m from its nearest predicted candidate is
+- A confirmed CBU point farther than 10 m from its nearest predicted candidate is
   now stored as the true positive location and can also mark that predicted
   candidate as a missed/negative training label.
 
@@ -76,9 +76,9 @@ Implemented:
 
 - Mobile-friendly map controls: List, Add, Locate.
 - Removed visible tracking text overlay.
-- User-added confirmed culverts display as `ABU`.
-- ABU tab in the drawer lists all confirmed user-added points.
-- ABU points can be selected, opened in Google Maps, or deleted.
+- User-added confirmed culverts display as `CBU`.
+- CBU tab in the drawer lists all confirmed user-added points.
+- CBU points can be selected, opened in Google Maps, or deleted.
 - User-added observation deletion works through `/api/observations?id=...`.
 - Deleting an observation removes its deployed feedback and refreshes the served
   ranking; the deleted point is also absent from the next Blob-backed retrain.
@@ -99,7 +99,7 @@ Implemented:
 ## Bottlenecks
 
 - Need negative labels from field checks.
-- Need Vercel Blob attached and `BLOB_READ_WRITE_TOKEN` set so ABU/no-culvert marks persist.
+- Need Vercel Blob attached and `BLOB_READ_WRITE_TOKEN` set so CBU/no-culvert marks persist.
 - Need official NYSDOT/county road and drainage layers.
 - DEM support is now implemented:
   - `data/raw/dem.tif` is generated from USGS 3DEP 1 arc-second tiles by default.
@@ -159,4 +159,4 @@ npm run build
 4. Add flow/drainage rasters and test whether 1/3 arc-second DEM improves field-route precision.
 5. Replace Census roads/water with NYSDOT/county GIS.
 6. Add route/day field validation reports: precision at 10, 25, 50 using 10 m match radius.
-7. Add a simple UI summary for last retrain date, model name, training positives, ABU count, and spatial AP.
+7. Add a simple UI summary for last retrain date, model name, training positives, CBU count, and spatial AP.
