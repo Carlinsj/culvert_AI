@@ -4,6 +4,7 @@ import {
   readObservations,
   refreshPublishedData,
   saveObservation,
+  saveObservations,
 } from "./_lib/feedback.js";
 import { requireFeedbackWriteAuth } from "./_lib/auth.js";
 import { readJsonBody, requireMethod, sendError, sendJson } from "./_lib/http.js";
@@ -48,16 +49,19 @@ export default async function handler(request, response) {
     if (!requireFeedbackWriteAuth(request, response)) return;
 
     const payload = await readJsonBody(request);
-    const saved = await saveObservation(payload);
+    const bulkPayload = Array.isArray(payload?.features) ? payload.features : Array.isArray(payload) ? payload : null;
+    const saved = bulkPayload ? await saveObservations(bulkPayload) : await saveObservation(payload);
     const { findings, summary } = await refreshPublishedData(saved.observations);
     const retraining = await maybeTriggerRetrain({
       observations: saved.observations,
-      reason: "field_observation_saved",
+      reason: bulkPayload ? "field_observations_bulk_saved" : "field_observation_saved",
     });
 
     sendJson(response, {
       status: "saved",
-      feature: saved.feature,
+      feature: saved.feature || saved.features?.[saved.features.length - 1] || null,
+      features: saved.features,
+      saved_count: saved.features?.length || 1,
       observations: saved.observations,
       findings,
       summary,

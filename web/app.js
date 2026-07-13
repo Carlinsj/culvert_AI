@@ -561,13 +561,16 @@ async function updateBackendStatus() {
 function appendLocalObservationStatus() {
   if (!els.backendStatus) return;
   const localCount = loadLocalObservations().length;
+  const baseText = els.backendStatus.textContent.replace(/\s*·?\s*\d+\s+unsynced local\s*$/i, "");
   if (els.syncLocalObservations) {
     els.syncLocalObservations.hidden = localCount === 0 || !hasApiBackend();
     els.syncLocalObservations.textContent = localCount > 0 ? `Sync ${localCount}` : "Sync now";
     els.syncLocalObservations.disabled = false;
   }
   if (localCount > 0) {
-    els.backendStatus.textContent = `${els.backendStatus.textContent} · ${localCount} unsynced local`;
+    els.backendStatus.textContent = `${baseText} · ${localCount} unsynced local`;
+  } else {
+    els.backendStatus.textContent = baseText;
   }
 }
 
@@ -2634,7 +2637,7 @@ async function saveObservation(payload) {
 
 async function syncLocalObservationsToServer(options = {}) {
   if (!hasApiBackend()) return;
-  const local = loadLocalObservations();
+  const local = loadLocalObservations().map(normalizeObservationFeature).filter(Boolean);
   if (!local.length) {
     appendLocalObservationStatus();
     return;
@@ -2649,17 +2652,17 @@ async function syncLocalObservationsToServer(options = {}) {
     els.backendStatus.textContent = `Syncing ${local.length} local point${local.length === 1 ? "" : "s"}...`;
   }
 
+  const bulkSynced = await syncLocalObservationsBulk(local, options);
+  if (bulkSynced) return;
+
   let synced = 0;
   let latestRefresh = null;
   for (const feature of local) {
-    const normalized = normalizeObservationFeature(feature);
-    if (!normalized) continue;
-
     try {
       const response = await fetchFeedbackWrite(OBSERVATIONS_URL, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(normalized.properties),
+        body: JSON.stringify(feature.properties),
       });
       if (!response.ok) continue;
 
@@ -2690,6 +2693,42 @@ async function syncLocalObservationsToServer(options = {}) {
       els.backendStatus.textContent = `${local.length - synced} local point${local.length - synced === 1 ? "" : "s"} still unsynced.`;
     }
     appendLocalObservationStatus();
+  }
+}
+
+async function syncLocalObservationsBulk(local, options = {}) {
+  try {
+    const response = await fetchFeedbackWrite(OBSERVATIONS_URL, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "FeatureCollection", features: local }),
+    });
+    if (!response.ok) {
+      if (options.force && els.backendStatus) {
+        els.backendStatus.textContent = `Bulk sync failed (${response.status}). Trying slower sync...`;
+      }
+      return false;
+    }
+
+    const saved = await response.json();
+    if (saved.storage !== "vercel_blob" && saved.storage !== "file") return false;
+
+    clearLocalObservations();
+    if (saved.findings && saved.summary) {
+      applyDashboardData(saved.findings, saved.summary, saved.observations, {
+        preserveSelection: true,
+      });
+    }
+    if (els.backendStatus) {
+      els.backendStatus.textContent = `Synced ${saved.saved_count || local.length} local point${local.length === 1 ? "" : "s"}.`;
+    }
+    updateBackendStatus();
+    return true;
+  } catch {
+    if (options.force && els.backendStatus) {
+      els.backendStatus.textContent = "Bulk sync failed. Trying slower sync...";
+    }
+    return false;
   }
 }
 

@@ -46,6 +46,30 @@ export async function saveObservation(payload) {
   return { feature, observations, storage: "vercel_blob" };
 }
 
+export async function saveObservations(payloads) {
+  const incoming = Array.isArray(payloads) ? payloads : [];
+  const featuresToSave = incoming.map(observationFeature);
+  if (!featuresToSave.length) {
+    throw new Error("At least one observation is required.");
+  }
+
+  const collection = await readObservations();
+  const features = mergeObservations([...collection.features, ...featuresToSave]);
+  const observations = { type: "FeatureCollection", features };
+
+  if (!blobConfigured()) {
+    return {
+      features: featuresToSave,
+      observations,
+      storage: "memory",
+      warning: "Vercel Blob is not configured. Set BLOB_READ_WRITE_TOKEN to persist observations.",
+    };
+  }
+
+  await writeBlobJson(OBSERVATIONS_BLOB_PATH, observations, "application/geo+json");
+  return { features: featuresToSave, observations, storage: "vercel_blob" };
+}
+
 export async function deleteObservation(observationId) {
   const id = safeString(observationId, 80);
   if (!id) {
