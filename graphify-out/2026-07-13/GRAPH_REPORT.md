@@ -1,16 +1,16 @@
 # Graph Report - culvert_AI  (2026-07-13)
 
 ## Corpus Check
-- 72 files · ~119,884 words
+- 72 files · ~120,006 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1061 nodes · 2565 edges · 57 communities (39 shown, 18 thin omitted)
+- 1061 nodes · 2567 edges · 56 communities (38 shown, 18 thin omitted)
 - Extraction: 91% EXTRACTED · 9% INFERRED · 0% AMBIGUOUS · INFERRED: 228 edges (avg confidence: 0.71)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `1a915776`
+- Built from commit: `d2b2fb17`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -70,7 +70,6 @@
 - [[_COMMUNITY_evaluate_success_rate_at_actuals|evaluate_success_rate_at_actuals]]
 - [[_COMMUNITY_region.py|region.py]]
 - [[_COMMUNITY_isMovedObservation|isMovedObservation]]
-- [[_COMMUNITY_render|render]]
 
 ## God Nodes (most connected - your core abstractions)
 1. `build_parser()` - 30 edges
@@ -78,9 +77,9 @@
 3. `escapeHtml()` - 23 edges
 4. `write_vector()` - 22 edges
 5. `score_unlabeled_candidates()` - 22 edges
-6. `renderList()` - 21 edges
-7. `_records_from_text()` - 21 edges
-8. `bindControls()` - 20 edges
+6. `bindControls()` - 21 edges
+7. `renderList()` - 21 edges
+8. `_records_from_text()` - 21 edges
 9. `Culvert AI: Ulster County Pilot` - 20 edges
 10. `scripts` - 20 edges
 
@@ -102,7 +101,7 @@
 ## Hyperedges (group relationships)
 - **Contact Sheet Validation Roadmap** — outputs_culvert_ai_research_portfolio_contact_sheet_soft_voting_ensemble, outputs_culvert_ai_research_portfolio_contact_sheet_discovery_score, outputs_culvert_ai_research_portfolio_contact_sheet_validation_roadmap [INFERRED 0.85]
 
-## Communities (57 total, 18 thin omitted)
+## Communities (56 total, 18 thin omitted)
 
 ### Community 0 - "Retraining API"
 Cohesion: 0.08
@@ -125,8 +124,8 @@ Cohesion: 0.15
 Nodes (43): _attach_supervised_probability(), _boolean_score(), build_discovery_ranking(), _crossing_geometry_score(), _dem_route_drainage_score(), _discovery_evidence_summary(), _drainage_strength_score(), _evidence_summary() (+35 more)
 
 ### Community 5 - "Map App Core"
-Cohesion: 0.07
-Nodes (41): bboxAroundLatLng(), candidateCanvasColor(), candidateCanvasLabel(), clampIntegerValue(), clampLatitude(), clampLongitude(), clampNumberValue(), compareCanvasCandidatePriority() (+33 more)
+Cohesion: 0.06
+Nodes (48): bboxAroundLatLng(), buildSearchText(), candidateCanvasColor(), candidateCanvasLabel(), clampIntegerValue(), clampLatitude(), clampLongitude(), clampNumberValue() (+40 more)
 
 ### Community 6 - "Field Report Parsing"
 Cohesion: 0.10
@@ -134,7 +133,7 @@ Nodes (45): Match, append_field_report_candidates(), _clean_text_line(), Coordin
 
 ### Community 7 - "handleLocationSuccess"
 Cohesion: 0.12
-Nodes (33): bindControls(), cancelScheduledAutoRouteTargets(), clearRouteTargetMarkers(), currentMapBbox(), fetchRouteCount(), focusRouteCountTarget(), focusUserLocation(), handleLocationError() (+25 more)
+Nodes (32): bindControls(), cancelScheduledAutoRouteTargets(), clearRouteTargetMarkers(), currentMapBbox(), fetchRouteCount(), focusRouteCountTarget(), focusUserLocation(), handleLocationError() (+24 more)
 
 ### Community 8 - "CLI Pipeline"
 Cohesion: 0.07
@@ -149,7 +148,7 @@ Cohesion: 0.11
 Nodes (33): appendObservation(), canRead(), DATA_DIR, deleteObservation(), __dirname, emptyFeatureCollection(), fileInfo(), handleRequest() (+25 more)
 
 ### Community 11 - "Detail Feedback UI"
-Cohesion: 0.09
+Cohesion: 0.10
 Nodes (46): bindDetailCloseAction(), bindFeedbackActions(), compactEvidenceSummary(), definitionItem(), detailCell(), discoveryStatusLabel(), draftPointSaveHtml(), drainageLabel() (+38 more)
 
 ### Community 12 - "renderDetail"
@@ -181,8 +180,8 @@ Cohesion: 0.23
 Nodes (13): dem_tiles_for_bounds(), _download_if_missing(), download_usgs_3dep_dem(), _expanded_bounds(), Path, Return USGS 3DEP tile IDs intersecting WGS84 bounds.      USGS 3DEP current elev, Download and mosaic USGS 3DEP DEM tiles covering a boundary layer., _tile_id() (+5 more)
 
 ### Community 19 - "Observation Labels"
-Cohesion: 0.13
-Nodes (37): bindDraftPointActions(), bindMovedRepairAction(), cancelPlacePointMode(), centerMapOnPoint(), clearDetail(), clearMovedOffsetOverlay(), draftPointStartLatLng(), handleMapClick() (+29 more)
+Cohesion: 0.09
+Nodes (49): bindDraftPointActions(), bindMovedRepairAction(), cancelPlacePointMode(), centerMapOnPoint(), clearDetail(), clearMovedOffsetOverlay(), compareFeaturesForList(), draftPointIcon() (+41 more)
 
 ### Community 20 - "Model Summary"
 Cohesion: 0.42
@@ -209,7 +208,7 @@ Cohesion: 0.27
 Nodes (7): bearerToken(), constantTimeTokenEquals(), isAuthorizedBearer(), requireFeedbackWriteAuth(), safeString(), handler(), previousEnv
 
 ### Community 26 - "renderMovedOffsetForObservation"
-Cohesion: 0.19
+Cohesion: 0.20
 Nodes (22): addObservation(), appendLocalObservationStatus(), applyDashboardData(), clearFeedbackWriteToken(), clearLocalObservations(), deleteObservationById(), fetchFeedbackWrite(), fetchFirst() (+14 more)
 
 ### Community 28 - "Continuous Learning Behavior"
@@ -233,8 +232,8 @@ Cohesion: 0.28
 Nodes (14): _clean_float(), _clean_string(), import_llm_reviewed_labels(), Any, Path, _queue_row(), _read_jsonl(), _review_id() (+6 more)
 
 ### Community 50 - "normalizeLongitude"
-Cohesion: 0.15
-Nodes (24): bucketFromScore(), distanceMeters(), featureLatLng(), fitVisibleMarkers(), idOf(), isRouteCandidateId(), knownFeatures(), latLngFromValues() (+16 more)
+Cohesion: 0.16
+Nodes (23): bucketFromScore(), distanceMeters(), featureLatLng(), fitVisibleMarkers(), idOf(), isRouteCandidateId(), knownFeatures(), latLngFromValues() (+15 more)
 
 ### Community 52 - "io.py"
 Cohesion: 0.24
@@ -249,12 +248,8 @@ Cohesion: 0.38
 Nodes (8): filter_to_region(), get_region(), GeoDataFrame, Path, Region, region_boundary(), write_region_boundary(), test_filter_to_ulster_poughkeepsie_region()
 
 ### Community 55 - "isMovedObservation"
-Cohesion: 0.23
-Nodes (15): FIELD_OBSERVATION_VIEWS, fieldObservationsForView(), fieldObservationView(), isConfirmedPredictionObservation(), isMovedObservation(), observationDisplayCode(), observationIcon(), observationListBadge() (+7 more)
-
-### Community 56 - "render"
-Cohesion: 0.24
-Nodes (11): buildSearchText(), compareFeaturesForList(), isMobileDrawerOpen(), isTruthy(), normalizeFeature(), normalizeSearchText(), render(), routeSearchTokens() (+3 more)
+Cohesion: 0.42
+Nodes (9): fieldObservationView(), isConfirmedPredictionObservation(), isMovedObservation(), observationDisplayCode(), observationIcon(), observationStatus(), observationTitle(), saveRouteTargetReview() (+1 more)
 
 ## Knowledge Gaps
 - **135 isolated node(s):** `DATA_URLS`, `SUMMARY_URLS`, `MODEL_SUMMARY_URLS`, `OBSERVATION_STATUSES`, `FIELD_VIEW_LABELS` (+130 more)
