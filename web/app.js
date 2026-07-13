@@ -2829,20 +2829,7 @@ function observationListBadge(props) {
 
 function isMovedObservation(props) {
   const layoutSource = String(props?.layout_source || props?.field_layout_source || "");
-  if (layoutSource === "moved_route_count_target") return true;
-
-  const status = observationStatus(props?.status || props?.field_feedback_status);
-  const source = String(props?.source || props?.field_feedback_source || "");
-  const savedOffset = movedObservationSavedOffsetMeters(props);
-  const hasOriginalCoordinate = Boolean(latLngFromValues(props?.predicted_latitude, props?.predicted_longitude));
-
-  return (
-    status === "confirmed_culvert" &&
-    source === "field_added_culvert" &&
-    hasOriginalCoordinate &&
-    Number.isFinite(savedOffset) &&
-    savedOffset > PREDICTION_HIT_RADIUS_M
-  );
+  return layoutSource === "moved_route_count_target";
 }
 
 function movedObservationSavedOffsetMeters(props) {
