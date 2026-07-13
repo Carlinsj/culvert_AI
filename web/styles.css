@@ -1528,6 +1528,8 @@ output {
     opacity: 0.62;
   }
 
+  .mobile-route-count.active,
+  .mobile-route-count[aria-pressed="true"],
   .mobile-add-point.active,
   .mobile-add-point[aria-pressed="true"] {
     border-color: var(--accent);

@@ -40,10 +40,10 @@ const ROUTE_TARGET_AUTO_RADIUS_M = 500;
 const ROUTE_TARGET_AUTO_MIN_MOVE_M = 70;
 const ROUTE_TARGET_AUTO_DEBOUNCE_MS = 900;
 const ROUTE_TARGET_AUTO_TOP_N = 14;
-const ROUTE_TARGET_AUTO_MAP_LIMIT = 6;
+const ROUTE_TARGET_AUTO_MAP_LIMIT = 4;
 const ROUTE_TARGET_MANUAL_TOP_N = 18;
-const ROUTE_TARGET_MANUAL_MAP_LIMIT = 8;
-const ROUTE_TARGET_MAP_MIN_GAP_PX = 74;
+const ROUTE_TARGET_MANUAL_MAP_LIMIT = 5;
+const ROUTE_TARGET_MAP_MIN_GAP_PX = 96;
 const ROUTE_TARGET_MANUAL_COOLDOWN_MS = 30000;
 const OSM_MAX_NATIVE_ZOOM = 19;
 const MAP_MAX_ZOOM = 20;
@@ -95,6 +95,8 @@ const state = {
   lastRouteTargetAutoLocation: null,
   lastManualRouteTargetAt: 0,
   routeTargetAutoTimer: null,
+  routeTargetsActive: false,
+  routeTargetLastCompletedKey: "",
   listDiscoveryCount: 0,
   shouldFocusLocationOnNextUpdate: false,
   modelSummary: null,
@@ -226,13 +228,25 @@ function setupMap() {
 }
 
 function bindControls() {
-  els.search.addEventListener("input", render);
+  els.search.addEventListener("input", () => {
+    resetRouteTargets();
+    render();
+  });
   els.score.addEventListener("input", () => {
+    resetRouteTargets();
     els.scoreOutput.value = els.score.value;
     render();
   });
-  els.buckets.forEach((input) => input.addEventListener("change", render));
-  els.showKnown?.addEventListener("change", render);
+  els.buckets.forEach((input) =>
+    input.addEventListener("change", () => {
+      resetRouteTargets();
+      render();
+    }),
+  );
+  els.showKnown?.addEventListener("change", () => {
+    resetRouteTargets();
+    render();
+  });
   els.listViewButtons.forEach((button) => {
     button.addEventListener("click", () => setListView(button.dataset.listView || "ranked"));
   });
@@ -556,6 +570,8 @@ async function runRouteCount(options = {}) {
   const route = options.route ?? String(els.routeCountInput?.value || "").trim();
   const bbox = options.bbox ?? (els.routeCountViewport?.checked ? currentMapBbox() : "");
   const topN = options.topN ?? 12;
+  const targetMode = options.targetMode !== false;
+  const targetRequestKey = options.targetRequestKey || routeTargetRequestKey(route, bbox);
 
   if (!route && !bbox) {
     showRouteCountMessage("Turn on current map view to count all routes, or enter a route.");
@@ -563,6 +579,9 @@ async function runRouteCount(options = {}) {
   }
 
   const requestId = ++state.routeCountRequestId;
+  if (targetMode) {
+    setRouteTargetsActive(true);
+  }
   els.routeCountRun.disabled = true;
   if (els.routeCountKingston) {
     els.routeCountKingston.disabled = true;
@@ -575,7 +594,7 @@ async function runRouteCount(options = {}) {
     setLocationStatus(options.statusMessage);
   }
   if (options.clearTargetsOnStart !== false) {
-    state.routeCountLayer?.clearLayers();
+    clearRouteTargetMarkers();
   }
 
   try {
@@ -591,6 +610,12 @@ async function runRouteCount(options = {}) {
         limit: options.mapTargetLimit,
         minGapPx: options.mapTargetMinGapPx,
       });
+      if (targetMode) {
+        state.routeTargetLastCompletedKey = targetRequestKey;
+        if (!renderedTargetCount) {
+          setRouteTargetsActive(false);
+        }
+      }
       if (options.statusMessage) {
         const count = Number(report.recommended?.predicted_count ?? 0);
         const targetCount = Number.isFinite(renderedTargetCount)
@@ -608,6 +633,10 @@ async function runRouteCount(options = {}) {
   } catch (error) {
     if (requestId === state.routeCountRequestId) {
       showRouteCountMessage(`Route count failed: ${error.message || "unknown error"}`);
+      if (targetMode) {
+        state.routeTargetLastCompletedKey = "";
+        setRouteTargetsActive(false);
+      }
       if (options.statusMessage) {
         setLocationStatus(`Route targets failed: ${error.message || "unknown error"}`);
       }
@@ -632,8 +661,18 @@ function runMobileRouteCount() {
     setLocationStatus("Move the map to the route area before loading targets.");
     return;
   }
+  cancelScheduledAutoRouteTargets();
   state.lastManualRouteTargetAt = Date.now();
   const route = routeCountRouteForMobile();
+  const targetRequestKey = routeTargetRequestKey(route, bbox);
+  if (
+    state.routeTargetsActive &&
+    state.routeTargetLastCompletedKey === targetRequestKey &&
+    Number(state.routeCountLayer?.getLayers?.().length || 0) > 0
+  ) {
+    setLocationStatus("Targets are already shown for this map view.");
+    return;
+  }
   runRouteCount({
     route,
     bbox,
@@ -641,11 +680,51 @@ function runMobileRouteCount() {
     mapTargetLimit: ROUTE_TARGET_MANUAL_MAP_LIMIT,
     pendingMessage: "Loading targets for this map view...",
     statusMessage: "Loading route-count targets for this map view...",
+    targetMode: true,
+    targetRequestKey,
     completeStatusMessage: (report, targetCount) => {
       const count = Number(report.recommended?.predicted_count ?? 0);
       return `${count.toLocaleString()} predicted in this view. Showing ${targetCount} route-count targets.`;
     },
   });
+}
+
+function routeTargetRequestKey(route, bbox) {
+  return [String(route || "").trim().toLowerCase(), String(bbox || "").trim()].join("|");
+}
+
+function clearRouteTargetMarkers() {
+  state.routeCountLayer?.clearLayers();
+  state.routeCountTargetsById.clear();
+}
+
+function setRouteTargetsActive(active) {
+  const nextActive = Boolean(active);
+  if (state.routeTargetsActive === nextActive) {
+    updateRouteTargetControls();
+    return;
+  }
+  state.routeTargetsActive = nextActive;
+  if (!nextActive) {
+    state.routeTargetLastCompletedKey = "";
+  }
+  updateRouteTargetControls();
+  renderMarkers();
+}
+
+function resetRouteTargets() {
+  clearRouteTargetMarkers();
+  setRouteTargetsActive(false);
+}
+
+function updateRouteTargetControls() {
+  els.mobileRouteCount?.setAttribute("aria-pressed", String(state.routeTargetsActive));
+  els.mobileRouteCount?.classList.toggle("active", state.routeTargetsActive);
+}
+
+function cancelScheduledAutoRouteTargets() {
+  window.clearTimeout(state.routeTargetAutoTimer);
+  state.routeTargetAutoTimer = null;
 }
 
 function routeCountRouteForMobile() {
@@ -666,19 +745,25 @@ function scheduleAutoRouteTargets(options = {}) {
     : Infinity;
   if (!options.force && movedMeters < ROUTE_TARGET_AUTO_MIN_MOVE_M) return;
 
-  window.clearTimeout(state.routeTargetAutoTimer);
+  cancelScheduledAutoRouteTargets();
   state.routeTargetAutoTimer = window.setTimeout(() => {
+    state.routeTargetAutoTimer = null;
+    if (Date.now() - state.lastManualRouteTargetAt < ROUTE_TARGET_MANUAL_COOLDOWN_MS) return;
     if (!state.userLocation) return;
     const { lat, lng } = state.userLocation;
     state.lastRouteTargetAutoLocation = { lat, lng };
+    const route = routeCountRouteForMobile();
+    const bbox = bboxAroundLatLng(lat, lng, ROUTE_TARGET_AUTO_RADIUS_M);
     runRouteCount({
-      route: routeCountRouteForMobile(),
-      bbox: bboxAroundLatLng(lat, lng, ROUTE_TARGET_AUTO_RADIUS_M),
+      route,
+      bbox,
       topN: ROUTE_TARGET_AUTO_TOP_N,
       mapTargetLimit: ROUTE_TARGET_AUTO_MAP_LIMIT,
       viewLabel: "near you",
       pendingMessage: "Loading route-count targets near you...",
       statusMessage: "Loading route-count targets near you...",
+      targetMode: true,
+      targetRequestKey: routeTargetRequestKey(route, bbox),
       completeStatusMessage: (report, targetCount) => {
         const count = Number(report.recommended?.predicted_count ?? 0);
         return `${count.toLocaleString()} predicted near you. Showing ${targetCount} nearby targets.`;
@@ -1181,6 +1266,11 @@ function render() {
 }
 
 function mapRenderableFeatures() {
+  if (state.routeTargetsActive) {
+    const selectedFeature = state.selectedId ? state.featureById.get(state.selectedId) : null;
+    return selectedFeature ? [selectedFeature] : [];
+  }
+
   const selectedFeature = state.selectedId ? state.featureById.get(state.selectedId) : null;
   const byId = new Map();
   for (const feature of state.filtered) {
@@ -1728,10 +1818,10 @@ function stopLocationTracking() {
   state.locationAccuracyCircle = null;
   state.lastLocationListRenderAt = 0;
   state.lastRouteTargetAutoLocation = null;
-  window.clearTimeout(state.routeTargetAutoTimer);
-  state.routeTargetAutoTimer = null;
+  cancelScheduledAutoRouteTargets();
   state.shouldFocusLocationOnNextUpdate = false;
   state.locationLayer?.clearLayers();
+  resetRouteTargets();
   updateLocationButton(false);
   updateRecenterLocationButton();
   setLocationStatus("");
@@ -1782,9 +1872,9 @@ function handleLocationError(error) {
   }
   state.locationWatchId = null;
   state.lastRouteTargetAutoLocation = null;
-  window.clearTimeout(state.routeTargetAutoTimer);
-  state.routeTargetAutoTimer = null;
+  cancelScheduledAutoRouteTargets();
   state.shouldFocusLocationOnNextUpdate = false;
+  resetRouteTargets();
   updateLocationButton(false);
   updateRecenterLocationButton();
   setLocationStatus(message);
