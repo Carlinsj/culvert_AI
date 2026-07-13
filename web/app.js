@@ -54,6 +54,7 @@ const state = {
   listView: "ranked",
   observationLayer: null,
   locationLayer: null,
+  routeCountLayer: null,
   draftPointLayer: null,
   map: null,
   placingPoint: false,
@@ -88,6 +89,7 @@ const els = {
   showKnown: document.querySelector("#show-known"),
   placePoint: document.querySelector("#place-point"),
   mobileAddPoint: document.querySelector("#mobile-add-point"),
+  mobileRouteCount: document.querySelector("#mobile-route-count"),
   toggleFilters: document.querySelector("#toggle-filters"),
   filterPanel: document.querySelector("#filter-panel"),
   detail: document.querySelector("#detail-panel"),
@@ -182,6 +184,7 @@ function setupMap() {
   state.candidateLayer = createCandidateCanvasLayer().addTo(state.map);
   state.observationLayer = L.layerGroup().addTo(state.map);
   state.locationLayer = L.layerGroup().addTo(state.map);
+  state.routeCountLayer = L.layerGroup().addTo(state.map);
   state.draftPointLayer = L.layerGroup().addTo(state.map);
   state.map.on("click", handleMapClick);
   state.map.on("moveend", updateRecenterLocationButton);
@@ -201,6 +204,7 @@ function bindControls() {
   });
   els.placePoint?.addEventListener("click", togglePlacePointMode);
   els.mobileAddPoint?.addEventListener("click", togglePlacePointMode);
+  els.mobileRouteCount?.addEventListener("click", runMobileRouteCount);
   els.toggleFilters?.addEventListener("click", toggleFilterPanel);
   els.mobileMenuToggle?.addEventListener("click", () => setMobileDrawerOpen(true));
   els.mobileSidebarClose?.addEventListener("click", () => setMobileDrawerOpen(false));
@@ -483,15 +487,16 @@ function hasApiBackend() {
   return !["127.0.0.1", "localhost"].includes(hostname) || port !== "8080";
 }
 
-async function runRouteCount() {
+async function runRouteCount(options = {}) {
   if (!els.routeCountResult || !els.routeCountRun) return;
   if (window.location.protocol === "file:") {
     showRouteCountMessage("Route count needs the deployed app or the local dev server.");
     return;
   }
 
-  const route = String(els.routeCountInput?.value || "").trim();
-  const bbox = els.routeCountViewport?.checked ? currentMapBbox() : "";
+  const route = options.route ?? String(els.routeCountInput?.value || "").trim();
+  const bbox = options.bbox ?? (els.routeCountViewport?.checked ? currentMapBbox() : "");
+  const topN = options.topN ?? 12;
 
   if (!route && !bbox) {
     showRouteCountMessage("Turn on current map view to count all routes, or enter a route.");
@@ -503,21 +508,36 @@ async function runRouteCount() {
   if (els.routeCountKingston) {
     els.routeCountKingston.disabled = true;
   }
-  showRouteCountMessage("Calculating route count...");
+  if (els.mobileRouteCount) {
+    els.mobileRouteCount.disabled = true;
+  }
+  showRouteCountMessage(options.pendingMessage || "Calculating route count...");
+  if (options.statusMessage) {
+    setLocationStatus(options.statusMessage);
+  }
 
   try {
     const url = new URL(ROUTE_COUNT_URL, window.location.href);
     if (route) url.searchParams.set("route", route);
     if (bbox) url.searchParams.set("bbox", bbox);
     url.searchParams.set("clusterRadiusM", "30");
-    url.searchParams.set("topN", "8");
+    url.searchParams.set("topN", String(topN));
     const report = await fetchRouteCount(url);
     if (requestId === state.routeCountRequestId) {
       renderRouteCountResult(report);
+      renderRouteCountTargetsOnMap(report.top_clusters || []);
+      if (options.statusMessage) {
+        const count = Number(report.recommended?.predicted_count ?? 0);
+        const targetCount = Array.isArray(report.top_clusters) ? report.top_clusters.length : 0;
+        setLocationStatus(`${count.toLocaleString()} predicted in this view. Showing ${targetCount} route-count targets.`);
+      }
     }
   } catch (error) {
     if (requestId === state.routeCountRequestId) {
       showRouteCountMessage(`Route count failed: ${error.message || "unknown error"}`);
+      if (options.statusMessage) {
+        setLocationStatus(`Route targets failed: ${error.message || "unknown error"}`);
+      }
     }
   } finally {
     if (requestId === state.routeCountRequestId) {
@@ -525,8 +545,35 @@ async function runRouteCount() {
       if (els.routeCountKingston) {
         els.routeCountKingston.disabled = false;
       }
+      if (els.mobileRouteCount) {
+        els.mobileRouteCount.disabled = false;
+      }
     }
   }
+}
+
+function runMobileRouteCount() {
+  const bbox = currentMapBbox();
+  if (!bbox) {
+    setLocationStatus("Move the map to the route area before loading targets.");
+    return;
+  }
+  const route = routeCountRouteForMobile();
+  runRouteCount({
+    route,
+    bbox,
+    topN: 50,
+    pendingMessage: "Loading targets for this map view...",
+    statusMessage: "Loading route-count targets for this map view...",
+  });
+}
+
+function routeCountRouteForMobile() {
+  const typedRoute = String(els.routeCountInput?.value || "").trim();
+  if (typedRoute) return typedRoute;
+  const search = String(els.search?.value || "").trim();
+  if (routeSearchTokens(search).length) return search;
+  return "";
 }
 
 function runKingstonRouteCount() {
@@ -638,6 +685,55 @@ function routeCountTargetsHtml(targets) {
         })
         .join("")}
     </div>
+  `;
+}
+
+function renderRouteCountTargetsOnMap(targets) {
+  if (!state.routeCountLayer || !Array.isArray(targets)) return;
+  state.routeCountLayer.clearLayers();
+  targets.forEach((target, index) => {
+    const latitude = Number(target.latitude);
+    const longitude = Number(target.longitude);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+
+    const marker = L.marker([latitude, longitude], {
+      icon: routeCountTargetIcon(index + 1, target),
+      zIndexOffset: 820,
+      riseOnHover: true,
+    });
+    marker.bindPopup(routeCountPopupHtml(target), selectedPopupOptions());
+    marker.on("click", () => {
+      const candidateId = String(target.candidate_id || "");
+      if (candidateId && state.featureById.has(candidateId)) {
+        selectFeature(candidateId, { pan: false, openPopup: false });
+      }
+    });
+    marker.addTo(state.routeCountLayer);
+  });
+}
+
+function routeCountTargetIcon(rank, target) {
+  const score = Number(target.score);
+  const label = Number.isFinite(score) ? Math.round(score) : rank;
+  return L.divIcon({
+    className: "route-count-map-marker",
+    html: `<span class="route-count-map-dot">${escapeHtml(label)}</span>`,
+    iconSize: [36, 36],
+    iconAnchor: [18, 18],
+    popupAnchor: [0, -16],
+  });
+}
+
+function routeCountPopupHtml(target) {
+  const probability = Number(target.predicted_site_probability);
+  const score = Number(target.score);
+  const road = target.road_name || target.matched_route || "Route-count target";
+  const candidateId = target.candidate_id ? formatReadableId(target.candidate_id) : "";
+  return `
+    <div class="popup-title">Target ${escapeHtml(String(target.rank || ""))}: ${escapeHtml(road)}</div>
+    <div class="popup-meta">Score ${escapeHtml(Number.isFinite(score) ? String(Math.round(score)) : "n/a")} · ${escapeHtml(formatPercent(probability))}</div>
+    ${candidateId ? `<div class="popup-meta">${escapeHtml(candidateId)}</div>` : ""}
+    <div class="popup-meta">Tap Add if this is the culvert you found.</div>
   `;
 }
 
