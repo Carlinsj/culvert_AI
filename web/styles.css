@@ -1205,6 +1205,47 @@ output {
   font-size: 0.55rem;
 }
 
+.moved-original-marker,
+.moved-offset-label-marker {
+  border: 0;
+  background: transparent;
+  pointer-events: none;
+}
+
+.moved-original-dot {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border: 3px solid var(--uncertain);
+  border-radius: 999px;
+  color: var(--uncertain);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow:
+    0 0 0 4px rgba(37, 95, 184, 0.18),
+    0 7px 18px rgba(28, 43, 35, 0.22);
+  font-size: 0.55rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.moved-offset-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 58px;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  padding: 4px 8px;
+  color: #fff;
+  background: var(--uncertain);
+  box-shadow: 0 6px 16px rgba(28, 43, 35, 0.26);
+  font-size: 0.72rem;
+  font-weight: 900;
+  line-height: 1;
+  white-space: nowrap;
+}
+
 .draft-point-marker {
   touch-action: none;
 }
@@ -1272,6 +1313,16 @@ output {
   font-size: 0.82rem;
 }
 
+.popup-actions {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.route-target-popup-actions {
+  grid-template-columns: 1fr;
+}
+
 .popup-action,
 .popup-delete-observation {
   width: 100%;
@@ -1288,6 +1339,21 @@ output {
   border: 1px solid rgba(31, 111, 87, 0.36);
   color: #fff;
   background: var(--accent);
+}
+
+.popup-actions .popup-action {
+  margin-top: 0;
+}
+
+.popup-secondary-action {
+  color: var(--accent);
+  background: #fff;
+}
+
+.popup-deny-action {
+  border-color: rgba(180, 35, 24, 0.36);
+  color: var(--denied);
+  background: #fff;
 }
 
 .popup-delete-observation {
@@ -1308,12 +1374,19 @@ output {
   background: rgba(180, 35, 24, 0.08);
 }
 
+.popup-deny-action:hover,
+.popup-deny-action:focus-visible {
+  border-color: var(--denied);
+  background: rgba(180, 35, 24, 0.08);
+}
+
+.popup-action:disabled,
 .popup-delete-observation:disabled {
   cursor: wait;
   opacity: 0.72;
 }
 
-@media (max-width: 820px) {
+@media (max-width: 1180px) {
   .app-shell {
     display: block;
     width: 100vw;
@@ -1812,6 +1885,7 @@ output {
     max-width: calc(100vw - 58px);
   }
 
+  .popup-action,
   .popup-delete-observation {
     min-height: 44px;
   }

@@ -210,6 +210,8 @@ function observationFeature(payload) {
       field_culvert_id: safeString(props.field_culvert_id, 80),
       layout_source: safeString(props.layout_source, 80),
       layout_scan_summary: safeString(props.layout_scan_summary, 600),
+      predicted_latitude: numberOrNull(props.predicted_latitude),
+      predicted_longitude: numberOrNull(props.predicted_longitude),
       nearest_candidate_id: safeString(props.nearest_candidate_id, 120),
       nearest_candidate_distance_m: numberOrNull(props.nearest_candidate_distance_m),
       missed_candidate_id: safeString(props.missed_candidate_id, 120),

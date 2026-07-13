@@ -12,7 +12,7 @@ const OBSERVATION_STATUSES = {
   no_culvert: "No culvert found",
   uncertain: "Needs another look",
 };
-const MOBILE_VIEWPORT_QUERY = "(max-width: 820px)";
+const MOBILE_VIEWPORT_QUERY = "(max-width: 1180px)";
 const NEARBY_FOCUS_LIMIT = 12;
 const FIELD_CONTEXT_RADIUS_M = 100;
 const PREDICTION_HIT_RADIUS_M = 10;
@@ -62,8 +62,11 @@ const state = {
   listView: "ranked",
   observationLayer: null,
   locationLayer: null,
+  movedOffsetLayer: null,
+  movedOffsetRenderer: null,
   routeCountLayer: null,
   draftPointLayer: null,
+  routeCountTargetsById: new Map(),
   map: null,
   placingPoint: false,
   draftPointMarker: null,
@@ -167,6 +170,9 @@ function applyDashboardData(geojson, summary, observations, options = {}) {
     selectedObservationId && state.observations.some((feature) => observationIdOf(feature) === selectedObservationId)
       ? selectedObservationId
       : null;
+  if (!state.selectedObservationId) {
+    clearMovedOffsetOverlay();
+  }
   renderSummary(summary);
   render();
 }
@@ -195,6 +201,8 @@ function setupMap() {
   state.candidateLayer = createCandidateCanvasLayer().addTo(state.map);
   state.observationLayer = L.layerGroup().addTo(state.map);
   state.locationLayer = L.layerGroup().addTo(state.map);
+  state.movedOffsetLayer = L.layerGroup().addTo(state.map);
+  state.movedOffsetRenderer = L.svg({ padding: 0.5 });
   state.routeCountLayer = L.layerGroup().addTo(state.map);
   state.draftPointLayer = L.layerGroup().addTo(state.map);
   state.map.on("click", handleMapClick);
@@ -237,6 +245,17 @@ function bindControls() {
     }
   });
   document.addEventListener("click", (event) => {
+    const routeTargetReview = event.target.closest("[data-route-target-review]");
+    if (routeTargetReview) {
+      event.preventDefault();
+      saveRouteTargetReview(
+        routeCountTargetFromElement(routeTargetReview),
+        routeTargetReview.dataset.routeTargetReview,
+        routeTargetReview,
+      );
+      return;
+    }
+
     const routeTargetMove = event.target.closest("[data-route-target-move]");
     if (routeTargetMove) {
       event.preventDefault();
@@ -784,6 +803,12 @@ function routeCountTargetsHtml(targets) {
 function renderRouteCountTargetsOnMap(targets, options = {}) {
   if (!state.routeCountLayer || !Array.isArray(targets)) return 0;
   state.routeCountLayer.clearLayers();
+  targets.forEach((target) => {
+    const candidateId = String(target?.candidate_id || "");
+    if (candidateId) {
+      state.routeCountTargetsById.set(candidateId, target);
+    }
+  });
   const visibleTargets = declutterRouteCountTargets(targets, options);
   visibleTargets.forEach((target, index) => {
     const latitude = Number(target.latitude);
@@ -804,6 +829,7 @@ function renderRouteCountTargetsOnMap(targets, options = {}) {
     });
     marker.addTo(state.routeCountLayer);
   });
+  refreshSelectedMovedOffsetOverlay();
   return visibleTargets.length;
 }
 
@@ -870,8 +896,12 @@ function routeCountPopupHtml(target) {
     <div class="popup-title">Target ${escapeHtml(String(target.rank || ""))}: ${escapeHtml(road)}</div>
     <div class="popup-meta">Score ${escapeHtml(Number.isFinite(score) ? String(Math.round(score)) : "n/a")} · ${escapeHtml(formatPercent(probability))}</div>
     ${candidateId ? `<div class="popup-meta">${escapeHtml(candidateId)}</div>` : ""}
-    <div class="popup-meta">If the culvert is nearby, move this target to the actual spot.</div>
-    <button type="button" class="popup-action" data-route-target-move ${targetPayload}>Move point</button>
+    <div class="popup-meta">Confirm it here, move it to the actual spot, or mark it absent.</div>
+    <div class="popup-actions route-target-popup-actions">
+      <button type="button" class="popup-action popup-confirm-action" data-route-target-review="confirmed_culvert" ${targetPayload}>Confirm here</button>
+      <button type="button" class="popup-action popup-secondary-action" data-route-target-move ${targetPayload}>Move</button>
+      <button type="button" class="popup-action popup-deny-action" data-route-target-review="no_culvert" ${targetPayload}>No culvert</button>
+    </div>
   `;
 }
 
@@ -930,6 +960,65 @@ function startMoveRouteTarget(target) {
   renderDraftPointDetail(latLng);
   centerMapOnPoint([latitude, longitude]);
   setLocationStatus("Move the red point to the actual culvert, then save it.");
+}
+
+async function saveRouteTargetReview(target, status, button) {
+  const normalizedStatus = observationStatus(status);
+  const latitude = Number(target?.latitude);
+  const longitude = Number(target?.longitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    setLocationStatus("This target has no coordinate to save.");
+    return;
+  }
+
+  const targetId = String(target?.candidate_id || "");
+  const featureProps = targetId ? state.featureById.get(targetId)?.properties || {} : {};
+  const score = Number(target?.score ?? featureProps.score);
+  const rank = Number(target?.discovery_rank || target?.rank || featureProps.rank);
+  const roadName = target?.road_name || featureProps.road_name || target?.matched_route || "";
+  const streamName = target?.stream_name || drainageLabel(featureProps) || "";
+  const readableTarget = targetId ? formatReadableId(targetId) : `Target ${target?.rank || ""}`.trim();
+  const actionLabel = normalizedStatus === "confirmed_culvert" ? "Confirmed" : "Denied";
+
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Saving...";
+  }
+
+  try {
+    const result = await saveObservation({
+      status: normalizedStatus,
+      notes: "",
+      latitude,
+      longitude,
+      candidate_id: targetId || readableTarget || makeFieldCulvertId(),
+      road_name: roadName,
+      stream_name: streamName,
+      source: "prediction_review",
+      layout_source: "route_count_target_review",
+      layout_scan_summary: `${actionLabel} ${readableTarget || "target"} at the predicted map location.`,
+      predicted_latitude: latitude,
+      predicted_longitude: longitude,
+      nearest_candidate_id: targetId,
+      nearest_candidate_distance_m: 0,
+      inferred_from_candidate: 1,
+      prediction_score: Number.isFinite(score) ? score : null,
+      priority_rank: Number.isFinite(rank) ? rank : null,
+      priority_bucket: bucketFromScore(score || featureProps.score),
+    });
+    state.map?.closePopup();
+    setLocationStatus(`${statusLabel(normalizedStatus)} saved for ${readableTarget || "target"}.`);
+    const observationId = observationIdOf(result.feature);
+    if (observationId) {
+      selectObservation(observationId, { pan: false, openPopup: false });
+    }
+  } catch (error) {
+    if (button) {
+      button.disabled = false;
+      button.textContent = normalizedStatus === "confirmed_culvert" ? "Confirm here" : "No culvert";
+    }
+    setLocationStatus(`Could not save target review: ${error.message || error}`);
+  }
 }
 
 function focusRouteCountTarget(button) {
@@ -1199,6 +1288,7 @@ function selectFeature(candidateId, options = { pan: true }) {
   state.shouldFocusLocationOnNextUpdate = false;
   state.selectedId = candidateId;
   state.selectedObservationId = null;
+  clearMovedOffsetOverlay();
   renderDetail(feature);
   renderList();
   renderMarkers();
@@ -1229,6 +1319,7 @@ function selectObservation(observationId, options = { pan: true }) {
   state.selectedId = null;
   state.selectedObservationId = observationId;
   renderObservationDetail(feature);
+  renderMovedOffsetForObservation(feature);
   renderList();
   updateSelectedMarkerClass();
 
@@ -1456,6 +1547,7 @@ function locationSummaryHtml(props) {
 function clearDetail() {
   state.selectedId = null;
   state.selectedObservationId = null;
+  clearMovedOffsetOverlay();
   hideDetailPanel({ clearSelection: false });
 }
 
@@ -1472,6 +1564,7 @@ function hideDetailPanel(options = {}) {
   if (clearSelection) {
     state.selectedId = null;
     state.selectedObservationId = null;
+    clearMovedOffsetOverlay();
     renderList();
     updateSelectedMarkerClass();
     state.map?.closePopup();
@@ -2236,6 +2329,8 @@ async function saveObservationAtPoint(latLng, status, notes, options = {}) {
     source: "field_added_culvert",
     layout_source: context.layoutSource || "manual_map_point",
     layout_scan_summary: context.summary || "",
+    predicted_latitude: context.predictedLatitude,
+    predicted_longitude: context.predictedLongitude,
     nearest_candidate_id: context.nearestCandidateId || matched.candidate_id || "",
     nearest_candidate_distance_m: context.distanceMeters,
     missed_candidate_id: context.missedCandidateId || "",
@@ -2401,6 +2496,7 @@ function removeObservation(observationId) {
   );
   if (state.selectedObservationId === observationId) {
     state.selectedObservationId = null;
+    clearMovedOffsetOverlay();
     hideDetailPanel({ clearSelection: false });
   }
   state.map?.closePopup();
@@ -2440,6 +2536,8 @@ function observationFeatureFromPayload(payload) {
       field_culvert_id: payload.field_culvert_id || "",
       layout_source: payload.layout_source || "",
       layout_scan_summary: payload.layout_scan_summary || "",
+      predicted_latitude: numberOrNull(payload.predicted_latitude),
+      predicted_longitude: numberOrNull(payload.predicted_longitude),
       nearest_candidate_id: payload.nearest_candidate_id || "",
       nearest_candidate_distance_m: numberOrNull(payload.nearest_candidate_distance_m),
       missed_candidate_id: payload.missed_candidate_id || "",
@@ -2565,13 +2663,152 @@ function movedObservationOffsetMeters(props) {
   const nearest = Number(props?.nearest_candidate_distance_m);
   if (Number.isFinite(nearest)) return nearest;
   const missed = Number(props?.missed_candidate_distance_m);
-  return Number.isFinite(missed) ? missed : NaN;
+  if (Number.isFinite(missed)) return missed;
+
+  const actual = movedPredictionActualLatLng(props);
+  const original = movedPredictionOriginalLatLng(props);
+  if (actual && original) {
+    return distanceMeters(actual.lat, actual.lng, original.lat, original.lng);
+  }
+  return NaN;
 }
 
 function movedObservationSummary(props) {
   const target = formatReadableId(props?.nearest_candidate_id || props?.missed_candidate_id || "predicted target");
   const offset = formatNumber(movedObservationOffsetMeters(props), "m");
   return `Moved from ${target}; actual point is ${offset} from the predicted location.`;
+}
+
+function refreshSelectedMovedOffsetOverlay() {
+  if (!state.selectedObservationId) return;
+  const feature = state.observations.find((item) => observationIdOf(item) === state.selectedObservationId);
+  if (feature && isMovedObservation(feature.properties)) {
+    renderMovedOffsetForObservation(feature);
+  }
+}
+
+function renderMovedOffsetForObservation(feature) {
+  const props = feature?.properties || {};
+  if (!isMovedObservation(props)) {
+    clearMovedOffsetOverlay();
+    return;
+  }
+
+  const actualLatLng = movedPredictionActualLatLng(props);
+  const originalLatLng = movedPredictionOriginalLatLng(props);
+  if (!actualLatLng || !originalLatLng) {
+    clearMovedOffsetOverlay();
+    return;
+  }
+
+  renderMovedOffsetOverlay({
+    actualLatLng,
+    originalLatLng,
+    offsetMeters: movedObservationOffsetMeters(props),
+    originalLabel: formatReadableId(props.nearest_candidate_id || props.missed_candidate_id || "Prediction"),
+  });
+}
+
+function renderMovedOffsetForDraft(latLng, context) {
+  if (!state.draftPointSourceTarget) {
+    clearMovedOffsetOverlay();
+    return;
+  }
+
+  const actualLatLng = L.latLng(latLng);
+  const originalLatLng = latLngFromValues(
+    state.draftPointSourceTarget.latitude,
+    state.draftPointSourceTarget.longitude,
+  );
+  if (!actualLatLng || !originalLatLng) {
+    clearMovedOffsetOverlay();
+    return;
+  }
+
+  renderMovedOffsetOverlay({
+    actualLatLng,
+    originalLatLng,
+    offsetMeters: context?.distanceMeters,
+    originalLabel: formatReadableId(state.draftPointSourceTarget.candidate_id || "Prediction"),
+  });
+}
+
+function renderMovedOffsetOverlay({ actualLatLng, originalLatLng, offsetMeters, originalLabel }) {
+  if (!state.movedOffsetLayer || !state.map) return;
+  state.movedOffsetLayer.clearLayers();
+
+  const offset = Number.isFinite(Number(offsetMeters))
+    ? Number(offsetMeters)
+    : distanceMeters(actualLatLng.lat, actualLatLng.lng, originalLatLng.lat, originalLatLng.lng);
+  const midpoint = L.latLng(
+    (actualLatLng.lat + originalLatLng.lat) / 2,
+    (actualLatLng.lng + originalLatLng.lng) / 2,
+  );
+
+  L.polyline([originalLatLng, actualLatLng], {
+    className: "moved-offset-line",
+    color: "#255fb8",
+    dashArray: "6 8",
+    interactive: false,
+    opacity: 0.92,
+    renderer: state.movedOffsetRenderer,
+    weight: 3,
+  }).addTo(state.movedOffsetLayer);
+
+  L.marker(originalLatLng, {
+    icon: L.divIcon({
+      className: "moved-original-marker",
+      html: `<span class="moved-original-dot" aria-label="Original prediction ${escapeAttr(originalLabel || "")}">PRED</span>`,
+      iconSize: [42, 42],
+      iconAnchor: [21, 21],
+    }),
+    interactive: false,
+    keyboard: false,
+    zIndexOffset: 860,
+  }).addTo(state.movedOffsetLayer);
+
+  L.marker(midpoint, {
+    icon: L.divIcon({
+      className: "moved-offset-label-marker",
+      html: `<span class="moved-offset-label">${escapeHtml(formatNumber(offset, "m"))}</span>`,
+      iconSize: [64, 26],
+      iconAnchor: [32, 13],
+    }),
+    interactive: false,
+    keyboard: false,
+    zIndexOffset: 880,
+  }).addTo(state.movedOffsetLayer);
+}
+
+function clearMovedOffsetOverlay() {
+  state.movedOffsetLayer?.clearLayers();
+}
+
+function movedPredictionActualLatLng(props) {
+  return latLngFromValues(props?.latitude, props?.longitude);
+}
+
+function movedPredictionOriginalLatLng(props) {
+  const persisted = latLngFromValues(props?.predicted_latitude, props?.predicted_longitude);
+  if (persisted) return persisted;
+
+  const targetId = String(props?.nearest_candidate_id || props?.missed_candidate_id || "");
+  if (!targetId) return null;
+
+  const cachedTarget = state.routeCountTargetsById?.get(targetId);
+  const cachedLatLng = latLngFromValues(cachedTarget?.latitude, cachedTarget?.longitude);
+  if (cachedLatLng) return cachedLatLng;
+
+  const feature = state.featureById?.get(targetId);
+  if (!feature) return null;
+  const featureLatLon = featureLatLng(feature);
+  return featureLatLon ? L.latLng(featureLatLon[0], featureLatLon[1]) : null;
+}
+
+function latLngFromValues(latitude, longitude) {
+  const lat = Number(latitude);
+  const lon = Number(longitude);
+  return Number.isFinite(lat) && Number.isFinite(lon) ? L.latLng(lat, lon) : null;
 }
 
 function sourceLabel(source) {
@@ -2658,6 +2895,8 @@ function routeTargetContextForPoint(latLng, target) {
     contextLabel: "moved prediction",
     withinRadius: isHit,
     distanceMeters: distanceMetersValue,
+    predictedLatitude: Number.isFinite(targetLatitude) ? targetLatitude : null,
+    predictedLongitude: Number.isFinite(targetLongitude) ? targetLongitude : null,
     roadName,
     streamName,
     nearestDisplayId,
@@ -2718,6 +2957,7 @@ function startPlacePointMode() {
   state.placingPoint = true;
   state.draftPointFieldId = makeFieldCulvertId();
   state.draftPointSourceTarget = null;
+  clearMovedOffsetOverlay();
   updatePlacePointButton();
   setMobileDrawerOpen(false);
   state.selectedId = null;
@@ -2737,6 +2977,7 @@ function cancelPlacePointMode() {
   state.draftPointFieldId = "";
   state.draftPointSourceTarget = null;
   removeDraftPointMarker();
+  clearMovedOffsetOverlay();
   updatePlacePointButton();
 }
 
@@ -2773,6 +3014,11 @@ function renderDraftPointMarker(latLng) {
       riseOnHover: true,
       zIndexOffset: 1400,
       title: "New culvert point",
+    });
+    state.draftPointMarker.on("drag", () => {
+      if (!state.draftPointSourceTarget) return;
+      const currentLatLng = state.draftPointMarker.getLatLng();
+      renderMovedOffsetForDraft(currentLatLng, mapContextForPoint(currentLatLng));
     });
     state.draftPointMarker.on("dragend", () => {
       renderDraftPointDetail(state.draftPointMarker.getLatLng());
@@ -2831,6 +3077,7 @@ function renderDraftPointDetail(latLng) {
   `;
   bindDetailCloseAction();
   bindDraftPointActions(fieldId);
+  renderMovedOffsetForDraft(latLng, context);
   window.requestAnimationFrame(scrollDetailIntoViewOnMobile);
 }
 
