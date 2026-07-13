@@ -132,6 +132,7 @@ const els = {
   detailModalClose: document.querySelector("#detail-modal-close"),
   fitVisible: document.querySelector("#fit-visible"),
   backendStatus: document.querySelector("#backend-status"),
+  syncLocalObservations: document.querySelector("#sync-local-observations"),
   sidebar: document.querySelector("#mobile-sidebar"),
   drawerBackdrop: document.querySelector("#drawer-backdrop"),
   mobileMenuToggle: document.querySelector("#mobile-menu-toggle"),
@@ -262,6 +263,7 @@ function bindControls() {
   els.recenterLocation?.addEventListener("click", recenterOnUserLocation);
   els.routeCountRun?.addEventListener("click", runRouteCount);
   els.routeCountKingston?.addEventListener("click", runKingstonRouteCount);
+  els.syncLocalObservations?.addEventListener("click", () => syncLocalObservationsToServer({ force: true }));
   els.routeCountInput?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
       event.preventDefault();
@@ -559,6 +561,11 @@ async function updateBackendStatus() {
 function appendLocalObservationStatus() {
   if (!els.backendStatus) return;
   const localCount = loadLocalObservations().length;
+  if (els.syncLocalObservations) {
+    els.syncLocalObservations.hidden = localCount === 0 || !hasApiBackend();
+    els.syncLocalObservations.textContent = localCount > 0 ? `Sync ${localCount}` : "Sync now";
+    els.syncLocalObservations.disabled = false;
+  }
   if (localCount > 0) {
     els.backendStatus.textContent = `${els.backendStatus.textContent} · ${localCount} unsynced local`;
   }
@@ -2625,12 +2632,21 @@ async function saveObservation(payload) {
   }
 }
 
-async function syncLocalObservationsToServer() {
+async function syncLocalObservationsToServer(options = {}) {
   if (!hasApiBackend()) return;
   const local = loadLocalObservations();
   if (!local.length) {
     appendLocalObservationStatus();
     return;
+  }
+
+  if (els.syncLocalObservations) {
+    els.syncLocalObservations.hidden = false;
+    els.syncLocalObservations.disabled = true;
+    els.syncLocalObservations.textContent = "Syncing...";
+  }
+  if (options.force && els.backendStatus) {
+    els.backendStatus.textContent = `Syncing ${local.length} local point${local.length === 1 ? "" : "s"}...`;
   }
 
   let synced = 0;
@@ -2653,6 +2669,10 @@ async function syncLocalObservationsToServer() {
         latestRefresh = saved;
       }
     } catch {
+      if (options.force && els.backendStatus) {
+        els.backendStatus.textContent = "Sync failed. Check connection/token and try Sync again.";
+      }
+      appendLocalObservationStatus();
       return;
     }
   }
@@ -2665,6 +2685,11 @@ async function syncLocalObservationsToServer() {
       });
     }
     updateBackendStatus();
+  } else {
+    if (options.force && els.backendStatus) {
+      els.backendStatus.textContent = `${local.length - synced} local point${local.length - synced === 1 ? "" : "s"} still unsynced.`;
+    }
+    appendLocalObservationStatus();
   }
 }
 

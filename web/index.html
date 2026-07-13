@@ -10,7 +10,7 @@
       integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
       crossorigin="anonymous"
     />
-    <link rel="stylesheet" href="styles.css?v=20260713-target-declutter" />
+    <link rel="stylesheet" href="styles.css?v=20260713-sync-local" />
   </head>
   <body>
     <main class="app-shell">
@@ -21,7 +21,12 @@
           </button>
           <p class="eyebrow">Ulster County Pilot</p>
           <h1>Culvert AI Field Review</h1>
-          <p id="backend-status" class="backend-status">Checking backend</p>
+          <div class="backend-row">
+            <p id="backend-status" class="backend-status">Checking backend</p>
+            <button id="sync-local-observations" type="button" class="sync-local-button" hidden>
+              Sync now
+            </button>
+          </div>
           <div class="summary-grid" aria-label="Summary statistics">
             <div>
               <span id="total-count">0</span>
@@ -193,6 +198,6 @@
       integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
       crossorigin="anonymous"
     ></script>
-    <script src="app.js?v=20260713-target-density-sync"></script>
+    <script src="app.js?v=20260713-sync-local"></script>
   </body>
 </html>

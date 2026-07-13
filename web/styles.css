@@ -107,11 +107,33 @@ h1 {
   line-height: 1.12;
 }
 
-.backend-status {
+.backend-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: -8px 0 14px;
+}
+
+.backend-status {
+  margin: 0;
   color: var(--muted);
   font-size: 0.78rem;
   font-weight: 700;
+}
+
+.sync-local-button {
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 6px 8px;
+  color: var(--accent);
+  background: #fff;
+  font-size: 0.72rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.sync-local-button:disabled {
+  opacity: 0.65;
 }
 
 h2 {
