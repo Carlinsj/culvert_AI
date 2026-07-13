@@ -16,7 +16,6 @@
   "14": "Web Export",
   "15": "Census Inputs",
   "16": "LLM Label Import",
-  "17": "Draft Point UI",
   "18": "DEM Acquisition",
   "19": "Observation Labels",
   "20": "Model Summary",
@@ -35,7 +34,6 @@
   "33": "Series",
   "34": "Vercel Observation Pull",
   "35": "Web Build Verify",
-  "36": "region.py",
   "37": "Python Wrapper",
   "38": "Python Bootstrap",
   "39": "Actual Predictions Script",
@@ -51,8 +49,5 @@
   "49": "Project Root",
   "50": "normalizeLongitude",
   "51": "Soft Voting Ensemble",
-  "52": "io.py",
-  "53": "evaluate_success_rate_at_actuals",
-  "54": "region.py",
   "55": "isMovedObservation"
 }
