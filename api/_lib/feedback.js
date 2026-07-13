@@ -180,7 +180,7 @@ function emptyFeatureCollection() {
 function observationFeature(payload) {
   const props = payload?.properties || payload || {};
   const coordinates = payload?.geometry?.coordinates || [props.longitude, props.latitude];
-  const longitude = Number(props.longitude ?? coordinates[0]);
+  const longitude = normalizeLongitude(props.longitude ?? coordinates[0]);
   const latitude = Number(props.latitude ?? coordinates[1]);
 
   if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) {
@@ -211,7 +211,7 @@ function observationFeature(payload) {
       layout_source: safeString(props.layout_source, 80),
       layout_scan_summary: safeString(props.layout_scan_summary, 600),
       predicted_latitude: numberOrNull(props.predicted_latitude),
-      predicted_longitude: numberOrNull(props.predicted_longitude),
+      predicted_longitude: longitudeOrNull(props.predicted_longitude),
       nearest_candidate_id: safeString(props.nearest_candidate_id, 120),
       nearest_candidate_distance_m: numberOrNull(props.nearest_candidate_distance_m),
       missed_candidate_id: safeString(props.missed_candidate_id, 120),
@@ -364,6 +364,12 @@ function applyObservationToFeature(feature, observation) {
     props.nearest_field_report_date = safeString(obs.observed_at, 10);
     props.field_added_culvert_id = obs.field_culvert_id || "";
     props.field_layout_source = obs.layout_source || "";
+    props.predicted_latitude = numberOrNull(obs.predicted_latitude);
+    props.predicted_longitude = longitudeOrNull(obs.predicted_longitude);
+    props.nearest_candidate_id = obs.nearest_candidate_id || "";
+    props.nearest_candidate_distance_m = numberOrNull(obs.nearest_candidate_distance_m);
+    props.missed_candidate_id = obs.missed_candidate_id || "";
+    props.missed_candidate_distance_m = numberOrNull(obs.missed_candidate_distance_m);
     return;
   }
 
@@ -449,6 +455,12 @@ function featureFromConfirmedObservation(observation) {
       nearest_field_report_source_file: "vercel_field_observations",
       field_added_culvert_id: obs.field_culvert_id || "",
       field_layout_source: obs.layout_source || "",
+      predicted_latitude: numberOrNull(obs.predicted_latitude),
+      predicted_longitude: longitudeOrNull(obs.predicted_longitude),
+      nearest_candidate_id: obs.nearest_candidate_id || "",
+      nearest_candidate_distance_m: numberOrNull(obs.nearest_candidate_distance_m),
+      missed_candidate_id: obs.missed_candidate_id || "",
+      missed_candidate_distance_m: numberOrNull(obs.missed_candidate_distance_m),
       field_feedback_status: "confirmed_culvert",
       field_feedback_observation_id: obs.observation_id,
       field_feedback_at: obs.observed_at,
@@ -607,6 +619,18 @@ function safeString(value, maxLength) {
 function numberOrNull(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+function longitudeOrNull(value) {
+  const longitude = normalizeLongitude(value);
+  return Number.isFinite(longitude) ? longitude : null;
+}
+
+function normalizeLongitude(value) {
+  const longitude = Number(value);
+  if (!Number.isFinite(longitude)) return NaN;
+  const normalized = ((((longitude + 180) % 360) + 360) % 360) - 180;
+  return normalized === -180 && longitude > 0 ? 180 : normalized;
 }
 
 function numberOrZero(value) {

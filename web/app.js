@@ -27,6 +27,8 @@ const MOBILE_VIEWPORT_QUERY = "(max-width: 1180px)";
 const NEARBY_FOCUS_LIMIT = 12;
 const FIELD_CONTEXT_RADIUS_M = 100;
 const PREDICTION_HIT_RADIUS_M = 10;
+const MOVED_OFFSET_MAX_RENDER_M = 750;
+const MOVED_OFFSET_RENDER_TOLERANCE_M = 75;
 const SELECTED_POINT_ZOOM = 16;
 const SELECTED_POINT_MAX_ZOOM_STEP = 1;
 const SELECTION_POPUP_DELAY_MS = 460;
@@ -1067,9 +1069,10 @@ function showRouteCountMessage(message) {
 function normalizeFeature(feature) {
   const props = feature.properties || {};
   const coordinates = feature.geometry?.coordinates || [props.longitude, props.latitude];
+  const longitude = normalizeLongitude(props.longitude ?? coordinates[0]);
   const normalizedProps = {
     ...props,
-    longitude: Number(props.longitude ?? coordinates[0]),
+    longitude,
     latitude: Number(props.latitude ?? coordinates[1]),
     score: Number(props.discovery_score ?? props.culvert_likelihood_score ?? props.culvert_probability ?? 0),
     rank: Number(props.discovery_rank ?? props.priority_rank ?? 999999),
@@ -1370,12 +1373,14 @@ function scrollDetailIntoViewOnMobile() {
 }
 
 function centerMapOnPoint(latLng) {
+  const point = Array.isArray(latLng) ? latLngFromValues(latLng[0], latLng[1]) : normalizeLatLng(latLng);
+  const target = point || latLng;
   state.map.stop();
   const currentZoom = state.map.getZoom();
   const zoom = selectedPointTargetZoom(currentZoom);
   const mobile = isMobileViewport();
   if (mobile && currentZoom >= SELECTED_POINT_ZOOM) {
-    state.map.panTo(latLng, {
+    state.map.panTo(target, {
       animate: true,
       duration: 0.18,
       easeLinearity: 0.25,
@@ -1383,7 +1388,7 @@ function centerMapOnPoint(latLng) {
     return;
   }
 
-  state.map.flyTo(latLng, zoom, {
+  state.map.flyTo(target, zoom, {
     animate: true,
     duration: mobile ? 0.34 : 0.5,
     easeLinearity: 0.18,
@@ -1855,7 +1860,8 @@ function renderLocationMarker() {
 
 function focusUserLocation() {
   if (!state.userLocation) return;
-  const latLng = [state.userLocation.lat, state.userLocation.lng];
+  const point = normalizeLatLng(state.userLocation);
+  const latLng = point ? [point.lat, point.lng] : [state.userLocation.lat, state.userLocation.lng];
   const zoom = Math.max(state.map.getZoom(), LOCATION_FOCUS_ZOOM);
   const mobile = isMobileViewport();
   state.map.stop();
@@ -1909,7 +1915,7 @@ function knownFeatures() {
 
 function featureLatLng(feature) {
   const lat = Number(feature.properties.latitude);
-  const lon = Number(feature.properties.longitude);
+  const lon = normalizeLongitude(feature.properties.longitude);
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
   return [lat, lon];
 }
@@ -2264,7 +2270,7 @@ function knownFieldObservationCode(props) {
   if (!isFieldObservedKnown(props)) return "";
   const layoutSource = String(props?.layout_source || props?.field_layout_source || "");
   const feedbackSource = String(props?.field_feedback_source || props?.source || "");
-  if (layoutSource === "moved_route_count_target") return "MVD";
+  if (layoutSource === "moved_route_count_target" || isMovedObservation(props)) return "MVD";
   if (layoutSource === "route_count_target_review" || feedbackSource === "prediction_review") {
     return CONFIRMED_FIELD_LABEL;
   }
@@ -2351,6 +2357,8 @@ async function saveObservationForFeature(feature, status, notes) {
 
 async function saveObservationAtPoint(latLng, status, notes, options = {}) {
   const context = options.context || {};
+  const point = normalizeLatLng(latLng);
+  if (!point) throw new Error("Observation needs a valid latitude and longitude.");
   const fieldId = options.fieldId || makeFieldCulvertId();
   const matched = context.matchedFeature?.properties || {};
   const predictionScore = context.predictionScore ?? matched.score;
@@ -2359,8 +2367,8 @@ async function saveObservationAtPoint(latLng, status, notes, options = {}) {
   return saveObservation({
     status,
     notes,
-    latitude: latLng.lat,
-    longitude: latLng.lng,
+    latitude: point.lat,
+    longitude: point.lng,
     candidate_id: fieldId,
     field_culvert_id: fieldId,
     road_name: context.roadName || "",
@@ -2553,8 +2561,8 @@ function updateVisibleCount() {
 
 function observationFeatureFromPayload(payload) {
   const latitude = Number(payload.latitude);
-  const longitude = Number(payload.longitude);
-  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+  const longitude = normalizeLongitude(payload.longitude);
+  if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90 || !Number.isFinite(longitude)) {
     throw new Error("Observation needs a valid latitude and longitude.");
   }
 
@@ -2576,7 +2584,7 @@ function observationFeatureFromPayload(payload) {
       layout_source: payload.layout_source || "",
       layout_scan_summary: payload.layout_scan_summary || "",
       predicted_latitude: numberOrNull(payload.predicted_latitude),
-      predicted_longitude: numberOrNull(payload.predicted_longitude),
+      predicted_longitude: longitudeOrNull(payload.predicted_longitude),
       nearest_candidate_id: payload.nearest_candidate_id || "",
       nearest_candidate_distance_m: numberOrNull(payload.nearest_candidate_distance_m),
       missed_candidate_id: payload.missed_candidate_id || "",
@@ -2612,7 +2620,7 @@ function normalizeObservationFeature(feature) {
 function observationLatLng(feature) {
   const props = feature.properties || {};
   const lat = Number(props.latitude);
-  const lon = Number(props.longitude);
+  const lon = normalizeLongitude(props.longitude);
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
   return [lat, lon];
 }
@@ -2730,14 +2738,34 @@ function observationListBadge(props) {
 }
 
 function isMovedObservation(props) {
-  return String(props?.layout_source || props?.field_layout_source || "") === "moved_route_count_target";
+  const layoutSource = String(props?.layout_source || props?.field_layout_source || "");
+  if (layoutSource === "moved_route_count_target") return true;
+
+  const status = observationStatus(props?.status || props?.field_feedback_status);
+  const source = String(props?.source || props?.field_feedback_source || "");
+  const savedOffset = movedObservationSavedOffsetMeters(props);
+  const hasOriginalCoordinate = Boolean(latLngFromValues(props?.predicted_latitude, props?.predicted_longitude));
+
+  return (
+    status === "confirmed_culvert" &&
+    source === "field_added_culvert" &&
+    hasOriginalCoordinate &&
+    Number.isFinite(savedOffset) &&
+    savedOffset > PREDICTION_HIT_RADIUS_M
+  );
 }
 
-function movedObservationOffsetMeters(props) {
+function movedObservationSavedOffsetMeters(props) {
   const nearest = Number(props?.nearest_candidate_distance_m);
   if (Number.isFinite(nearest)) return nearest;
   const missed = Number(props?.missed_candidate_distance_m);
   if (Number.isFinite(missed)) return missed;
+  return NaN;
+}
+
+function movedObservationOffsetMeters(props) {
+  const savedOffset = movedObservationSavedOffsetMeters(props);
+  if (Number.isFinite(savedOffset)) return savedOffset;
 
   const actual = movedPredictionActualLatLng(props);
   const original = movedPredictionOriginalLatLng(props);
@@ -2766,21 +2794,41 @@ function renderSavedMovedOffsetOverlays() {
 
   state.observations.forEach((feature) => {
     const props = feature?.properties || {};
-    if (!isMovedObservation(props)) return;
-
-    const actualLatLng = movedPredictionActualLatLng(props);
-    const originalLatLng = movedPredictionOriginalLatLng(props);
-    if (!actualLatLng || !originalLatLng) return;
+    const context = movedOffsetRenderContext(props);
+    if (!context) return;
 
     renderMovedOffsetOverlay({
-      actualLatLng,
-      originalLatLng,
-      offsetMeters: movedObservationOffsetMeters(props),
+      actualLatLng: context.actualLatLng,
+      originalLatLng: context.originalLatLng,
+      offsetMeters: context.offsetMeters,
       originalLabel: formatReadableId(props.nearest_candidate_id || props.missed_candidate_id || "Prediction"),
       layer: state.movedOffsetLayer,
       clearLayer: false,
     });
   });
+}
+
+function movedOffsetRenderContext(props) {
+  if (!isMovedObservation(props)) return null;
+
+  const actualLatLng = movedPredictionActualLatLng(props);
+  const originalLatLng = movedPredictionOriginalLatLng(props);
+  if (!actualLatLng || !originalLatLng) return null;
+
+  const computedOffset = distanceMeters(actualLatLng.lat, actualLatLng.lng, originalLatLng.lat, originalLatLng.lng);
+  if (!Number.isFinite(computedOffset) || computedOffset > MOVED_OFFSET_MAX_RENDER_M) return null;
+
+  const savedOffset = movedObservationSavedOffsetMeters(props);
+  if (Number.isFinite(savedOffset)) {
+    const tolerance = Math.max(MOVED_OFFSET_RENDER_TOLERANCE_M, savedOffset * 2);
+    if (Math.abs(computedOffset - savedOffset) > tolerance) return null;
+  }
+
+  return {
+    actualLatLng,
+    originalLatLng,
+    offsetMeters: Number.isFinite(savedOffset) ? savedOffset : computedOffset,
+  };
 }
 
 function renderMovedOffsetForDraft(latLng, context) {
@@ -2818,19 +2866,19 @@ function renderMovedOffsetOverlay({
   clearLayer = true,
 }) {
   if (!layer || !state.map) return;
+  const actual = normalizeLatLng(actualLatLng);
+  const original = normalizeLatLng(originalLatLng);
+  if (!actual || !original) return;
   if (clearLayer) {
     layer.clearLayers();
   }
 
   const offset = Number.isFinite(Number(offsetMeters))
     ? Number(offsetMeters)
-    : distanceMeters(actualLatLng.lat, actualLatLng.lng, originalLatLng.lat, originalLatLng.lng);
-  const midpoint = L.latLng(
-    (actualLatLng.lat + originalLatLng.lat) / 2,
-    (actualLatLng.lng + originalLatLng.lng) / 2,
-  );
+    : distanceMeters(actual.lat, actual.lng, original.lat, original.lng);
+  const midpoint = midpointLatLng(actual, original);
 
-  L.polyline([originalLatLng, actualLatLng], {
+  L.polyline([original, actual], {
     className: "moved-offset-line",
     color: "#255fb8",
     dashArray: "6 8",
@@ -2840,7 +2888,7 @@ function renderMovedOffsetOverlay({
     weight: 3,
   }).addTo(layer);
 
-  L.marker(originalLatLng, {
+  L.marker(original, {
     icon: L.divIcon({
       className: "moved-original-marker",
       html: `<span class="moved-original-dot" aria-label="Original prediction ${escapeAttr(originalLabel || "")}">PRED</span>`,
@@ -2892,8 +2940,8 @@ function movedPredictionOriginalLatLng(props) {
 
 function latLngFromValues(latitude, longitude) {
   const lat = Number(latitude);
-  const lon = Number(longitude);
-  return Number.isFinite(lat) && Number.isFinite(lon) ? L.latLng(lat, lon) : null;
+  const lon = normalizeLongitude(longitude);
+  return Number.isFinite(lat) && lat >= -90 && lat <= 90 && Number.isFinite(lon) ? L.latLng(lat, lon) : null;
 }
 
 function sourceLabel(source) {
@@ -2958,9 +3006,9 @@ function mapContextForPoint(latLng) {
 
 function routeTargetContextForPoint(latLng, target) {
   const latitude = Number(latLng.lat);
-  const longitude = Number(latLng.lng);
+  const longitude = normalizeLongitude(latLng.lng);
   const targetLatitude = Number(target?.latitude);
-  const targetLongitude = Number(target?.longitude);
+  const targetLongitude = normalizeLongitude(target?.longitude);
   const targetId = String(target?.candidate_id || "");
   const distanceMetersValue =
     Number.isFinite(latitude) &&
@@ -3011,7 +3059,7 @@ function isMissablePredictionCandidate(props) {
 
 function nearestFeatureToPoint(latLng) {
   const latitude = Number(latLng.lat);
-  const longitude = Number(latLng.lng);
+  const longitude = normalizeLongitude(latLng.lng);
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
 
   let best = null;
@@ -3085,11 +3133,11 @@ function draftPointStartLatLng() {
     return L.latLng(state.userLocation.lat, state.userLocation.lng);
   }
   const center = state.map.getCenter();
-  return L.latLng(center.lat, center.lng);
+  return normalizeLatLng(center) || L.latLng(center.lat, center.lng);
 }
 
 function renderDraftPointMarker(latLng) {
-  const point = L.latLng(latLng);
+  const point = normalizeLatLng(latLng) || L.latLng(latLng);
   if (!state.draftPointMarker) {
     state.draftPointMarker = L.marker(point, {
       autoPan: true,
@@ -3136,12 +3184,13 @@ function draftPointIcon() {
 }
 
 function renderDraftPointDetail(latLng) {
+  const point = normalizeLatLng(latLng) || L.latLng(latLng);
   state.selectedId = null;
   state.selectedObservationId = null;
   renderList();
   const fieldId = state.draftPointFieldId || makeFieldCulvertId();
   state.draftPointFieldId = fieldId;
-  const context = mapContextForPoint(latLng);
+  const context = mapContextForPoint(point);
   const existingNotes = els.detail?.querySelector("#field-notes")?.value || "";
   const notesOpen = Boolean(els.detail?.querySelector(".notes-disclosure")?.open);
   const movingTarget = Boolean(state.draftPointSourceTarget);
@@ -3156,13 +3205,13 @@ function renderDraftPointDetail(latLng) {
       <button type="button" class="detail-close" data-close-detail aria-label="Close details">Close</button>
     </div>
     <p>${escapeHtml(instruction)}</p>
-    <p>Lat ${formatNumber(latLng.lat, "")}, Lon ${formatNumber(latLng.lng, "")}</p>
+    <p>Lat ${formatNumber(point.lat, "")}, Lon ${formatNumber(point.lng, "")}</p>
     ${fieldCulvertContextHtml(fieldId, context)}
     ${draftPointSaveHtml(existingNotes, notesOpen)}
   `;
   bindDetailCloseAction();
   bindDraftPointActions(fieldId);
-  renderMovedOffsetForDraft(latLng, context);
+  renderMovedOffsetForDraft(point, context);
   window.requestAnimationFrame(scrollDetailIntoViewOnMobile);
 }
 
@@ -3273,6 +3322,30 @@ function numberOrNull(value) {
   return Number.isFinite(number) ? number : null;
 }
 
+function longitudeOrNull(value) {
+  const longitude = normalizeLongitude(value);
+  return Number.isFinite(longitude) ? longitude : null;
+}
+
+function normalizeLongitude(value) {
+  const longitude = Number(value);
+  if (!Number.isFinite(longitude)) return NaN;
+  const normalized = ((((longitude + 180) % 360) + 360) % 360) - 180;
+  return normalized === -180 && longitude > 0 ? 180 : normalized;
+}
+
+function normalizeLatLng(value) {
+  if (!value) return null;
+  const lat = Number(value.lat);
+  const lng = normalizeLongitude(value.lng);
+  return Number.isFinite(lat) && lat >= -90 && lat <= 90 && Number.isFinite(lng) ? L.latLng(lat, lng) : null;
+}
+
+function midpointLatLng(a, b) {
+  const deltaLng = normalizeLongitude(b.lng - a.lng);
+  return L.latLng((a.lat + b.lat) / 2, normalizeLongitude(a.lng + deltaLng / 2));
+}
+
 function detailCell(label, value) {
   return `<div><label>${escapeHtml(label)}</label><span>${escapeHtml(formatValue(value))}</span></div>`;
 }
@@ -3347,7 +3420,7 @@ function distanceMeters(latA, lonA, latB, lonB) {
   const phiA = toRadians(latA);
   const phiB = toRadians(latB);
   const deltaPhi = toRadians(latB - latA);
-  const deltaLambda = toRadians(lonB - lonA);
+  const deltaLambda = toRadians(normalizeLongitude(lonB - lonA));
   const haversine =
     Math.sin(deltaPhi / 2) ** 2 +
     Math.cos(phiA) * Math.cos(phiB) * Math.sin(deltaLambda / 2) ** 2;

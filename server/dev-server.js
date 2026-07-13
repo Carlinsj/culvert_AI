@@ -345,7 +345,7 @@ function emptyFeatureCollection() {
 
 function observationFeature(payload) {
   const latitude = Number(payload.latitude);
-  const longitude = Number(payload.longitude);
+  const longitude = normalizeLongitude(payload.longitude);
   if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) {
     throw new Error("Observation needs a valid latitude.");
   }
@@ -373,8 +373,12 @@ function observationFeature(payload) {
       field_culvert_id: safeString(payload.field_culvert_id, 80),
       layout_source: safeString(payload.layout_source, 80),
       layout_scan_summary: safeString(payload.layout_scan_summary, 600),
+      predicted_latitude: numberOrNull(payload.predicted_latitude),
+      predicted_longitude: longitudeOrNull(payload.predicted_longitude),
       nearest_candidate_id: safeString(payload.nearest_candidate_id, 120),
       nearest_candidate_distance_m: numberOrNull(payload.nearest_candidate_distance_m),
+      missed_candidate_id: safeString(payload.missed_candidate_id, 120),
+      missed_candidate_distance_m: numberOrNull(payload.missed_candidate_distance_m),
       inferred_from_candidate: numberOrNull(payload.inferred_from_candidate),
       latitude,
       longitude,
@@ -405,6 +409,18 @@ function safeString(value, maxLength) {
 function numberOrNull(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+function longitudeOrNull(value) {
+  const longitude = normalizeLongitude(value);
+  return Number.isFinite(longitude) ? longitude : null;
+}
+
+function normalizeLongitude(value) {
+  const longitude = Number(value);
+  if (!Number.isFinite(longitude)) return NaN;
+  const normalized = ((((longitude + 180) % 360) + 360) % 360) - 180;
+  return normalized === -180 && longitude > 0 ? 180 : normalized;
 }
 
 function makeObservationId() {
