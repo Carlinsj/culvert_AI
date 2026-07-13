@@ -49,5 +49,9 @@
   "47": "Web Serve Script",
   "48": "Package Init",
   "49": "Project Root",
-  "50": "normalizeLongitude"
+  "50": "normalizeLongitude",
+  "51": "Soft Voting Ensemble",
+  "52": "io.py",
+  "53": "evaluate_success_rate_at_actuals",
+  "54": "region.py"
 }
