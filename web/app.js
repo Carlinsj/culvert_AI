@@ -45,6 +45,7 @@ const ROUTE_TARGET_AUTO_MAP_LIMIT = 4;
 const ROUTE_TARGET_MANUAL_TOP_N = 18;
 const ROUTE_TARGET_MANUAL_MAP_LIMIT = 5;
 const ROUTE_TARGET_MAP_MIN_GAP_PX = 96;
+const ROUTE_TARGET_CLUSTER_RADIUS_M = 45;
 const ROUTE_TARGET_MANUAL_COOLDOWN_MS = 30000;
 const OSM_MAX_NATIVE_ZOOM = 19;
 const MAP_MAX_ZOOM = 20;
@@ -52,6 +53,7 @@ const MAX_LIST_ITEMS = 250;
 const CANDIDATE_HIT_TOLERANCE_PX = 8;
 const CANDIDATE_LABEL_MIN_ZOOM = 18;
 const CANDIDATE_LABEL_MAX_POINTS = 90;
+const CANDIDATE_CLUSTER_RADIUS_M = 35;
 const KINGSTON_ROUTE_COUNT_BOUNDS = [
   [41.86, -74.1],
   [42.02, -73.9],
@@ -963,10 +965,11 @@ function renderRouteCountTargetsOnMap(targets, options = {}) {
 function declutterRouteCountTargets(targets, options = {}) {
   const limit = clampIntegerValue(options.limit, targets.length, 0, targets.length);
   const minGapPx = clampNumberValue(options.minGapPx, ROUTE_TARGET_MAP_MIN_GAP_PX, 0, 200);
+  const clusteredTargets = clusterRouteCountTargets(targets);
   const accepted = [];
   const acceptedPoints = [];
 
-  for (const target of targets) {
+  for (const target of clusteredTargets) {
     if (accepted.length >= limit) break;
     const latitude = Number(target.latitude);
     const longitude = Number(target.longitude);
@@ -989,6 +992,72 @@ function declutterRouteCountTargets(targets, options = {}) {
   return accepted;
 }
 
+function clusterRouteCountTargets(targets) {
+  const clusters = [];
+  const sorted = [...targets].sort(compareRouteTargetPriority);
+
+  for (const target of sorted) {
+    const latitude = Number(target.latitude);
+    const longitude = normalizeLongitude(target.longitude);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) continue;
+
+    let cluster = null;
+    for (const candidateCluster of clusters) {
+      const distance = distanceMeters(latitude, longitude, candidateCluster.latitude, candidateCluster.longitude);
+      if (Number.isFinite(distance) && distance <= ROUTE_TARGET_CLUSTER_RADIUS_M) {
+        cluster = candidateCluster;
+        break;
+      }
+    }
+
+    if (!cluster) {
+      clusters.push({
+        latitude,
+        longitude,
+        targets: [target],
+      });
+      continue;
+    }
+
+    cluster.targets.push(target);
+    const count = cluster.targets.length;
+    cluster.latitude = cluster.latitude + (latitude - cluster.latitude) / count;
+    cluster.longitude = normalizeLongitude(cluster.longitude + (longitude - cluster.longitude) / count);
+  }
+
+  return clusters.map(routeTargetClusterRepresentative).sort(compareRouteTargetPriority);
+}
+
+function routeTargetClusterRepresentative(cluster) {
+  const targets = cluster.targets || [];
+  const representative = [...targets].sort(compareRouteTargetPriority)[0] || {};
+  const scoreValues = targets.map((target) => Number(target.score)).filter(Number.isFinite);
+  const probabilityValues = targets
+    .map((target) => Number(target.predicted_site_probability))
+    .filter(Number.isFinite);
+  const bestScore = scoreValues.length ? Math.max(...scoreValues) : Number(representative.score);
+  const bestProbability = probabilityValues.length ? Math.max(...probabilityValues) : Number(representative.predicted_site_probability);
+
+  return {
+    ...representative,
+    latitude: cluster.latitude,
+    longitude: cluster.longitude,
+    score: Number.isFinite(bestScore) ? bestScore : representative.score,
+    predicted_site_probability: Number.isFinite(bestProbability)
+      ? bestProbability
+      : representative.predicted_site_probability,
+    cluster_count: targets.length,
+    cluster_candidate_ids: targets.map((target) => target.candidate_id).filter(Boolean).join(","),
+  };
+}
+
+function compareRouteTargetPriority(a, b) {
+  const rankA = Number(a?.discovery_rank || a?.rank || 999999);
+  const rankB = Number(b?.discovery_rank || b?.rank || 999999);
+  if (rankA !== rankB) return rankA - rankB;
+  return Number(b?.score || 0) - Number(a?.score || 0);
+}
+
 function clampIntegerValue(value, fallback, min, max) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return fallback;
@@ -1003,7 +1072,10 @@ function clampNumberValue(value, fallback, min, max) {
 
 function routeCountTargetIcon(rank, target) {
   const score = Number(target.score);
-  const label = Number.isFinite(score) ? Math.round(score) : rank;
+  const clusterCount = Number(target.cluster_count);
+  const label = Number.isFinite(clusterCount) && clusterCount > 1
+    ? `x${clusterCount}`
+    : Number.isFinite(score) ? Math.round(score) : rank;
   return L.divIcon({
     className: "route-count-map-marker",
     html: `<span class="route-count-map-dot">${escapeHtml(label)}</span>`,
@@ -1018,11 +1090,16 @@ function routeCountPopupHtml(target) {
   const score = Number(target.score);
   const road = target.road_name || target.matched_route || "Route-count target";
   const candidateId = target.candidate_id ? formatReadableId(target.candidate_id) : "";
+  const clusterCount = Number(target.cluster_count);
+  const clusterText = Number.isFinite(clusterCount) && clusterCount > 1
+    ? `Represents ${clusterCount} nearby predictions within ${ROUTE_TARGET_CLUSTER_RADIUS_M} m.`
+    : "";
   const targetPayload = routeCountTargetDataAttrs(target);
   return `
     <div class="popup-title">Target ${escapeHtml(String(target.rank || ""))}: ${escapeHtml(road)}</div>
     <div class="popup-meta">Score ${escapeHtml(Number.isFinite(score) ? String(Math.round(score)) : "n/a")} · ${escapeHtml(formatPercent(probability))}</div>
     ${candidateId ? `<div class="popup-meta">${escapeHtml(candidateId)}</div>` : ""}
+    ${clusterText ? `<div class="popup-meta">${escapeHtml(clusterText)}</div>` : ""}
     <div class="popup-meta">Confirm it here, move it to the actual spot, or mark it absent.</div>
     <div class="popup-actions route-target-popup-actions">
       <button type="button" class="popup-action popup-confirm-action" data-route-target-review="confirmed_culvert" ${targetPayload}>Confirm here</button>
@@ -1044,6 +1121,8 @@ function routeCountTargetDataAttrs(target) {
     ["score", target.score],
     ["probability", target.predicted_site_probability],
     ["discovery-rank", target.discovery_rank],
+    ["cluster-count", target.cluster_count || ""],
+    ["cluster-candidates", target.cluster_candidate_ids || ""],
   ]
     .map(([key, value]) => `data-route-target-${key}="${escapeAttr(value ?? "")}"`)
     .join(" ");
@@ -1061,6 +1140,8 @@ function routeCountTargetFromElement(element) {
     score: element.dataset.routeTargetScore || "",
     predicted_site_probability: element.dataset.routeTargetProbability || "",
     discovery_rank: element.dataset.routeTargetDiscoveryRank || "",
+    cluster_count: element.dataset.routeTargetClusterCount || "",
+    cluster_candidate_ids: element.dataset.routeTargetClusterCandidates || "",
   };
 }
 
@@ -1106,6 +1187,11 @@ async function saveRouteTargetReview(target, status, button) {
   const streamName = target?.stream_name || drainageLabel(featureProps) || "";
   const readableTarget = targetId ? formatReadableId(targetId) : `Target ${target?.rank || ""}`.trim();
   const actionLabel = normalizedStatus === "confirmed_culvert" ? "Confirmed" : "Denied";
+  const clusterCount = Number(target?.cluster_count);
+  const clusterSummary =
+    Number.isFinite(clusterCount) && clusterCount > 1
+      ? ` Cluster representative for ${clusterCount} nearby predictions.`
+      : "";
 
   if (button) {
     button.disabled = true;
@@ -1123,7 +1209,7 @@ async function saveRouteTargetReview(target, status, button) {
       stream_name: streamName,
       source: "prediction_review",
       layout_source: "route_count_target_review",
-      layout_scan_summary: `${actionLabel} ${readableTarget || "target"} at the predicted map location.`,
+      layout_scan_summary: `${actionLabel} ${readableTarget || "target"} at the predicted map location.${clusterSummary}`,
       predicted_latitude: latitude,
       predicted_longitude: longitude,
       nearest_candidate_id: targetId,
@@ -2260,12 +2346,10 @@ function candidateCanvasRadius(props, zoom, selected) {
 }
 
 function declutterCanvasItems(items, zoom) {
-  if (zoom >= 18) return items;
-
   const cellSize = zoom >= 17 ? 36 : zoom >= 15 ? 52 : zoom >= 13 ? 66 : 82;
   const selected = [];
   const known = [];
-  const candidatesByCell = new Map();
+  const candidateItems = [];
 
   for (const item of items) {
     if (item.selected) {
@@ -2278,6 +2362,11 @@ function declutterCanvasItems(items, zoom) {
       continue;
     }
 
+    candidateItems.push(item);
+  }
+
+  const candidatesByCell = new Map();
+  for (const item of clusterCanvasCandidateItems(candidateItems)) {
     const key = `${Math.floor(item.point.x / cellSize)}:${Math.floor(item.point.y / cellSize)}`;
     const current = candidatesByCell.get(key);
     if (!current || compareCanvasCandidatePriority(item, current) < 0) {
@@ -2286,6 +2375,46 @@ function declutterCanvasItems(items, zoom) {
   }
 
   return [...candidatesByCell.values(), ...known, ...selected];
+}
+
+function clusterCanvasCandidateItems(items) {
+  const clusters = [];
+  const sorted = [...items].sort(compareCanvasCandidatePriority);
+
+  for (const item of sorted) {
+    const latLng = featureLatLng(item.feature);
+    if (!latLng) continue;
+    let cluster = null;
+    for (const candidateCluster of clusters) {
+      const distance = distanceMeters(latLng[0], latLng[1], candidateCluster.latitude, candidateCluster.longitude);
+      if (Number.isFinite(distance) && distance <= CANDIDATE_CLUSTER_RADIUS_M) {
+        cluster = candidateCluster;
+        break;
+      }
+    }
+
+    if (!cluster) {
+      clusters.push({
+        latitude: latLng[0],
+        longitude: latLng[1],
+        items: [item],
+      });
+      continue;
+    }
+
+    cluster.items.push(item);
+    const count = cluster.items.length;
+    cluster.latitude = cluster.latitude + (latLng[0] - cluster.latitude) / count;
+    cluster.longitude = normalizeLongitude(cluster.longitude + (latLng[1] - cluster.longitude) / count);
+  }
+
+  return clusters.map((cluster) => {
+    const representative = [...cluster.items].sort(compareCanvasCandidatePriority)[0];
+    return {
+      ...representative,
+      clusterCount: cluster.items.length,
+    };
+  });
 }
 
 function compareCanvasCandidatePriority(a, b) {
@@ -2303,6 +2432,14 @@ function candidateCanvasColor(props) {
 
 function drawCandidateCanvasPoint(context, item) {
   const { point, radius, selected, props } = item;
+  const clusterCount = Number(item.clusterCount || 0);
+  if (clusterCount > 1 && !selected) {
+    context.beginPath();
+    context.arc(point.x, point.y, radius + 4, 0, Math.PI * 2);
+    context.fillStyle = "rgba(49, 104, 180, 0.16)";
+    context.fill();
+  }
+
   if (selected) {
     context.beginPath();
     context.arc(point.x, point.y, radius + 5, 0, Math.PI * 2);
@@ -2322,6 +2459,12 @@ function drawCandidateCanvasPoint(context, item) {
   context.lineWidth = selected ? 3 : 1.6;
   context.strokeStyle = "#ffffff";
   context.stroke();
+
+  if (clusterCount > 1 && !selected) {
+    context.lineWidth = 1.3;
+    context.strokeStyle = "rgba(49, 104, 180, 0.72)";
+    context.stroke();
+  }
 }
 
 function drawCandidateCanvasLabels(context, items, zoom) {
@@ -3273,6 +3416,11 @@ function routeTargetContextForPoint(latLng, target) {
   const roadName = target?.road_name || (target?.matched_route ? `Route ${target.matched_route}` : "");
   const streamName = target?.stream_name || "";
   const nearestDisplayId = targetId ? formatReadableId(targetId) : `Target ${target?.rank || ""}`.trim();
+  const clusterCount = Number(target?.cluster_count);
+  const clusterSummary =
+    Number.isFinite(clusterCount) && clusterCount > 1
+      ? ` Cluster representative for ${clusterCount} nearby predictions.`
+      : "";
 
   return {
     contextLabel: "moved prediction",
@@ -3291,8 +3439,8 @@ function routeTargetContextForPoint(latLng, target) {
     priorityRank: Number.isFinite(rank) ? rank : null,
     priorityBucket: bucketFromScore(score),
     summary: Number.isFinite(distanceMetersValue)
-      ? `Moved ${nearestDisplayId} ${formatNumber(distanceMetersValue, "m")} to the field-confirmed culvert location.`
-      : `Moved ${nearestDisplayId} to the field-confirmed culvert location.`,
+      ? `Moved ${nearestDisplayId} ${formatNumber(distanceMetersValue, "m")} to the field-confirmed culvert location.${clusterSummary}`
+      : `Moved ${nearestDisplayId} to the field-confirmed culvert location.${clusterSummary}`,
   };
 }
 
