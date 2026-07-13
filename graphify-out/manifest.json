@@ -280,8 +280,8 @@
     "semantic_hash": ""
   },
   "web/app.js": {
-    "mtime": 1783976102.3437037,
-    "ast_hash": "d910af42b70d7aa082071791b007e3d2",
+    "mtime": 1783976435.0001802,
+    "ast_hash": "26f2d51c2db22061e0f2e72d80962eb6",
     "semantic_hash": ""
   },
   "web/data/model_summary.json": {
@@ -335,8 +335,8 @@
     "semantic_hash": ""
   },
   "web/index.html": {
-    "mtime": 1783976113.614311,
-    "ast_hash": "0b3239b8b8ec6273697feeb570199012",
+    "mtime": 1783976443.4123266,
+    "ast_hash": "d03c4ae2cde217561e52e3a6db147bd4",
     "semantic_hash": ""
   },
   "graphify-out/memory/query_20260707_173049_now_how_to_improve_model_train_this_model_or_switc.md": {
