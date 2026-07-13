@@ -12,6 +12,7 @@ const OBSERVATION_STATUSES = {
   no_culvert: "No culvert found",
   uncertain: "Needs another look",
 };
+const CONFIRMED_FIELD_LABEL = "CBU";
 const MOBILE_VIEWPORT_QUERY = "(max-width: 1180px)";
 const NEARBY_FOCUS_LIMIT = 12;
 const FIELD_CONTEXT_RADIUS_M = 100;
@@ -1209,7 +1210,7 @@ function renderList() {
     const button = item.querySelector(".candidate-button");
     button.classList.toggle("active", idOf(feature) === state.selectedId);
     button.addEventListener("click", () => selectFeature(idOf(feature), { pan: true }));
-    item.querySelector(".rank").textContent = props.knownFieldMatch ? "K" : props.rank;
+    item.querySelector(".rank").textContent = props.knownFieldMatch ? knownCulvertShortLabel(props) : props.rank;
     item.querySelector(".candidate-title").textContent = props.road_name || "Unnamed road";
     item.querySelector(".candidate-subtitle").textContent = listSubtitle(props);
     const pill = item.querySelector(".score-pill");
@@ -1235,7 +1236,7 @@ function renderAbuList() {
   if (!observations.length) {
     const empty = document.createElement("li");
     empty.className = "list-empty";
-    empty.textContent = "No ABU points saved yet.";
+    empty.textContent = `No ${CONFIRMED_FIELD_LABEL} points saved yet.`;
     fragment.append(empty);
     els.list.append(fragment);
     return;
@@ -1267,14 +1268,14 @@ function renderAbuList() {
 
 function updateListViewControls() {
   if (els.listHeading) {
-    els.listHeading.textContent = state.listView === "abu" ? "ABU points" : "Ranked locations";
+    els.listHeading.textContent = state.listView === "abu" ? `${CONFIRMED_FIELD_LABEL} points` : "Ranked locations";
   }
   els.listViewButtons.forEach((button) => {
     button.setAttribute("aria-selected", String(button.dataset.listView === state.listView));
   });
   if (els.abuTab) {
     const count = abuObservations().length;
-    els.abuTab.textContent = count ? `ABU (${count})` : "ABU";
+    els.abuTab.textContent = count ? `${CONFIRMED_FIELD_LABEL} (${count})` : CONFIRMED_FIELD_LABEL;
   }
 }
 
@@ -2157,7 +2158,7 @@ function drawCandidateCanvasLabels(context, items, zoom) {
 function candidateCanvasLabel(item, zoom) {
   if (item.props.knownFieldMatch) {
     if (isMovedObservation(item.props)) return "MVD";
-    if (isFieldObservedKnown(item.props)) return "ABU";
+    if (isFieldObservedKnown(item.props)) return CONFIRMED_FIELD_LABEL;
     return item.selected && zoom >= 16 ? "K" : "";
   }
   if (item.selected) return String(Math.round(item.props.score));
@@ -2189,7 +2190,13 @@ function renderObservationMarkers() {
 function observationIcon(props) {
   const normalized = observationStatus(props?.status);
   const moved = isMovedObservation(props);
-  const text = moved ? "MVD" : normalized === "confirmed_culvert" ? "ABU" : normalized === "no_culvert" ? "NO" : "?";
+  const text = moved
+    ? "MVD"
+    : normalized === "confirmed_culvert"
+      ? CONFIRMED_FIELD_LABEL
+      : normalized === "no_culvert"
+        ? "NO"
+        : "?";
   return L.divIcon({
     className: `observation-marker observation-${normalized}${moved ? " observation-moved" : ""}`,
     html: `<span class="observation-dot">${text}</span>`,
@@ -2227,7 +2234,7 @@ function knownCulvertLabel(props) {
 }
 
 function knownCulvertShortLabel(props) {
-  if (isFieldObservedKnown(props)) return "ABU";
+  if (isFieldObservedKnown(props)) return CONFIRMED_FIELD_LABEL;
   const label = formatReadableId(knownCulvertLabel(props));
   if (/^sc[-_]?\d+/i.test(label)) return label.replace(/^sc/i, "SC").slice(0, 7);
   return "K";
@@ -2620,7 +2627,7 @@ function renderObservationDetail(feature) {
     ${moved ? `<p class="context-note">${escapeHtml(movedObservationSummary(props))}</p>` : ""}
     <div class="actions location-actions">
       <a href="${escapeAttr(mapsUrl)}" target="_blank" rel="noreferrer">Google Maps</a>
-      <button type="button" class="danger-action" data-observation-delete="${escapeAttr(props.observation_id || "")}">${moved ? "Delete moved point" : "Delete ABU"}</button>
+      <button type="button" class="danger-action" data-observation-delete="${escapeAttr(props.observation_id || "")}">${moved ? "Delete moved point" : `Delete ${CONFIRMED_FIELD_LABEL}`}</button>
     </div>
   `;
   bindDetailCloseAction();
@@ -2652,7 +2659,7 @@ function observationTitle(props) {
 
 function observationListBadge(props) {
   if (isMovedObservation(props)) return "MVD";
-  return observationStatus(props?.status) === "confirmed_culvert" ? "ABU" : "?";
+  return observationStatus(props?.status) === "confirmed_culvert" ? CONFIRMED_FIELD_LABEL : "?";
 }
 
 function isMovedObservation(props) {
