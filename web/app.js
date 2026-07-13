@@ -27,8 +27,9 @@ const MOBILE_VIEWPORT_QUERY = "(max-width: 1180px)";
 const NEARBY_FOCUS_LIMIT = 12;
 const FIELD_CONTEXT_RADIUS_M = 100;
 const PREDICTION_HIT_RADIUS_M = 10;
-const MOVED_OFFSET_MAX_RENDER_M = 750;
+const MOVED_OFFSET_MAX_RENDER_M = 200;
 const MOVED_OFFSET_RENDER_TOLERANCE_M = 75;
+const MOVED_REPAIR_MAX_TARGET_M = 150;
 const SELECTED_POINT_ZOOM = 16;
 const SELECTED_POINT_MAX_ZOOM_STEP = 1;
 const SELECTION_POPUP_DELAY_MS = 460;
@@ -1381,13 +1382,16 @@ function renderFieldObservationList(view) {
 function movedRepairActionHtml(feature) {
   const context = movedRepairContextForObservation(feature);
   if (!context) return "";
+  const actionLabel = isMovedObservation(feature?.properties)
+    ? `Relink MVD to ${context.readableTarget}`
+    : `Mark as MVD from ${context.readableTarget}`;
 
   return `
     <section class="field-feedback moved-repair" aria-label="Moved target repair">
       <h4>Moved target</h4>
-      <p class="context-note">Use this only when this saved point came from moving a predicted target.</p>
+      <p class="context-note">Use this only when this saved point came from moving a nearby predicted target.</p>
       <button type="button" class="secondary-action" data-mark-observation-moved>
-        Mark as MVD from ${escapeHtml(context.readableTarget)}
+        ${escapeHtml(actionLabel)}
       </button>
       <p id="moved-repair-status" class="feedback-status"></p>
     </section>
@@ -3211,7 +3215,6 @@ function routeTargetContextForPoint(latLng, target) {
 
 function movedRepairContextForObservation(feature) {
   const props = feature?.properties || {};
-  if (isMovedObservation(props)) return null;
   if (observationStatus(props.status) !== "confirmed_culvert") return null;
   if (String(props.source || "") !== "field_added_culvert") return null;
 
@@ -3219,25 +3222,19 @@ function movedRepairContextForObservation(feature) {
   const actualLatLng = actualValues ? latLngFromValues(actualValues[0], actualValues[1]) : null;
   if (!actualLatLng) return null;
 
-  const targetFeature = movedRepairTargetFeature(props);
-  if (!targetFeature) return null;
-  const targetValues = featureLatLng(targetFeature);
-  const originalLatLng = targetValues ? latLngFromValues(targetValues[0], targetValues[1]) : null;
-  if (!originalLatLng) return null;
+  const target = movedRepairTargetForPoint(actualLatLng, props);
+  if (!target) return null;
 
-  const targetProps = targetFeature.properties || {};
-  const targetId = idOf(targetFeature);
-  const offsetMeters = distanceMeters(actualLatLng.lat, actualLatLng.lng, originalLatLng.lat, originalLatLng.lng);
-  if (!Number.isFinite(offsetMeters)) return null;
-
+  const targetProps = target.feature.properties || {};
+  const targetId = idOf(target.feature);
   const score = Number(targetProps.score ?? targetProps.discovery_score);
   const rank = Number(targetProps.rank ?? targetProps.discovery_rank);
   return {
     actualLatLng,
-    originalLatLng,
+    originalLatLng: target.latLng,
     targetId,
     readableTarget: formatReadableId(targetId),
-    offsetMeters,
+    offsetMeters: target.distanceMeters,
     roadName: props.road_name || targetProps.road_name || "",
     streamName: props.stream_name || targetProps.stream_name || "",
     predictionScore: Number.isFinite(score) ? score : null,
@@ -3246,20 +3243,46 @@ function movedRepairContextForObservation(feature) {
   };
 }
 
-function movedRepairTargetFeature(props) {
+function movedRepairTargetForPoint(actualLatLng, props) {
+  const candidates = [];
   const ids = [
     props.nearest_candidate_id,
     props.missed_candidate_id,
-    props.candidate_id,
+    isRouteCandidateId(props.candidate_id) ? props.candidate_id : "",
   ]
     .map((value) => String(value || "").trim())
     .filter(Boolean);
 
   for (const id of ids) {
-    if (state.featureById.has(id)) return state.featureById.get(id);
+    const feature = state.featureById.get(id);
+    const latLngValues = feature ? featureLatLng(feature) : null;
+    const latLng = latLngValues ? latLngFromValues(latLngValues[0], latLngValues[1]) : null;
+    if (!feature || !latLng) continue;
+    const distance = distanceMeters(actualLatLng.lat, actualLatLng.lng, latLng.lat, latLng.lng);
+    if (Number.isFinite(distance) && distance <= MOVED_REPAIR_MAX_TARGET_M) {
+      candidates.push({ feature, latLng, distanceMeters: distance });
+    }
   }
 
-  return null;
+  const nearest = nearestFeatureToPoint(actualLatLng);
+  if (nearest?.feature && nearest.distanceMeters <= MOVED_REPAIR_MAX_TARGET_M) {
+    const latLngValues = featureLatLng(nearest.feature);
+    const latLng = latLngValues ? latLngFromValues(latLngValues[0], latLngValues[1]) : null;
+    if (latLng) {
+      candidates.push({
+        feature: nearest.feature,
+        latLng,
+        distanceMeters: nearest.distanceMeters,
+      });
+    }
+  }
+
+  candidates.sort((a, b) => a.distanceMeters - b.distanceMeters);
+  return candidates[0] || null;
+}
+
+function isRouteCandidateId(value) {
+  return /^cand_\d+$/i.test(String(value || "").trim());
 }
 
 function isMissablePredictionCandidate(props) {
