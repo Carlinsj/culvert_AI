@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from math import atan2, cos, degrees, isnan, radians, sin
+from math import atan2, cos, degrees, floor, isnan, radians, sin
 
 import geopandas as gpd
 import numpy as np
@@ -201,7 +201,10 @@ def generate_road_route_candidates(
     return candidates.reset_index(drop=True)
 
 
-def merge_candidate_layers(layers: list[gpd.GeoDataFrame]) -> gpd.GeoDataFrame:
+def merge_candidate_layers(
+    layers: list[gpd.GeoDataFrame],
+    min_spacing_m: float = 5.0,
+) -> gpd.GeoDataFrame:
     cleaned = [clean_geometry(layer) for layer in layers if layer is not None and not layer.empty]
     if not cleaned:
         raise ValueError("No non-empty candidate layers were provided.")
@@ -209,6 +212,9 @@ def merge_candidate_layers(layers: list[gpd.GeoDataFrame]) -> gpd.GeoDataFrame:
     crs = cleaned[0].crs
     aligned = [layer.to_crs(crs) if layer.crs != crs else layer.copy() for layer in cleaned]
     merged = gpd.GeoDataFrame(pd.concat(aligned, ignore_index=True), geometry="geometry", crs=crs)
+    if "road_stream_distance_m" not in merged.columns:
+        merged["road_stream_distance_m"] = np.nan
+    merged = _deduplicate(merged, min_spacing_m)
     merged["candidate_id"] = [f"cand_{index + 1:06d}" for index in range(len(merged))]
     return merged
 
@@ -316,14 +322,37 @@ def _deduplicate(candidates: gpd.GeoDataFrame, min_spacing_m: float) -> gpd.GeoD
     if min_spacing_m <= 0 or candidates.empty:
         return candidates
 
-    ordered = candidates.sort_values("road_stream_distance_m").reset_index(drop=True)
+    if "road_stream_distance_m" in candidates.columns:
+        ordered = candidates.sort_values(
+            "road_stream_distance_m",
+            na_position="last",
+            kind="mergesort",
+        ).reset_index(drop=True)
+    else:
+        ordered = candidates.reset_index(drop=True)
+
+    cell_size = float(min_spacing_m)
     accepted_rows = []
-    accepted_points = []
+    accepted_cells: dict[tuple[int, int], list[Point]] = {}
     for _, row in ordered.iterrows():
         point = row.geometry
-        if all(point.distance(existing) >= min_spacing_m for existing in accepted_points):
+        cell = (floor(point.x / cell_size), floor(point.y / cell_size))
+        too_close = False
+        for x_offset in (-1, 0, 1):
+            for y_offset in (-1, 0, 1):
+                nearby_points = accepted_cells.get((cell[0] + x_offset, cell[1] + y_offset), [])
+                if any(point.distance(existing) < min_spacing_m for existing in nearby_points):
+                    too_close = True
+                    break
+            if too_close:
+                break
+
+        if not too_close:
             accepted_rows.append(row)
-            accepted_points.append(point)
+            accepted_cells.setdefault(cell, []).append(point)
+
+    if not accepted_rows:
+        return candidates.iloc[0:0].copy()
 
     return gpd.GeoDataFrame(accepted_rows, geometry="geometry", crs=candidates.crs).reset_index(
         drop=True

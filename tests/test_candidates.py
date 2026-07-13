@@ -4,7 +4,11 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import LineString, Point
 
-from culvert_ai.candidates import generate_road_route_candidates, _route_tokens_from_text
+from culvert_ai.candidates import (
+    generate_road_route_candidates,
+    merge_candidate_layers,
+    _route_tokens_from_text,
+)
 from culvert_ai.cli import _build_road_candidates
 
 
@@ -148,3 +152,80 @@ def test_build_road_candidates_reads_routes_from_road_name_column(tmp_path):
     assert result["rows"] == 3
     assert set(candidates["road_name"]) == {"US Hwy 9w"}
     assert set(candidates["matched_route"]) == {"9W"}
+
+
+def test_merge_candidate_layers_deduplicates_overlapping_route_samples():
+    all_numbered = gpd.GeoDataFrame(
+        [
+            {
+                "candidate_id": "route_000001",
+                "road_name": "State Rte 32",
+                "source": "route_interval_sample",
+                "road_stream_distance_m": float("nan"),
+                "geometry": Point(0, 0),
+            },
+            {
+                "candidate_id": "route_000002",
+                "road_name": "State Rte 32",
+                "source": "route_interval_sample",
+                "road_stream_distance_m": float("nan"),
+                "geometry": Point(20, 0),
+            },
+        ],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+    observed_route = gpd.GeoDataFrame(
+        [
+            {
+                "candidate_id": "route_000003",
+                "road_name": "State Rte 32",
+                "source": "route_interval_sample",
+                "road_stream_distance_m": float("nan"),
+                "geometry": Point(1, 1),
+            },
+        ],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+
+    merged = merge_candidate_layers([all_numbered, observed_route], min_spacing_m=5)
+
+    assert len(merged) == 2
+    assert list(merged["candidate_id"]) == ["cand_000001", "cand_000002"]
+    assert sorted(point.x for point in merged.geometry) == [0.0, 20.0]
+
+
+def test_merge_candidate_layers_prefers_road_stream_crossing_over_route_sample():
+    route_sample = gpd.GeoDataFrame(
+        [
+            {
+                "candidate_id": "route_000001",
+                "road_name": "State Rte 32",
+                "source": "route_interval_sample",
+                "road_stream_distance_m": float("nan"),
+                "geometry": Point(0, 0),
+            },
+        ],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+    crossing = gpd.GeoDataFrame(
+        [
+            {
+                "candidate_id": "cand_000001",
+                "road_name": "State Rte 32",
+                "source": "exact_road_stream_intersection",
+                "road_stream_distance_m": 0.0,
+                "geometry": Point(1, 1),
+            },
+        ],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+
+    merged = merge_candidate_layers([route_sample, crossing], min_spacing_m=5)
+
+    assert len(merged) == 1
+    assert merged.iloc[0]["candidate_id"] == "cand_000001"
+    assert merged.iloc[0]["source"] == "exact_road_stream_intersection"

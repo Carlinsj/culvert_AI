@@ -1,0 +1,76 @@
+# High-value geospatial sources to plug into the Ulster culvert pipeline.
+# Download/convert these to the local_target paths, then run the pipeline with
+# the listed environment variable pointing at the converted file.
+
+sources:
+  nys_streets:
+    priority: 1
+    layer_type: roads
+    signal: "Authoritative NY street centerlines and route naming."
+    portal_url: "https://gis.ny.gov/streets-addresses"
+    local_target: "data/raw/nys_streets.gpkg"
+    pipeline_env: "ROADS_PATH"
+    notes: "Best first road replacement for Census TIGER when route names or alignment are off."
+
+  nys_hydrography_dataset:
+    priority: 2
+    layer_type: streams
+    signal: "NYS hydrography/stream alignment for road-drainage crossings."
+    portal_url: "https://gis.ny.gov/nys-hydrography-dataset-nyshd"
+    local_target: "data/raw/nys_hydrography.gpkg"
+    pipeline_env: "STREAMS_PATH"
+    notes: "Use line features only. Clip to the Ulster/Region 8 boundary before long runs."
+
+  usgs_3dep_dem:
+    priority: 3
+    layer_type: raster
+    signal: "Bare-earth elevation, slope, low-point, valley, and terrain-break features."
+    portal_url: "https://www.usgs.gov/3d-elevation-program"
+    local_target: "data/raw/dem.tif"
+    pipeline_env: "DEM_PATH"
+    notes: "Already supported by download-dem. Higher-resolution local DEMs can replace this path."
+
+  flow_accumulation:
+    priority: 4
+    layer_type: raster
+    signal: "Hydrologic concentration upstream of each road candidate."
+    portal_url: "https://www.usgs.gov/3d-hydrography-program/access-3dhp-data-products"
+    local_target: "data/raw/flow_accumulation.tif"
+    pipeline_env: "FLOW_ACCUMULATION_PATH"
+    notes: "Use a raster aligned to the DEM when possible."
+
+  drainage_area:
+    priority: 5
+    layer_type: raster
+    signal: "Drainage area or contributing-area size at each candidate."
+    portal_url: "https://www.usgs.gov/streamstats"
+    local_target: "data/raw/drainage_area.tif"
+    pipeline_env: "DRAINAGE_AREA_PATH"
+    notes: "Rasterized drainage-area products are directly consumed by build-features."
+
+  nlcd_landcover:
+    priority: 6
+    layer_type: raster
+    signal: "Land cover and impervious context around road drainage points."
+    portal_url: "https://www.mrlc.gov/data-services-page"
+    local_target: "data/raw/landcover.tif"
+    pipeline_env: "LANDCOVER_PATH"
+    notes: "Use NLCD landcover or impervious rasters clipped to the study area."
+
+  ssurgo_soils:
+    priority: 7
+    layer_type: tabular_or_polygon
+    signal: "Hydrologic soil group, drainage class, Ksat, and hydric soil indicators."
+    portal_url: "https://sdmdataaccess.nrcs.usda.gov/"
+    local_target: "data/raw/soils.gpkg"
+    pipeline_env: "not_yet_consumed"
+    notes: "Next feature-engineering target after road/hydrography/DEM improvements."
+
+  fema_nfhl:
+    priority: 8
+    layer_type: polygon_or_line
+    signal: "Floodplain and water-feature support evidence."
+    portal_url: "https://hazards.fema.gov/femaportal/wps/portal/NFHLWMS"
+    local_target: "data/raw/fema_nfhl.gpkg"
+    pipeline_env: "not_yet_consumed"
+    notes: "Useful as supporting evidence, not as a primary culvert label."

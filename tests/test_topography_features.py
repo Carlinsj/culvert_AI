@@ -94,6 +94,35 @@ def test_build_feature_table_applies_negative_observations_at_10m():
     assert features.loc["positive", "field_denied"] == 0
 
 
+def test_known_culvert_route_match_accepts_bare_and_prefixed_tokens():
+    candidates = gpd.GeoDataFrame(
+        [
+            {
+                "candidate_id": "route-sample",
+                "source": "route_interval_sample",
+                "matched_route": "209",
+                "road_name": "US Hwy 209",
+                "geometry": Point(0, 0),
+            },
+        ],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+    known = gpd.GeoDataFrame(
+        [{"route": "NY209", "geometry": Point(100, 0)}],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+
+    features = build_feature_table(
+        candidates,
+        known_culverts=known,
+        positive_radius_m=10,
+    ).set_index("candidate_id")
+
+    assert features.loc["route-sample", "nearest_known_route_match"] == 1
+
+
 def test_build_feature_table_applies_missed_prediction_by_candidate_id():
     roads = gpd.GeoDataFrame(
         [{"geometry": LineString([(0, -1), (0, 1)])}],

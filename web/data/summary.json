@@ -1,20 +1,18 @@
 {
   "rows": 5000,
   "discovery_candidates": 5000,
-  "known_field_matches": 504,
+  "known_field_matches": 412,
   "exported_known_field_matches": 0,
   "score_column": "discovery_score",
   "max_score": 70.0,
-  "mean_score": 55.80689544082278,
+  "mean_score": 68.90431919748168,
   "priority_buckets": {
-    "high": 2812,
-    "medium": 1955,
-    "low": 233
+    "high": 5000
   },
   "bounds": [
-    -74.764617,
-    41.58785235321804,
-    -73.92668675213747,
-    42.16474145072246
+    -74.567986,
+    41.694131000000006,
+    -73.92673921188366,
+    42.159602886073976
   ]
 }

@@ -5,6 +5,7 @@ import {
   refreshPublishedData,
   saveObservation,
 } from "./_lib/feedback.js";
+import { requireFeedbackWriteAuth } from "./_lib/auth.js";
 import { readJsonBody, requireMethod, sendError, sendJson } from "./_lib/http.js";
 import { maybeTriggerRetrain } from "./_lib/retrain.js";
 
@@ -21,6 +22,8 @@ export default async function handler(request, response) {
     }
 
     if (request.method === "DELETE") {
+      if (!requireFeedbackWriteAuth(request, response)) return;
+
       const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
       const deleted = await deleteObservation(url.searchParams.get("id"));
       const { findings, summary } = await refreshPublishedData(deleted.observations);
@@ -41,6 +44,8 @@ export default async function handler(request, response) {
       });
       return;
     }
+
+    if (!requireFeedbackWriteAuth(request, response)) return;
 
     const payload = await readJsonBody(request);
     const saved = await saveObservation(payload);

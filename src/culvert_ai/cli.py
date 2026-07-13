@@ -39,6 +39,7 @@ from culvert_ai.point_analysis import (
     write_point_only_layer,
 )
 from culvert_ai.region import filter_to_region, get_region, write_region_boundary
+from culvert_ai.route_count import write_route_count_report
 from culvert_ai.scoring import (
     build_discovery_ranking,
     score_unlabeled_candidates,
@@ -400,6 +401,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     merge_candidates.add_argument("--inputs", nargs="+", required=True)
     merge_candidates.add_argument("--output", required=True)
+    merge_candidates.add_argument(
+        "--min-spacing-m",
+        type=float,
+        default=5.0,
+        help="Drop duplicate merged candidates within this distance in meters.",
+    )
     merge_candidates.set_defaults(func=_merge_candidates)
 
     features = subparsers.add_parser(
@@ -538,6 +545,45 @@ def build_parser() -> argparse.ArgumentParser:
     )
     success_rate.add_argument("--rank-limit", type=int, help="Evaluate only predictions up to this rank.")
     success_rate.set_defaults(func=_evaluate_success_rate)
+
+    route_count = subparsers.add_parser(
+        "route-count-report",
+        help="Estimate predicted culvert counts for a route or walked segment.",
+    )
+    route_count.add_argument(
+        "--predictions",
+        default="data/processed/actual_ulster_discovery_predictions.gpkg",
+        help="Ranked prediction vector file.",
+    )
+    route_count.add_argument("--route", help="Route filter such as NY212, US 9W, or State Rte 32.")
+    route_count.add_argument(
+        "--segment",
+        help="Optional walked route line/polygon GeoJSON/GPKG. Lines are buffered before counting.",
+    )
+    route_count.add_argument("--buffer-m", type=float, default=30.0)
+    route_count.add_argument("--cluster-radius-m", type=float, default=30.0)
+    route_count.add_argument(
+        "--score-column",
+        help="Score column for threshold counts. Defaults to discovery_score when present.",
+    )
+    route_count.add_argument("--probability-column", default="culvert_probability")
+    route_count.add_argument("--score-threshold", type=float)
+    route_count.add_argument("--thresholds", type=float, nargs="*")
+    route_count.add_argument("--rank-limit", type=int)
+    route_count.add_argument("--top-n", type=int, default=50)
+    route_count.add_argument(
+        "--include-known-matches",
+        action="store_true",
+        help="Count known/label rows as predictions. Default excludes them.",
+    )
+    route_count.add_argument(
+        "--output",
+        default="reports/route_count_report.json",
+        help="JSON report output.",
+    )
+    route_count.add_argument("--csv-output", help="Optional CSV of clustered predicted sites.")
+    route_count.add_argument("--geojson-output", help="Optional GeoJSON of clustered predicted sites.")
+    route_count.set_defaults(func=_route_count_report)
 
     return parser
 
@@ -729,9 +775,14 @@ def _build_road_candidates(args) -> dict:
 
 def _merge_candidates(args) -> dict:
     layers = [read_vector(path) for path in args.inputs]
-    output = merge_candidate_layers(layers)
+    output = merge_candidate_layers(layers, min_spacing_m=args.min_spacing_m)
     write_vector(output, args.output)
-    return {"candidates": Path(args.output), "rows": len(output), "inputs": args.inputs}
+    return {
+        "candidates": Path(args.output),
+        "rows": len(output),
+        "inputs": args.inputs,
+        "min_spacing_m": args.min_spacing_m,
+    }
 
 
 def _build_features(args) -> dict:
@@ -851,6 +902,26 @@ def _evaluate_success_rate(args) -> dict:
         max_distance_m=args.max_distance_m,
         exclude_known_matches=not args.include_known_matches,
         rank_limit=args.rank_limit,
+    )
+
+
+def _route_count_report(args) -> dict:
+    return write_route_count_report(
+        predictions_path=args.predictions,
+        output_path=args.output,
+        route=args.route,
+        segment_path=args.segment,
+        buffer_m=args.buffer_m,
+        cluster_radius_m=args.cluster_radius_m,
+        score_column=args.score_column,
+        probability_column=args.probability_column,
+        score_threshold=args.score_threshold,
+        thresholds=args.thresholds,
+        exclude_known_matches=not args.include_known_matches,
+        rank_limit=args.rank_limit,
+        top_n=args.top_n,
+        csv_output=args.csv_output,
+        geojson_output=args.geojson_output,
     )
 
 

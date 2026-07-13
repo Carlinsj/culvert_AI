@@ -14,7 +14,13 @@ from culvert_ai.io import add_wgs84_coordinates, clean_geometry, project_layers_
 
 KNOWN_PATTERN_RADII_M = (250.0, 500.0, 1000.0)
 ROUTE_TOKEN_RE = re.compile(
-    r"\b(?P<prefix>NY|US|I|CR)\s*-?\s*(?P<number>\d+[A-Z]?)\b",
+    r"\b(?P<prefix>NY|US|I|CR)\s*-?\s*"
+    r"(?:(?:HWY|HIGHWAY|RTE|ROUTE|RT)\s*-?\s*)?"
+    r"(?P<number>\d+[A-Z]?)\b",
+    re.IGNORECASE,
+)
+GENERIC_ROUTE_TOKEN_RE = re.compile(
+    r"\b(?:ROUTE|RTE|RT)\s*-?\s*(?P<number>\d+[A-Z]?)\b",
     re.IGNORECASE,
 )
 
@@ -785,10 +791,13 @@ def _known_route_tokens(row: pd.Series) -> set[str]:
 
 def _route_tokens_from_value(value) -> set[str]:
     text = _normalized_route_text(value)
-    tokens = {
-        f"{match.group('prefix').upper()}{match.group('number').upper()}"
-        for match in ROUTE_TOKEN_RE.finditer(text)
-    }
+    tokens = set()
+    for match in ROUTE_TOKEN_RE.finditer(text):
+        number = match.group("number").upper()
+        tokens.add(f"{match.group('prefix').upper()}{number}")
+        tokens.add(number)
+    for match in GENERIC_ROUTE_TOKEN_RE.finditer(text):
+        tokens.add(match.group("number").upper())
     if tokens:
         return tokens
 

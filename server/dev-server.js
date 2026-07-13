@@ -5,6 +5,8 @@ import { access, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { isAuthorizedBearer, requireFeedbackWriteAuth } from "../api/_lib/auth.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 const WEB_DIR = path.join(ROOT, "web");
@@ -58,6 +60,8 @@ async function handleRequest(request, response) {
     }
 
     if (url.pathname === "/api/observations" && request.method === "DELETE") {
+      if (!requireFeedbackWriteAuth(request, response)) return;
+
       try {
         const observationId = safeString(url.searchParams.get("id"), 80);
         const result = await deleteObservation(observationId);
@@ -69,6 +73,8 @@ async function handleRequest(request, response) {
     }
 
     if (url.pathname === "/api/observations" && request.method === "POST") {
+      if (!requireFeedbackWriteAuth(request, response)) return;
+
       try {
         const payload = await readJsonBody(request);
         const feature = await appendObservation(payload);
@@ -80,6 +86,8 @@ async function handleRequest(request, response) {
     }
 
     if (url.pathname === "/api/run-demo" && request.method === "POST") {
+      if (!(await requireDevTaskAuth(request, response))) return;
+
       await runExclusiveTask(response, "demo", [
         [PYTHON_BIN, ["-m", "culvert_ai.cli", "run-demo", "--output-dir", DEMO_DIR]],
         [
@@ -99,6 +107,8 @@ async function handleRequest(request, response) {
     }
 
     if (url.pathname === "/api/run-actual" && request.method === "POST") {
+      if (!(await requireDevTaskAuth(request, response))) return;
+
       await runExclusiveTask(response, "actual-ulster-census", [
         ["bash", ["scripts/run_actual_ulster_census_pipeline.sh"]],
       ]);
@@ -106,6 +116,8 @@ async function handleRequest(request, response) {
     }
 
     if (url.pathname === "/api/run-ulster" && request.method === "POST") {
+      if (!(await requireDevTaskAuth(request, response))) return;
+
       await runExclusiveTask(response, "ulster-unlabeled", [
         ["bash", ["scripts/run_ulster_unlabeled_pipeline.sh"]],
       ]);
@@ -165,15 +177,48 @@ function listenWithFallback(port, attempt = 0) {
 }
 
 function safeWebPath(pathname) {
-  const decoded = decodeURIComponent(pathname);
-  const normalized = path.normalize(decoded).replace(/^(\.\.[/\\])+/, "");
-  const filePath = path.join(WEB_DIR, normalized);
+  let decoded;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    throw new Error("Invalid path");
+  }
 
-  if (!filePath.startsWith(WEB_DIR)) {
+  const filePath = path.resolve(WEB_DIR, decoded.replace(/^[/\\]+/, ""));
+  const relativePath = path.relative(WEB_DIR, filePath);
+
+  if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
     throw new Error("Invalid path");
   }
 
   return filePath;
+}
+
+async function requireDevTaskAuth(request, response) {
+  if (isLoopbackAddress(request.socket?.remoteAddress)) {
+    return true;
+  }
+
+  if (isAuthorizedBearer(request, process.env.CULVERT_DEV_TASK_TOKEN)) {
+    return true;
+  }
+
+  const hasToken = Boolean(process.env.CULVERT_DEV_TASK_TOKEN);
+  await sendJson(
+    response,
+    {
+      error: hasToken
+        ? "Unauthorized dev task request."
+        : "Remote dev task requests require CULVERT_DEV_TASK_TOKEN.",
+    },
+    hasToken ? 401 : 403,
+  );
+  return false;
+}
+
+function isLoopbackAddress(address) {
+  const value = String(address || "").replace(/^::ffff:/, "");
+  return value === "127.0.0.1" || value === "::1" || value === "localhost";
 }
 
 async function healthPayload() {

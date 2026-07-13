@@ -2,52 +2,52 @@
   "available": true,
   "selected_model": "soft_voting_ensemble",
   "selection_metric": "spatial_holdout_average_precision_then_cross_validated_average_precision",
-  "rows": 112811,
-  "positive_labels": 144,
-  "negative_labels": 112667,
-  "training_points": 145,
-  "feature_count": 81,
-  "random_holdout_average_precision": 0.8659759798731593,
-  "random_holdout_roc_auc": 0.9997110487844325,
-  "spatial_holdout_average_precision": 0.8365051368737719,
-  "spatial_holdout_roc_auc": 0.9708857814996227,
+  "rows": 236890,
+  "positive_labels": 160,
+  "negative_labels": 236730,
+  "training_points": 161,
+  "feature_count": 83,
+  "random_holdout_average_precision": 0.656617933426278,
+  "random_holdout_roc_auc": 0.9984780257844313,
+  "spatial_holdout_average_precision": 0.4273320644491315,
+  "spatial_holdout_roc_auc": 0.9628547277932697,
   "spatial_holdout_top10_precision": 1.0,
   "target_precision_floor": 0.6,
   "operating_threshold": {
     "target_precision": 0.6,
     "meets_precision_floor": true,
-    "threshold": 0.43137856578468964,
-    "precision": 0.6078431372549019,
-    "recall": 0.8611111111111112,
-    "f1": 0.7126436781609194,
-    "predicted_positive_count": 51,
-    "hits": 31,
+    "threshold": 0.8275518223033451,
+    "precision": 0.6,
+    "recall": 0.2553191489361702,
+    "f1": 0.3582089552238805,
+    "predicted_positive_count": 20,
+    "hits": 12,
     "source": "spatial_holdout"
   },
   "point_qc": {
-    "rows": 176,
-    "matched_existing_candidates": 128,
-    "outside_analysis_extent": 48,
+    "rows": 209,
+    "matched_existing_candidates": 144,
+    "outside_analysis_extent": 65,
     "analysis_flags": {
-      "matched_existing_candidate": 128,
-      "outside_current_analysis_extent": 48
+      "matched_existing_candidate": 144,
+      "outside_current_analysis_extent": 65
     }
   },
   "source_files": [
     {
       "path": "reports/actual_ulster_field_report_metrics.json",
       "exists": true,
-      "bytes": 22916
+      "bytes": 23254
     },
     {
       "path": "reports/extracted_points_analysis.json",
       "exists": true,
-      "bytes": 5997
+      "bytes": 6508
     },
     {
       "path": "data/processed/training_known_culverts.csv",
       "exists": true,
-      "bytes": 32331
+      "bytes": 35812
     }
   ]
 }

@@ -32,6 +32,8 @@ Build a field-ready culvert discovery workflow for Ulster County:
   `INCLUDE_FIELD_OBSERVATIONS_AS_POSITIVES=0` only for a questionable batch.
 - `scripts/pull_vercel_observations.js` can pull deployed observations through
   Blob credentials or the public `/api/observations` endpoint.
+- Deployed observation writes require `CULVERT_FEEDBACK_WRITE_TOKEN`; local dev
+  remains open unless `CULVERT_REQUIRE_FEEDBACK_AUTH=1` is set.
 - Deployed observation uploads now queue automatic retraining when
   `CULVERT_RETRAIN_WEBHOOK_URL` or `GITHUB_RETRAIN_TOKEN`/`GITHUB_REPOSITORY` is
   configured. The Python training still runs in an external worker with

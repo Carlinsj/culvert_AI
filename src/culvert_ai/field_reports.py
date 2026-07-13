@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import unicodedata
 import xml.etree.ElementTree as ET
@@ -32,8 +33,8 @@ COORDINATE_RE = re.compile(
     re.IGNORECASE,
 )
 ROUTE_RE = re.compile(
-    r"\b(?:NY|US|I|CR|Co\s*Rd|County\s*(?:Road|Route)|State\s*(?:Rte|Route))\s*-?\s*"
-    r"\d+[A-Za-z]?\b",
+    r"\b(?:NY|NYS|US|U\.S\.|I|CR|Co\s*Rd|County\s*(?:Road|Route|Rte)|"
+    r"State\s*(?:Rte|Route|Rt)|Rte|Route)\s*-?\s*\d+[A-Za-z]?\b",
     re.IGNORECASE,
 )
 REGION_ROUTE_RE = re.compile(
@@ -63,6 +64,31 @@ DAY_MONTH_DATE_RE = re.compile(
 )
 BARE_ROUTE_TABLE_RE = re.compile(
     r"^\s*(?:\d+\s+)?R?\s*(?P<region>[1-9])\s+(?P<route>\d{1,3}[A-Za-z]?)\b",
+    re.IGNORECASE,
+)
+STANDALONE_REGION_RE = re.compile(r"^\s*(?P<region>[1-9])\s*$")
+BARE_STATION_ROUTE_RE = re.compile(
+    r"^\s*(?P<route>\d{1,3}[A-Za-z]?)\s+\d{4,}\b",
+    re.IGNORECASE,
+)
+REPORT_ROUTE_RE = re.compile(
+    r"\b(?:Start|End)\s+Location:\s*(?:Route|Rte)\s*(?P<route>\d{1,3}[A-Za-z]?)\b",
+    re.IGNORECASE,
+)
+SPACED_COORDINATE_NUMBER_RE = re.compile(
+    r"(?<![A-Z0-9])(?P<number>[+-]?(?:\d\s*){1,3}\s*\.\s*(?:\d\s*){2,8})"
+    r"(?P<direction>\s*[NSEW]\b)",
+    re.IGNORECASE,
+)
+SPACED_ROUTE_NUMBER_RE = re.compile(
+    r"\b(?P<prefix>NY|NYS|US|U\.S\.|CR|I)\s*"
+    r"(?P<number>\d(?:\s+\d{1,2}){1,2}[A-Za-z]?)"
+    r"(?=\s+\d\s*\d?\s*\.)",
+    re.IGNORECASE,
+)
+STANDALONE_SPACED_ROUTE_RE = re.compile(
+    r"^\s*(?P<prefix>NY|NYS|US|U\.S\.|CR|I)\s*"
+    r"(?P<number>\d(?:\s+\d{1,2}){1,2}[A-Za-z]?)\s*$",
     re.IGNORECASE,
 )
 MONTH_LOOKUP = {
@@ -260,7 +286,11 @@ def _report_files(root: Path) -> list[Path]:
 def _extract_from_files(paths: list[Path]) -> list[CoordinateRecord]:
     records: list[CoordinateRecord] = []
     for path in paths:
-        text = _normalize_extracted_text(_extract_text(path))
+        try:
+            text = _normalize_extracted_text(_extract_text(path))
+        except (OSError, RuntimeError, subprocess.CalledProcessError, KeyError) as exc:
+            print(f"Skipping unreadable field report {path}: {exc}", file=sys.stderr)
+            continue
         records.extend(_records_from_text(path, text))
     return records
 
@@ -317,9 +347,15 @@ def _records_from_text(path: Path, text: str) -> list[CoordinateRecord]:
     records: list[CoordinateRecord] = []
     nearby_culvert_id = ""
     nearby_culvert_lines = 0
+    lines = [
+        _clean_text_line(_normalize_coordinate_spacing(_normalize_route_spacing(line)))
+        for line in text.splitlines()
+    ]
+    report_route = _report_route(lines)
+    recent_route = report_route
+    recent_region = ""
 
-    for line in text.splitlines():
-        line = _clean_text_line(line)
+    for line_index, line in enumerate(lines):
         if not line:
             continue
 
@@ -328,15 +364,35 @@ def _records_from_text(path: Path, text: str) -> list[CoordinateRecord]:
             nearby_culvert_id = line_culvert_ids[0]
             nearby_culvert_lines = 3
 
-        for match in COORDINATE_RE.finditer(line):
+        line_route = _route_for_line(line, len(line))
+        if line_route:
+            recent_route = line_route
+        line_region = _region_for_line(line, line_route or recent_route)
+        if line_region:
+            recent_region = line_region
+
+        window = _clean_text_line(
+            _normalize_coordinate_spacing(
+                _normalize_route_spacing(" ".join(lines[line_index : line_index + 3]))
+            )
+        )
+
+        for match in COORDINATE_RE.finditer(window):
             lat_lon = _infer_lat_lon(match)
             if not lat_lon:
                 continue
 
             latitude, longitude = lat_lon
-            route = _route_for_line(line, match.start())
-            region = _region_for_line(line, route)
-            culvert_id = line_culvert_ids[0] if line_culvert_ids else nearby_culvert_id
+            route = _route_for_line(window, match.start(), line_route or recent_route)
+            region = _region_for_line(window, route) or line_region or recent_region
+            prefix_culvert_ids = _culvert_ids(window[: match.start()])
+            culvert_id = (
+                prefix_culvert_ids[0]
+                if prefix_culvert_ids
+                else line_culvert_ids[0]
+                if line_culvert_ids
+                else nearby_culvert_id
+            )
             records.append(
                 CoordinateRecord(
                     source_file=path.name,
@@ -347,7 +403,7 @@ def _records_from_text(path: Path, text: str) -> list[CoordinateRecord]:
                     longitude=longitude,
                     raw_coordinate_text=match.group(0),
                     culvert_id=culvert_id,
-                    context_text=line,
+                    context_text=window,
                 )
             )
 
@@ -356,7 +412,7 @@ def _records_from_text(path: Path, text: str) -> list[CoordinateRecord]:
             if nearby_culvert_lines == 0:
                 nearby_culvert_id = ""
 
-    return records
+    return _deduplicate_coordinate_records(records)
 
 
 def _infer_lat_lon(match: re.Match) -> tuple[float, float] | None:
@@ -381,7 +437,7 @@ def _valid_new_york_lat_lon(latitude: float, longitude: float) -> bool:
     return 39.0 <= latitude <= 45.5 and -80.5 <= longitude <= -70.0
 
 
-def _route_for_line(line: str, coordinate_start: int) -> str:
+def _route_for_line(line: str, coordinate_start: int, fallback_route: str = "") -> str:
     before_coordinate = line[:coordinate_start]
     match = ROUTE_RE.search(before_coordinate) or ROUTE_RE.search(line)
     if match:
@@ -391,7 +447,11 @@ def _route_for_line(line: str, coordinate_start: int) -> str:
     if bare_match:
         return _normalize_route(f"NY{bare_match.group('route')}")
 
-    return ""
+    station_match = BARE_STATION_ROUTE_RE.search(before_coordinate) or BARE_STATION_ROUTE_RE.search(line)
+    if station_match:
+        return _normalize_route(station_match.group("route"))
+
+    return fallback_route
 
 
 def _region_for_line(line: str, route: str) -> str:
@@ -402,6 +462,10 @@ def _region_for_line(line: str, route: str) -> str:
     route_region = re.search(r"\bR\s*[-:]?\s*(?P<region>[1-9])\b", line, re.IGNORECASE)
     if route_region:
         return route_region.group("region")
+
+    standalone_region = STANDALONE_REGION_RE.fullmatch(line)
+    if standalone_region:
+        return standalone_region.group("region")
 
     bare_route = BARE_ROUTE_TABLE_RE.search(line)
     if bare_route:
@@ -417,11 +481,22 @@ def _region_for_line(line: str, route: str) -> str:
 
 def _normalize_route(route: str) -> str:
     normalized = re.sub(r"\s+", " ", route.strip().upper())
+    normalized = re.sub(r"\bU\.S\.\b", "US", normalized)
+    normalized = normalized.replace("US ROUTE", "US")
+    normalized = normalized.replace("US RTE", "US")
+    normalized = normalized.replace("US RT", "US")
+    normalized = normalized.replace("US HWY", "US")
+    normalized = normalized.replace("US HIGHWAY", "US")
     normalized = normalized.replace("STATE RTE", "NY")
+    normalized = normalized.replace("STATE RT", "NY")
     normalized = normalized.replace("STATE ROUTE", "NY")
+    normalized = normalized.replace("NYS RTE", "NY")
+    normalized = normalized.replace("NYS ROUTE", "NY")
     normalized = normalized.replace("COUNTY ROAD", "CR")
     normalized = normalized.replace("COUNTY ROUTE", "CR")
+    normalized = normalized.replace("COUNTY RTE", "CR")
     normalized = normalized.replace("CO RD", "CR")
+    normalized = re.sub(r"^(?:ROUTE|RTE|RT)\s+", "NY ", normalized)
     normalized = normalized.replace(" ", "")
     normalized = normalized.replace("-", "")
     return normalized
@@ -482,6 +557,61 @@ def _normalize_extracted_text(text: str) -> str:
 
 def _clean_text_line(line: str) -> str:
     return re.sub(r"\s+", " ", _normalize_extracted_text(line)).strip()
+
+
+def _normalize_coordinate_spacing(text: str) -> str:
+    def replace(match: re.Match) -> str:
+        number = re.sub(r"\s+", "", match.group("number"))
+        return f"{number}{match.group('direction')}"
+
+    return SPACED_COORDINATE_NUMBER_RE.sub(replace, text)
+
+
+def _normalize_route_spacing(text: str) -> str:
+    def replace(match: re.Match) -> str:
+        number = re.sub(r"\s+", "", match.group("number"))
+        return f"{match.group('prefix')}{number}"
+
+    return STANDALONE_SPACED_ROUTE_RE.sub(replace, SPACED_ROUTE_NUMBER_RE.sub(replace, text))
+
+
+def _report_route(lines: list[str]) -> str:
+    for line in lines[:40]:
+        match = REPORT_ROUTE_RE.search(line)
+        if match:
+            return _normalize_route(match.group("route"))
+    return ""
+
+
+def _deduplicate_coordinate_records(records: list[CoordinateRecord]) -> list[CoordinateRecord]:
+    if not records:
+        return records
+
+    table = pd.DataFrame([record.__dict__ for record in records])
+    deduped = _deduplicate_records(table, precision=6)
+    return [
+        CoordinateRecord(
+            source_file=_text_value(row, "source_file"),
+            report_date=_text_value(row, "report_date"),
+            nysdot_region=_text_value(row, "nysdot_region"),
+            route=_text_value(row, "route"),
+            latitude=float(row["latitude"]),
+            longitude=float(row["longitude"]),
+            raw_coordinate_text=_text_value(row, "raw_coordinate_text"),
+            culvert_id=_text_value(row, "culvert_id"),
+            context_text=_text_value(row, "context_text"),
+            label=_text_value(row, "label") or "field_observed_culvert",
+            label_confidence=float(row.get("label_confidence", 0.85)),
+        )
+        for _, row in deduped.iterrows()
+    ]
+
+
+def _text_value(row: pd.Series, column: str) -> str:
+    value = row.get(column, "")
+    if pd.isna(value):
+        return ""
+    return str(value)
 
 
 def _format_date(month: int, day: int, year: int) -> str:

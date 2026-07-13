@@ -21,8 +21,9 @@
     "retrain:from-vercel": "npm run pull:observations && npm run predict:actual && npm run build",
     "actual": "npm run predict:actual",
     "pipeline:ulster": "bash scripts/run_ulster_unlabeled_pipeline.sh",
-    "test": "npm run test:python",
-    "test:python": "scripts/python.sh -m pytest tests"
+    "test": "npm run test:python && npm run test:security",
+    "test:python": "scripts/python.sh -m pytest tests",
+    "test:security": "node scripts/verify_security.js"
   },
   "engines": {
     "node": ">=18"

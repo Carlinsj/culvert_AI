@@ -4,6 +4,7 @@ const MODEL_SUMMARY_URLS = ["data/model_summary.json"];
 const HEALTH_URL = "/api/health";
 const OBSERVATIONS_URL = "/api/observations";
 const LOCAL_OBSERVATIONS_KEY = "culvert-ai-field-observations";
+const FEEDBACK_WRITE_TOKEN_KEY = "culvert-ai-feedback-write-token";
 
 const OBSERVATION_STATUSES = {
   confirmed_culvert: "Confirmed culvert",
@@ -276,6 +277,69 @@ async function fetchJson(url) {
     throw new Error(`${url}: ${response.status}`);
   }
   return response.json();
+}
+
+async function fetchFeedbackWrite(url, options = {}) {
+  let response = await fetch(url, {
+    ...options,
+    headers: feedbackWriteHeaders(options.headers),
+  });
+
+  if (response.status !== 401) {
+    return response;
+  }
+
+  clearFeedbackWriteToken();
+  const token = promptFeedbackWriteToken();
+  if (!token) {
+    return response;
+  }
+
+  response = await fetch(url, {
+    ...options,
+    headers: feedbackWriteHeaders(options.headers),
+  });
+  if (response.status === 401) {
+    clearFeedbackWriteToken();
+  }
+  return response;
+}
+
+function feedbackWriteHeaders(headers = {}) {
+  const token = loadFeedbackWriteToken();
+  return {
+    ...headers,
+    ...(token ? { authorization: `Bearer ${token}` } : {}),
+  };
+}
+
+function loadFeedbackWriteToken() {
+  try {
+    return String(window.sessionStorage?.getItem(FEEDBACK_WRITE_TOKEN_KEY) || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+function promptFeedbackWriteToken() {
+  if (typeof window.prompt !== "function") return "";
+  const token = String(window.prompt("Field update token") || "").trim();
+  if (!token) return "";
+
+  try {
+    window.sessionStorage?.setItem(FEEDBACK_WRITE_TOKEN_KEY, token);
+  } catch {
+    // Token memory is best-effort; the next write will prompt again if storage is unavailable.
+  }
+  return token;
+}
+
+function clearFeedbackWriteToken() {
+  try {
+    window.sessionStorage?.removeItem(FEEDBACK_WRITE_TOKEN_KEY);
+  } catch {
+    // Session storage may be unavailable in private or restricted browsing modes.
+  }
 }
 
 async function fetchFirst(urls) {
@@ -1682,7 +1746,7 @@ async function saveObservation(payload) {
   }
 
   try {
-    const response = await fetch(OBSERVATIONS_URL, {
+    const response = await fetchFeedbackWrite(OBSERVATIONS_URL, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(feature.properties),
@@ -1727,7 +1791,7 @@ async function syncLocalObservationsToServer() {
     if (!normalized) continue;
 
     try {
-      const response = await fetch(OBSERVATIONS_URL, {
+      const response = await fetchFeedbackWrite(OBSERVATIONS_URL, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(normalized.properties),
@@ -1770,7 +1834,7 @@ async function deleteObservationById(observationId, button) {
   }
 
   try {
-    const response = await fetch(`${OBSERVATIONS_URL}?id=${encodeURIComponent(id)}`, {
+    const response = await fetchFeedbackWrite(`${OBSERVATIONS_URL}?id=${encodeURIComponent(id)}`, {
       method: "DELETE",
     });
     if (!response.ok) {

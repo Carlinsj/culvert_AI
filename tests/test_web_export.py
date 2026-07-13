@@ -91,6 +91,46 @@ def test_limit_for_web_reserves_field_recall_candidates():
     assert len(limited) == 3
 
 
+def test_limit_for_web_keeps_field_scale_discovery_spacing():
+    predictions = gpd.GeoDataFrame(
+        [
+            {
+                "candidate_id": "a1",
+                "discovery_status": "undiscovered_candidate",
+                "discovery_rank": 1,
+                "field_recall_score": 0.0,
+                "dist_to_known_culvert_m": 500.0,
+                "road_id": "road-a",
+                "geometry": Point(0, 0),
+            },
+            {
+                "candidate_id": "a2",
+                "discovery_status": "undiscovered_candidate",
+                "discovery_rank": 2,
+                "field_recall_score": 0.0,
+                "dist_to_known_culvert_m": 500.0,
+                "road_id": "road-a",
+                "geometry": Point(20, 0),
+            },
+            {
+                "candidate_id": "a3",
+                "discovery_status": "undiscovered_candidate",
+                "discovery_rank": 3,
+                "field_recall_score": 0.0,
+                "dist_to_known_culvert_m": 500.0,
+                "road_id": "road-a",
+                "geometry": Point(40, 0),
+            },
+        ],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+
+    limited = _limit_for_web(predictions, limit=3)
+
+    assert limited["candidate_id"].tolist() == ["a1", "a2", "a3"]
+
+
 def test_prediction_export_pool_removes_known_and_denied_rows():
     predictions = gpd.GeoDataFrame(
         [

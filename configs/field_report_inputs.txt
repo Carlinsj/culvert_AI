@@ -1,5 +1,6 @@
 # One field-report file or folder per line. The pipeline combines all readable inputs.
 /Users/Carli/Downloads/Team No. 2-selected (1)
+/Users/Carli/Downloads/Team No. 3 (1).zip
 /Users/Carli/Downloads/Archive/18 JUNE 2026 TEAM 4 DAILY REPORT.pdf
 /Users/Carli/Downloads/Archive/17 JUNE 2026 TEAM 4 DAILY REPORT.pdf
 /Users/Carli/Downloads/Archive/16 JUNE 2026 TEAM 4 DAILY REPORT.pdf

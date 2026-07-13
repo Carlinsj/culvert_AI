@@ -42,6 +42,8 @@ def test_records_from_text_handles_zero_width_pdf_spacing():
 def test_route_and_culvert_ids_are_normalized():
     assert _normalize_route("NY-9G") == "NY9G"
     assert _normalize_route("State Route 212") == "NY212"
+    assert _normalize_route("Route 209") == "NY209"
+    assert _normalize_route("US Hwy 9W") == "US9W"
     assert _culvert_ids("NY-9G (CID: 149980) SC150237 CID: Not Assigned") == [
         "CID149980",
         "SC150237",
@@ -62,6 +64,74 @@ def test_team_four_table_rows_keep_explicit_route_and_region():
     assert records[0].longitude == -74.108094
 
 
+def test_records_from_text_handles_split_line_coordinates_with_route_context():
+    text = "\n".join(
+        [
+            "End Location: Route 209",
+            "1. SC150598 Coordinates: 41.906449° N /",
+            "74.084137° W",
+            "Culvert SC150598: Located along Route 209.",
+        ]
+    )
+
+    records = _records_from_text(
+        Path("CS_CJ - Small Culvert Inventory Daily Field Report 07-09-2026.docx"),
+        text,
+    )
+
+    assert len(records) == 1
+    assert records[0].report_date == "2026-07-09"
+    assert records[0].route == "NY209"
+    assert records[0].culvert_id == "SC150598"
+    assert records[0].latitude == 41.906449
+    assert records[0].longitude == -74.084137
+
+
+def test_records_from_text_normalizes_spaced_coordinate_digits():
+    text = "8 NY 2 1 2 4 2. 089862 N 7 3. 940645 W"
+
+    records = _records_from_text(
+        Path("CS_CJ - Small Culvert Inventory Daily Field Report 06-24-2026.docx"),
+        text,
+    )
+
+    assert len(records) == 1
+    assert records[0].nysdot_region == "8"
+    assert records[0].route == "NY212"
+    assert records[0].latitude == 42.089862
+    assert records[0].longitude == -73.940645
+
+
+def test_records_from_text_normalizes_partially_spaced_route_digits():
+    text = "8 NY2 14 42.101911N 74.307789W"
+
+    records = _records_from_text(
+        Path("CS_CJ - Small Culvert Inventory Daily Field Report 06-11-2026.docx"),
+        text,
+    )
+
+    assert len(records) == 1
+    assert records[0].nysdot_region == "8"
+    assert records[0].route == "NY214"
+    assert records[0].latitude == 42.101911
+    assert records[0].longitude == -74.307789
+
+
+def test_records_from_text_uses_standalone_spaced_route_line_for_next_coordinate():
+    text = "\n".join(["8", "NY2 14", "42.101911N", "74.307789W"])
+
+    records = _records_from_text(
+        Path("CS_CJ - Small Culvert Inventory Daily Field Report 06-11-2026.docx"),
+        text,
+    )
+
+    assert len(records) == 1
+    assert records[0].nysdot_region == "8"
+    assert records[0].route == "NY214"
+    assert records[0].latitude == 42.101911
+    assert records[0].longitude == -74.307789
+
+
 def test_nearby_culvert_id_is_used_without_global_misalignment():
     text = "\n".join(
         [
@@ -74,9 +144,9 @@ def test_nearby_culvert_id_is_used_without_global_misalignment():
 
     records = _records_from_text(Path("18 JUNE 2026 TEAM 4 DAILY REPORT.pdf"), text)
 
-    assert records[0].culvert_id == ""
-    assert records[1].culvert_id == ""
-    assert records[2].culvert_id == "SC150332"
+    by_coordinate = {(record.latitude, record.longitude): record for record in records}
+    assert by_coordinate[(42.073705, -74.028352)].culvert_id == ""
+    assert by_coordinate[(42.069648, -74.041329)].culvert_id == "SC150332"
 
 
 def test_deduplicate_prefers_identified_record_but_keeps_route():

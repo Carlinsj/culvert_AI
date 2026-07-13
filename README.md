@@ -150,6 +150,40 @@ Known field matches remain visible, but the discovery ranking prioritizes
 not-yet-observed candidates first. This keeps the dashboard useful for field crews
 instead of simply redisplaying already-known culverts at the top.
 
+## Route Count Reports
+
+Use `route-count-report` when the field question is "how many culverts should I
+expect along this route or walked segment?" The command clusters nearby ranked
+points into predicted sites, sums cluster probabilities, and writes a count plus
+the top coordinates to inspect.
+
+```bash
+scripts/python.sh -m culvert_ai.cli route-count-report \
+  --predictions data/processed/actual_ulster_discovery_predictions.gpkg \
+  --route "NY212" \
+  --output reports/route_count_NY212.json \
+  --csv-output reports/route_count_NY212.csv \
+  --geojson-output reports/route_count_NY212.geojson
+```
+
+For a specific walked line, save the line as GeoJSON/GPKG and add:
+
+```bash
+  --segment path/to/walked_segment.geojson --buffer-m 30
+```
+
+The main pipeline can also consume better GIS inputs without editing the script:
+
+```bash
+ROADS_PATH=data/raw/nys_streets.gpkg \
+STREAMS_PATH=data/raw/nys_hydrography.gpkg \
+DEM_PATH=data/raw/dem.tif \
+LANDCOVER_PATH=data/raw/landcover.tif \
+scripts/run_actual_ulster_census_pipeline.sh
+```
+
+See `configs/geospatial_sources.yml` for the highest-value source layers to add.
+
 ## Field UI
 
 The web app is a Leaflet field-review dashboard.
@@ -192,6 +226,8 @@ Relevant environment variables:
 BLOB_READ_WRITE_TOKEN
 VERCEL_OIDC_TOKEN
 BLOB_STORE_ID
+CULVERT_FEEDBACK_WRITE_TOKEN
+CULVERT_DEV_TASK_TOKEN
 CULVERT_OBSERVATIONS_URL
 CULVERT_OBSERVATIONS_BLOB_PATH
 CULVERT_FINDINGS_BLOB_PATH
@@ -217,6 +253,15 @@ If Blob is not configured, deployed feedback can be handled in memory/static mod
 but it will not be durable. The browser keeps a local recovery copy; after Blob is
 configured, opening the updated app on the same phone will try to sync those local
 observations to `/api/observations`.
+
+Deployed `POST /api/observations` and `DELETE /api/observations?id=...` requests
+require `CULVERT_FEEDBACK_WRITE_TOKEN`. Field users enter that token once per
+browser session when the app asks for the field update token. Local development
+does not require it unless `CULVERT_REQUIRE_FEEDBACK_AUTH=1` is set.
+
+The local dev server's `/api/run-*` endpoints can start pipeline commands. They
+remain available to loopback clients, but remote clients must send
+`Authorization: Bearer $CULVERT_DEV_TASK_TOKEN`.
 
 To configure persistence, attach a Vercel Blob store to the deployed project and
 set `BLOB_READ_WRITE_TOKEN` for production and preview. Then redeploy and verify:
@@ -245,8 +290,9 @@ rebuilt outputs are deployed.
 
 Field uploads now queue retraining automatically when a worker is configured:
 
-- `POST /api/observations` and `DELETE /api/observations?id=...` save feedback,
-  refresh the served ranking, then call the retraining trigger.
+- Authenticated `POST /api/observations` and `DELETE /api/observations?id=...`
+  requests save feedback, refresh the served ranking, then call the retraining
+  trigger.
 - The trigger dispatches either `CULVERT_RETRAIN_WEBHOOK_URL` or GitHub repository
   dispatch through `GITHUB_RETRAIN_TOKEN` plus `GITHUB_REPOSITORY`.
 - Retraining is debounced with `CULVERT_RETRAIN_MIN_INTERVAL_SECONDS`, defaulting

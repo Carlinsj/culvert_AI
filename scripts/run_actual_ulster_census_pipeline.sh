@@ -6,7 +6,23 @@ set -euo pipefail
 # predicts likely culvert locations, and refreshes the web dashboard data.
 # Downloads a USGS 3DEP DEM by default if data/raw/dem.tif is missing.
 
-if [ "${REFRESH_CENSUS_INPUTS:-0}" = "1" ] || [ ! -f data/raw/roads.gpkg ] || [ ! -f data/raw/streams.gpkg ]; then
+DEFAULT_ROADS_PATH="data/raw/roads.gpkg"
+DEFAULT_STREAMS_PATH="data/raw/streams.gpkg"
+ROADS_PATH="${ROADS_PATH:-$DEFAULT_ROADS_PATH}"
+STREAMS_PATH="${STREAMS_PATH:-$DEFAULT_STREAMS_PATH}"
+BOUNDARY_PATH="${BOUNDARY_PATH:-data/raw/ulster_county_boundary.gpkg}"
+CUSTOM_VECTOR_INPUTS=0
+if [ "$ROADS_PATH" != "$DEFAULT_ROADS_PATH" ] || [ "$STREAMS_PATH" != "$DEFAULT_STREAMS_PATH" ]; then
+  CUSTOM_VECTOR_INPUTS=1
+fi
+
+if [ "$CUSTOM_VECTOR_INPUTS" = "1" ]; then
+  if [ ! -f "$ROADS_PATH" ] || [ ! -f "$STREAMS_PATH" ]; then
+    echo "Configured geospatial inputs were not found: ROADS_PATH=$ROADS_PATH STREAMS_PATH=$STREAMS_PATH"
+    exit 1
+  fi
+  echo "Using configured geospatial inputs: ROADS_PATH=$ROADS_PATH STREAMS_PATH=$STREAMS_PATH"
+elif [ "${REFRESH_CENSUS_INPUTS:-0}" = "1" ] || [ ! -f "$ROADS_PATH" ] || [ ! -f "$STREAMS_PATH" ]; then
   scripts/python.sh -m culvert_ai.cli download-census \
     --output-dir data/raw \
     --statefp "36" \
@@ -16,9 +32,12 @@ else
 fi
 
 DEM_PATH="${DEM_PATH:-data/raw/dem.tif}"
+FLOW_ACCUMULATION_PATH="${FLOW_ACCUMULATION_PATH:-data/raw/flow_accumulation.tif}"
+DRAINAGE_AREA_PATH="${DRAINAGE_AREA_PATH:-data/raw/drainage_area.tif}"
+LANDCOVER_PATH="${LANDCOVER_PATH:-data/raw/landcover.tif}"
 if [ "${DOWNLOAD_DEM:-1}" = "1" ] && { [ "${REFRESH_DEM:-0}" = "1" ] || [ ! -f "$DEM_PATH" ]; }; then
   DOWNLOAD_DEM_ARGS=(
-    --boundary data/raw/ulster_county_boundary.gpkg
+    --boundary "$BOUNDARY_PATH"
     --output "$DEM_PATH"
     --source-dir "${DEM_SOURCE_DIR:-data/raw/sources/dem}"
     --resolution "${DEM_RESOLUTION:-1}"
@@ -36,7 +55,7 @@ fi
 DEFAULT_FIELD_REPORTS_PATH="/Users/Carli/Downloads/Team No. 2-selected (1)"
 FIELD_REPORTS_MANIFEST="${FIELD_REPORTS_MANIFEST:-configs/field_report_inputs.txt}"
 LLM_REVIEWED_CULVERTS_PATH="${LLM_REVIEWED_CULVERTS_PATH:-data/processed/field_report_llm_reviewed_culverts.gpkg}"
-BOUNDARY_PATH="${BOUNDARY_PATH:-data/raw/ulster_county_boundary.gpkg}"
+LEGACY_FIELD_REPORT_QUEUE_PATH="${LEGACY_FIELD_REPORT_QUEUE_PATH:-data/processed/field_report_llm_review_queue.jsonl}"
 EXTRACTED_POINTS_PATH=""
 KNOWN_CULVERTS_PATH=""
 DENIED_CULVERTS_PATH=""
@@ -92,10 +111,59 @@ if [ -f "$LLM_REVIEWED_CULVERTS_PATH" ]; then
   echo "Using LLM-reviewed field labels from $LLM_REVIEWED_CULVERTS_PATH."
   EXTRACTED_POINTS_PATH="$LLM_REVIEWED_CULVERTS_PATH"
 fi
+if [ "${INCLUDE_LEGACY_FIELD_REPORT_QUEUE_AS_LABELS:-1}" = "1" ] && [ -f "$LEGACY_FIELD_REPORT_QUEUE_PATH" ]; then
+  LEGACY_FIELD_REPORT_POINTS_PATH="data/processed/legacy_field_report_queue_culverts.gpkg"
+  scripts/python.sh -m culvert_ai.cli import-llm-reviewed-labels \
+    --input "$LEGACY_FIELD_REPORT_QUEUE_PATH" \
+    --output "$LEGACY_FIELD_REPORT_POINTS_PATH" \
+    --csv-output data/processed/legacy_field_report_queue_culverts.csv
+
+  if [ -n "$EXTRACTED_POINTS_PATH" ] && [ -f "$EXTRACTED_POINTS_PATH" ]; then
+    FIELD_REPORT_LAYER_INPUTS="$EXTRACTED_POINTS_PATH:$LEGACY_FIELD_REPORT_POINTS_PATH" \
+    FIELD_REPORT_LAYER_OUTPUT="data/processed/field_report_combined_culverts.gpkg" \
+    FIELD_REPORT_LAYER_CSV_OUTPUT="data/processed/field_report_combined_culverts.csv" \
+    scripts/python.sh - <<'PY'
+import os
+from pathlib import Path
+
+import geopandas as gpd
+import pandas as pd
+from shapely.geometry import Point
+
+from culvert_ai.field_reports import _deduplicate_records
+from culvert_ai.io import ensure_parent_dir, write_vector
+
+inputs = [path for path in os.environ["FIELD_REPORT_LAYER_INPUTS"].split(":") if path]
+layers = []
+for path in inputs:
+    layer = gpd.read_file(path).to_crs("EPSG:4326")
+    layer["longitude"] = layer.geometry.x
+    layer["latitude"] = layer.geometry.y
+    layers.append(layer.drop(columns="geometry"))
+
+table = pd.concat(layers, ignore_index=True, sort=False).fillna("")
+deduped = _deduplicate_records(table, precision=6)
+merged = gpd.GeoDataFrame(
+    deduped,
+    geometry=[Point(lon, lat) for lon, lat in zip(deduped["longitude"], deduped["latitude"])],
+    crs="EPSG:4326",
+)
+output = Path(os.environ["FIELD_REPORT_LAYER_OUTPUT"])
+csv_output = Path(os.environ["FIELD_REPORT_LAYER_CSV_OUTPUT"])
+write_vector(merged, output)
+ensure_parent_dir(csv_output)
+merged.drop(columns="geometry").to_csv(csv_output, index=False)
+print({"merged_field_report_points": str(output), "rows": int(len(merged)), "inputs": inputs})
+PY
+    EXTRACTED_POINTS_PATH="data/processed/field_report_combined_culverts.gpkg"
+  else
+    EXTRACTED_POINTS_PATH="$LEGACY_FIELD_REPORT_POINTS_PATH"
+  fi
+fi
 
 scripts/python.sh -m culvert_ai.cli build-candidates \
-  --roads data/raw/roads.gpkg \
-  --streams data/raw/streams.gpkg \
+  --roads "$ROADS_PATH" \
+  --streams "$STREAMS_PATH" \
   --output data/interim/actual_ulster_candidates.gpkg \
   --snap-tolerance-m 20 \
   --min-spacing-m 20
@@ -121,7 +189,7 @@ if [ "$BUILD_NUMBERED_ROAD_CANDIDATES" = "1" ] || { [ -n "$EXTRACTED_POINTS_PATH
   ROUTE_CANDIDATE_INPUTS=()
   if [ "$BUILD_NUMBERED_ROAD_CANDIDATES" = "1" ]; then
     ROUTE_CANDIDATE_ARGS=(
-      --roads data/raw/roads.gpkg
+      --roads "$ROADS_PATH"
       --interval-m "${ROUTE_SAMPLE_INTERVAL_M:-10}"
       --lateral-offsets-m ${ROUTE_NUMBERED_SAMPLE_OFFSETS_M:-0}
       --output data/interim/actual_ulster_route_candidates.gpkg
@@ -137,7 +205,7 @@ if [ "$BUILD_NUMBERED_ROAD_CANDIDATES" = "1" ] || { [ -n "$EXTRACTED_POINTS_PATH
   fi
   if [ "${#ROUTE_CORRIDOR_ARGS[@]}" -gt 0 ]; then
     OBSERVED_ROUTE_CANDIDATE_ARGS=(
-      --roads data/raw/roads.gpkg
+      --roads "$ROADS_PATH"
       --interval-m "${ROUTE_CORRIDOR_SAMPLE_INTERVAL_M:-10}"
       --lateral-offsets-m ${ROUTE_CORRIDOR_SAMPLE_OFFSETS_M:--40 -20 0 20 40}
       --output data/interim/actual_ulster_observed_route_candidates.gpkg
@@ -155,6 +223,7 @@ if [ "$BUILD_NUMBERED_ROAD_CANDIDATES" = "1" ] || { [ -n "$EXTRACTED_POINTS_PATH
 
   scripts/python.sh -m culvert_ai.cli merge-candidates \
     --inputs data/interim/actual_ulster_candidates.gpkg "${ROUTE_CANDIDATE_INPUTS[@]}" \
+    --min-spacing-m "${MERGE_CANDIDATE_MIN_SPACING_M:-5}" \
     --output data/interim/actual_ulster_candidates_with_route_samples.gpkg
   CANDIDATES_PATH="data/interim/actual_ulster_candidates_with_route_samples.gpkg"
 fi
@@ -172,8 +241,8 @@ if [ -n "$EXTRACTED_POINTS_PATH" ] && [ -f "$EXTRACTED_POINTS_PATH" ]; then
 
   ANALYZE_POINTS_ARGS=(
     --points "$EXTRACTED_POINTS_PATH"
-    --roads data/raw/roads.gpkg
-    --streams data/raw/streams.gpkg
+    --roads "$ROADS_PATH"
+    --streams "$STREAMS_PATH"
     --candidates "$CANDIDATES_PATH"
     --output-geojson data/processed/extracted_points_analysis.geojson
     --output-csv data/processed/extracted_points_analysis.csv
@@ -245,8 +314,8 @@ fi
 
 FEATURE_ARGS=(
   --candidates "$CANDIDATES_PATH"
-  --roads data/raw/roads.gpkg
-  --streams data/raw/streams.gpkg
+  --roads "$ROADS_PATH"
+  --streams "$STREAMS_PATH"
   --density-radii-m 50 100 250 500
   --output data/processed/actual_ulster_unlabeled_features.gpkg
 )
@@ -260,11 +329,14 @@ fi
 if [ -f "$DEM_PATH" ]; then
   FEATURE_ARGS+=(--dem "$DEM_PATH")
 fi
-if [ -f data/raw/flow_accumulation.tif ]; then
-  FEATURE_ARGS+=(--flow-accumulation data/raw/flow_accumulation.tif)
+if [ -f "$FLOW_ACCUMULATION_PATH" ]; then
+  FEATURE_ARGS+=(--flow-accumulation "$FLOW_ACCUMULATION_PATH")
 fi
-if [ -f data/raw/drainage_area.tif ]; then
-  FEATURE_ARGS+=(--drainage-area data/raw/drainage_area.tif)
+if [ -f "$DRAINAGE_AREA_PATH" ]; then
+  FEATURE_ARGS+=(--drainage-area "$DRAINAGE_AREA_PATH")
+fi
+if [ -f "$LANDCOVER_PATH" ]; then
+  FEATURE_ARGS+=(--landcover "$LANDCOVER_PATH")
 fi
 
 scripts/python.sh -m culvert_ai.cli build-features "${FEATURE_ARGS[@]}"
