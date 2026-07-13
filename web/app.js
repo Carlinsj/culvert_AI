@@ -23,10 +23,14 @@ const LOCATION_FOCUS_ZOOM = 16;
 const LOCATION_MIN_MOVE_M = 4;
 const LOCATION_LIST_THROTTLE_MS = 650;
 const LOCATION_RECENTER_THRESHOLD_M = 120;
-const ROUTE_TARGET_AUTO_RADIUS_M = 1000;
-const ROUTE_TARGET_AUTO_MIN_MOVE_M = 90;
+const ROUTE_TARGET_AUTO_RADIUS_M = 500;
+const ROUTE_TARGET_AUTO_MIN_MOVE_M = 70;
 const ROUTE_TARGET_AUTO_DEBOUNCE_MS = 900;
-const ROUTE_TARGET_AUTO_TOP_N = 60;
+const ROUTE_TARGET_AUTO_TOP_N = 16;
+const ROUTE_TARGET_AUTO_MAP_LIMIT = 10;
+const ROUTE_TARGET_MANUAL_TOP_N = 24;
+const ROUTE_TARGET_MANUAL_MAP_LIMIT = 16;
+const ROUTE_TARGET_MAP_MIN_GAP_PX = 52;
 const OSM_MAX_NATIVE_ZOOM = 19;
 const MAP_MAX_ZOOM = 20;
 const MAX_LIST_ITEMS = 250;
@@ -538,10 +542,17 @@ async function runRouteCount(options = {}) {
     const report = await fetchRouteCount(url);
     if (requestId === state.routeCountRequestId) {
       renderRouteCountResult(report, options.viewLabel);
-      renderRouteCountTargetsOnMap(report.top_clusters || []);
+      const renderedTargetCount = renderRouteCountTargetsOnMap(report.top_clusters || [], {
+        limit: options.mapTargetLimit,
+        minGapPx: options.mapTargetMinGapPx,
+      });
       if (options.statusMessage) {
         const count = Number(report.recommended?.predicted_count ?? 0);
-        const targetCount = Array.isArray(report.top_clusters) ? report.top_clusters.length : 0;
+        const targetCount = Number.isFinite(renderedTargetCount)
+          ? renderedTargetCount
+          : Array.isArray(report.top_clusters)
+            ? report.top_clusters.length
+            : 0;
         const completeMessage =
           typeof options.completeStatusMessage === "function"
             ? options.completeStatusMessage(report, targetCount)
@@ -579,7 +590,8 @@ function runMobileRouteCount() {
   runRouteCount({
     route,
     bbox,
-    topN: 50,
+    topN: ROUTE_TARGET_MANUAL_TOP_N,
+    mapTargetLimit: ROUTE_TARGET_MANUAL_MAP_LIMIT,
     pendingMessage: "Loading targets for this map view...",
     statusMessage: "Loading route-count targets for this map view...",
     completeStatusMessage: (report, targetCount) => {
@@ -615,6 +627,7 @@ function scheduleAutoRouteTargets(options = {}) {
       route: routeCountRouteForMobile(),
       bbox: bboxAroundLatLng(lat, lng, ROUTE_TARGET_AUTO_RADIUS_M),
       topN: ROUTE_TARGET_AUTO_TOP_N,
+      mapTargetLimit: ROUTE_TARGET_AUTO_MAP_LIMIT,
       viewLabel: "near you",
       pendingMessage: "Loading route-count targets near you...",
       statusMessage: "Loading route-count targets near you...",
@@ -760,10 +773,11 @@ function routeCountTargetsHtml(targets) {
   `;
 }
 
-function renderRouteCountTargetsOnMap(targets) {
-  if (!state.routeCountLayer || !Array.isArray(targets)) return;
+function renderRouteCountTargetsOnMap(targets, options = {}) {
+  if (!state.routeCountLayer || !Array.isArray(targets)) return 0;
   state.routeCountLayer.clearLayers();
-  targets.forEach((target, index) => {
+  const visibleTargets = declutterRouteCountTargets(targets, options);
+  visibleTargets.forEach((target, index) => {
     const latitude = Number(target.latitude);
     const longitude = Number(target.longitude);
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
@@ -782,6 +796,48 @@ function renderRouteCountTargetsOnMap(targets) {
     });
     marker.addTo(state.routeCountLayer);
   });
+  return visibleTargets.length;
+}
+
+function declutterRouteCountTargets(targets, options = {}) {
+  const limit = clampIntegerValue(options.limit, targets.length, 0, targets.length);
+  const minGapPx = clampNumberValue(options.minGapPx, ROUTE_TARGET_MAP_MIN_GAP_PX, 0, 200);
+  const accepted = [];
+  const acceptedPoints = [];
+
+  for (const target of targets) {
+    if (accepted.length >= limit) break;
+    const latitude = Number(target.latitude);
+    const longitude = Number(target.longitude);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) continue;
+
+    if (state.map && minGapPx > 0) {
+      const point = state.map.latLngToContainerPoint([latitude, longitude]);
+      const tooClose = acceptedPoints.some((acceptedPoint) => {
+        const dx = point.x - acceptedPoint.x;
+        const dy = point.y - acceptedPoint.y;
+        return Math.hypot(dx, dy) < minGapPx;
+      });
+      if (tooClose) continue;
+      acceptedPoints.push(point);
+    }
+
+    accepted.push(target);
+  }
+
+  return accepted;
+}
+
+function clampIntegerValue(value, fallback, min, max) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(numeric)));
+}
+
+function clampNumberValue(value, fallback, min, max) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.min(max, Math.max(min, numeric));
 }
 
 function routeCountTargetIcon(rank, target) {
