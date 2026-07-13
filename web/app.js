@@ -68,6 +68,7 @@ const state = {
   placingPoint: false,
   draftPointMarker: null,
   draftPointFieldId: "",
+  draftPointSourceTarget: null,
   locationWatchId: null,
   userLocation: null,
   locationMarker: null,
@@ -236,6 +237,13 @@ function bindControls() {
     }
   });
   document.addEventListener("click", (event) => {
+    const routeTargetMove = event.target.closest("[data-route-target-move]");
+    if (routeTargetMove) {
+      event.preventDefault();
+      startMoveRouteTarget(routeCountTargetFromElement(routeTargetMove));
+      return;
+    }
+
     const routeCountTarget = event.target.closest("[data-route-count-candidate]");
     if (routeCountTarget) {
       event.preventDefault();
@@ -857,12 +865,71 @@ function routeCountPopupHtml(target) {
   const score = Number(target.score);
   const road = target.road_name || target.matched_route || "Route-count target";
   const candidateId = target.candidate_id ? formatReadableId(target.candidate_id) : "";
+  const targetPayload = routeCountTargetDataAttrs(target);
   return `
     <div class="popup-title">Target ${escapeHtml(String(target.rank || ""))}: ${escapeHtml(road)}</div>
     <div class="popup-meta">Score ${escapeHtml(Number.isFinite(score) ? String(Math.round(score)) : "n/a")} · ${escapeHtml(formatPercent(probability))}</div>
     ${candidateId ? `<div class="popup-meta">${escapeHtml(candidateId)}</div>` : ""}
-    <div class="popup-meta">Tap Add if this is the culvert you found.</div>
+    <div class="popup-meta">If the culvert is nearby, move this target to the actual spot.</div>
+    <button type="button" class="popup-action" data-route-target-move ${targetPayload}>Move point</button>
   `;
+}
+
+function routeCountTargetDataAttrs(target) {
+  return [
+    ["candidate", target.candidate_id],
+    ["rank", target.rank],
+    ["latitude", target.latitude],
+    ["longitude", target.longitude],
+    ["road", target.road_name],
+    ["stream", target.stream_name],
+    ["route", target.matched_route],
+    ["score", target.score],
+    ["probability", target.predicted_site_probability],
+    ["discovery-rank", target.discovery_rank],
+  ]
+    .map(([key, value]) => `data-route-target-${key}="${escapeAttr(value ?? "")}"`)
+    .join(" ");
+}
+
+function routeCountTargetFromElement(element) {
+  return {
+    candidate_id: element.dataset.routeTargetCandidate || "",
+    rank: element.dataset.routeTargetRank || "",
+    latitude: element.dataset.routeTargetLatitude || "",
+    longitude: element.dataset.routeTargetLongitude || "",
+    road_name: element.dataset.routeTargetRoad || "",
+    stream_name: element.dataset.routeTargetStream || "",
+    matched_route: element.dataset.routeTargetRoute || "",
+    score: element.dataset.routeTargetScore || "",
+    predicted_site_probability: element.dataset.routeTargetProbability || "",
+    discovery_rank: element.dataset.routeTargetDiscoveryRank || "",
+  };
+}
+
+function startMoveRouteTarget(target) {
+  const latitude = Number(target?.latitude);
+  const longitude = Number(target?.longitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    setLocationStatus("This target has no coordinate to move.");
+    return;
+  }
+
+  state.map?.closePopup();
+  state.placingPoint = true;
+  state.draftPointFieldId = makeFieldCulvertId();
+  state.draftPointSourceTarget = target;
+  updatePlacePointButton();
+  setMobileDrawerOpen(false);
+  state.selectedId = null;
+  state.selectedObservationId = null;
+  renderList();
+
+  const latLng = L.latLng(latitude, longitude);
+  renderDraftPointMarker(latLng);
+  renderDraftPointDetail(latLng);
+  centerMapOnPoint([latitude, longitude]);
+  setLocationStatus("Move the red point to the actual culvert, then save it.");
 }
 
 function focusRouteCountTarget(button) {
@@ -2152,6 +2219,9 @@ async function saveObservationAtPoint(latLng, status, notes, options = {}) {
   const context = options.context || {};
   const fieldId = options.fieldId || makeFieldCulvertId();
   const matched = context.matchedFeature?.properties || {};
+  const predictionScore = context.predictionScore ?? matched.score;
+  const priorityRank = context.priorityRank ?? matched.rank;
+  const priorityBucket = context.priorityBucket ?? matched.bucket;
   return saveObservation({
     status,
     notes,
@@ -2164,14 +2234,14 @@ async function saveObservationAtPoint(latLng, status, notes, options = {}) {
     source: "field_added_culvert",
     layout_source: context.layoutSource || "manual_map_point",
     layout_scan_summary: context.summary || "",
-    nearest_candidate_id: matched.candidate_id || "",
+    nearest_candidate_id: context.nearestCandidateId || matched.candidate_id || "",
     nearest_candidate_distance_m: context.distanceMeters,
     missed_candidate_id: context.missedCandidateId || "",
     missed_candidate_distance_m: context.missedCandidateDistanceMeters,
     inferred_from_candidate: context.withinRadius ? 1 : 0,
-    prediction_score: matched.score,
-    priority_rank: matched.rank,
-    priority_bucket: matched.bucket || "",
+    prediction_score: predictionScore,
+    priority_rank: priorityRank,
+    priority_bucket: priorityBucket || "",
   });
 }
 
@@ -2479,7 +2549,7 @@ function fieldCulvertContextHtml(fieldId, context) {
     <section class="field-context" aria-label="Field culvert context">
       <div class="detail-grid">
         ${detailCell("Assigned ID", fieldId)}
-        ${detailCell("Context source", context.withinRadius ? "nearest map candidate" : "manual point")}
+        ${detailCell("Context source", context.contextLabel || (context.withinRadius ? "nearest map candidate" : "manual point"))}
         ${detailCell("Road", context.roadName || "unknown")}
         ${detailCell("Drainage/source", context.streamName || "unknown")}
         ${detailCell("Nearest candidate", context.nearestDisplayId || "none nearby")}
@@ -2491,6 +2561,10 @@ function fieldCulvertContextHtml(fieldId, context) {
 }
 
 function mapContextForPoint(latLng) {
+  if (state.draftPointSourceTarget) {
+    return routeTargetContextForPoint(latLng, state.draftPointSourceTarget);
+  }
+
   const nearest = nearestFeatureToPoint(latLng);
   if (!nearest) {
     return {
@@ -2520,6 +2594,46 @@ function mapContextForPoint(latLng) {
     summary: withinRadius
       ? `${isPredictionHit ? "Copied" : "Recorded miss against"} road, drainage, rank, and estimate context from ${nearestDisplayId}, ${formatNumber(nearest.distanceMeters, "m")} from the selected point.`
       : `Nearest map candidate is ${formatNumber(nearest.distanceMeters, "m")} away, outside the ${FIELD_CONTEXT_RADIUS_M} m context radius, so the point will be saved without inferred road/drainage context.`,
+  };
+}
+
+function routeTargetContextForPoint(latLng, target) {
+  const latitude = Number(latLng.lat);
+  const longitude = Number(latLng.lng);
+  const targetLatitude = Number(target?.latitude);
+  const targetLongitude = Number(target?.longitude);
+  const targetId = String(target?.candidate_id || "");
+  const distanceMetersValue =
+    Number.isFinite(latitude) &&
+    Number.isFinite(longitude) &&
+    Number.isFinite(targetLatitude) &&
+    Number.isFinite(targetLongitude)
+      ? distanceMeters(latitude, longitude, targetLatitude, targetLongitude)
+      : undefined;
+  const isHit = Number.isFinite(distanceMetersValue) && distanceMetersValue <= PREDICTION_HIT_RADIUS_M;
+  const score = Number(target?.score);
+  const rank = Number(target?.discovery_rank || target?.rank);
+  const roadName = target?.road_name || (target?.matched_route ? `Route ${target.matched_route}` : "");
+  const streamName = target?.stream_name || "";
+  const nearestDisplayId = targetId ? formatReadableId(targetId) : `Target ${target?.rank || ""}`.trim();
+
+  return {
+    contextLabel: "moved prediction",
+    withinRadius: isHit,
+    distanceMeters: distanceMetersValue,
+    roadName,
+    streamName,
+    nearestDisplayId,
+    nearestCandidateId: targetId,
+    missedCandidateId: isHit ? "" : targetId,
+    missedCandidateDistanceMeters: isHit ? null : distanceMetersValue,
+    layoutSource: "moved_route_count_target",
+    predictionScore: Number.isFinite(score) ? score : null,
+    priorityRank: Number.isFinite(rank) ? rank : null,
+    priorityBucket: bucketFromScore(score),
+    summary: Number.isFinite(distanceMetersValue)
+      ? `Moved ${nearestDisplayId} ${formatNumber(distanceMetersValue, "m")} to the field-confirmed culvert location.`
+      : `Moved ${nearestDisplayId} to the field-confirmed culvert location.`,
   };
 }
 
@@ -2566,6 +2680,7 @@ function togglePlacePointMode() {
 function startPlacePointMode() {
   state.placingPoint = true;
   state.draftPointFieldId = makeFieldCulvertId();
+  state.draftPointSourceTarget = null;
   updatePlacePointButton();
   setMobileDrawerOpen(false);
   state.selectedId = null;
@@ -2583,6 +2698,7 @@ function startPlacePointMode() {
 function cancelPlacePointMode() {
   state.placingPoint = false;
   state.draftPointFieldId = "";
+  state.draftPointSourceTarget = null;
   removeDraftPointMarker();
   updatePlacePointButton();
 }
@@ -2660,12 +2776,18 @@ function renderDraftPointDetail(latLng) {
   const context = mapContextForPoint(latLng);
   const existingNotes = els.detail?.querySelector("#field-notes")?.value || "";
   const notesOpen = Boolean(els.detail?.querySelector(".notes-disclosure")?.open);
+  const movingTarget = Boolean(state.draftPointSourceTarget);
+  const title = movingTarget ? `Move target to ${escapeHtml(fieldId)}` : `New culvert ${escapeHtml(fieldId)}`;
+  const instruction = movingTarget
+    ? "Drag the red point or tap the map at the actual culvert, then save."
+    : "Drag the red point or tap the map to place the culvert, then save.";
   showDetailPanel();
   els.detail.innerHTML = `
     <div class="detail-panel-header">
-      <h3>New culvert ${escapeHtml(fieldId)}</h3>
+      <h3>${title}</h3>
       <button type="button" class="detail-close" data-close-detail aria-label="Close details">Close</button>
     </div>
+    <p>${escapeHtml(instruction)}</p>
     <p>Lat ${formatNumber(latLng.lat, "")}, Lon ${formatNumber(latLng.lng, "")}</p>
     ${fieldCulvertContextHtml(fieldId, context)}
     ${draftPointSaveHtml(existingNotes, notesOpen)}
@@ -2812,6 +2934,15 @@ function formatReadableId(value) {
 
 function labelBucket(bucket) {
   return String(bucket || "unknown").replace("_", " ");
+}
+
+function bucketFromScore(value) {
+  const score = Number(value);
+  if (!Number.isFinite(score)) return "";
+  if (score > 75) return "very_high";
+  if (score > 55) return "high";
+  if (score > 35) return "medium";
+  return "low";
 }
 
 function formatNumber(value, suffix) {

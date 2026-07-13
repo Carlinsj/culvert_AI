@@ -1263,17 +1263,34 @@ output {
   font-size: 0.82rem;
 }
 
+.popup-action,
 .popup-delete-observation {
   width: 100%;
   margin-top: 10px;
-  border: 1px solid rgba(180, 35, 24, 0.36);
   border-radius: 8px;
   padding: 8px 10px;
-  color: var(--denied);
   background: #fff;
   cursor: pointer;
   font-size: 0.82rem;
   font-weight: 900;
+}
+
+.popup-action {
+  border: 1px solid rgba(31, 111, 87, 0.36);
+  color: #fff;
+  background: var(--accent);
+}
+
+.popup-delete-observation {
+  border: 1px solid rgba(180, 35, 24, 0.36);
+  color: var(--denied);
+}
+
+.popup-action:hover,
+.popup-action:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(31, 111, 87, 0.13);
 }
 
 .popup-delete-observation:hover,
