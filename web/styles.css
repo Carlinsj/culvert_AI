@@ -1200,6 +1200,11 @@ output {
   font-size: 0.62rem;
 }
 
+.observation-moved .observation-dot {
+  background: var(--uncertain);
+  font-size: 0.55rem;
+}
+
 .draft-point-marker {
   touch-action: none;
 }
@@ -1234,6 +1239,10 @@ output {
 
 .observation-confirmed_culvert .observation-dot {
   background: var(--known);
+}
+
+.observation-confirmed_culvert.observation-moved .observation-dot {
+  background: var(--uncertain);
 }
 
 .observation-no_culvert .observation-dot {

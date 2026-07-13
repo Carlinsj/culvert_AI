@@ -1160,7 +1160,7 @@ function renderAbuList() {
     item.innerHTML = `
       <div class="abu-card">
         <button type="button" class="abu-select${observationId === state.selectedObservationId ? " active" : ""}">
-          <span class="rank">ABU</span>
+          <span class="rank">${escapeHtml(observationListBadge(props))}</span>
           <span class="candidate-main">
             <strong class="candidate-title">${escapeHtml(observationTitle(props))} ${escapeHtml(String(index + 1))}</strong>
             <span class="candidate-subtitle">${escapeHtml(observationSubtitle(props))}</span>
@@ -2063,6 +2063,7 @@ function drawCandidateCanvasLabels(context, items, zoom) {
 
 function candidateCanvasLabel(item, zoom) {
   if (item.props.knownFieldMatch) {
+    if (isMovedObservation(item.props)) return "MVD";
     if (isFieldObservedKnown(item.props)) return "ABU";
     return item.selected && zoom >= 16 ? "K" : "";
   }
@@ -2094,9 +2095,10 @@ function renderObservationMarkers() {
 
 function observationIcon(props) {
   const normalized = observationStatus(props?.status);
-  const text = normalized === "confirmed_culvert" ? "ABU" : normalized === "no_culvert" ? "NO" : "?";
+  const moved = isMovedObservation(props);
+  const text = moved ? "MVD" : normalized === "confirmed_culvert" ? "ABU" : normalized === "no_culvert" ? "NO" : "?";
   return L.divIcon({
-    className: `observation-marker observation-${normalized}`,
+    className: `observation-marker observation-${normalized}${moved ? " observation-moved" : ""}`,
     html: `<span class="observation-dot">${text}</span>`,
     iconSize: [40, 40],
     iconAnchor: [20, 20],
@@ -2490,6 +2492,9 @@ function observationSubtitle(props) {
   const coordinates = `${formatNumber(props.latitude, "")}, ${formatNumber(props.longitude, "")}`;
   const date = props.observed_at ? shortDateTime(props.observed_at) : "unknown time";
   const label = props.field_culvert_id || props.road_name || props.candidate_id || coordinates;
+  if (isMovedObservation(props)) {
+    return `${label} · offset ${formatNumber(movedObservationOffsetMeters(props), "m")} · ${date}`;
+  }
   return `${label} · ${date}`;
 }
 
@@ -2497,6 +2502,8 @@ function renderObservationDetail(feature) {
   const props = feature.properties || {};
   const title = observationTitle(props);
   const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${props.latitude},${props.longitude}`;
+  const moved = isMovedObservation(props);
+  const offset = movedObservationOffsetMeters(props);
   showDetailPanel();
   els.detail.innerHTML = `
     <div class="detail-panel-header">
@@ -2506,13 +2513,16 @@ function renderObservationDetail(feature) {
     <p>${escapeHtml(props.notes || "User-added training point.")}</p>
     <div class="quick-detail-grid">
       ${detailCell("Status", statusLabel(props.status))}
-      ${detailCell("Source", sourceLabel(props.source))}
+      ${detailCell("Source", moved ? "Moved prediction" : sourceLabel(props.source))}
       ${detailCell("Latitude", formatNumber(props.latitude, ""))}
       ${detailCell("Longitude", formatNumber(props.longitude, ""))}
+      ${moved ? detailCell("Offset from prediction", formatNumber(offset, "m")) : ""}
+      ${moved ? detailCell("Original target", formatReadableId(props.nearest_candidate_id || props.missed_candidate_id || "n/a")) : ""}
     </div>
+    ${moved ? `<p class="context-note">${escapeHtml(movedObservationSummary(props))}</p>` : ""}
     <div class="actions location-actions">
       <a href="${escapeAttr(mapsUrl)}" target="_blank" rel="noreferrer">Google Maps</a>
-      <button type="button" class="danger-action" data-observation-delete="${escapeAttr(props.observation_id || "")}">Delete ABU</button>
+      <button type="button" class="danger-action" data-observation-delete="${escapeAttr(props.observation_id || "")}">${moved ? "Delete moved point" : "Delete ABU"}</button>
     </div>
   `;
   bindDetailCloseAction();
@@ -2521,9 +2531,11 @@ function renderObservationDetail(feature) {
 function observationPopupHtml(props) {
   const title = observationTitle(props);
   const road = props.field_culvert_id || props.road_name || props.candidate_id || "Manual field point";
+  const moved = isMovedObservation(props);
   return `
     <div class="popup-title">${escapeHtml(title)}</div>
     <div class="popup-meta">${escapeHtml(road)}</div>
+    ${moved ? `<div class="popup-meta">Offset ${escapeHtml(formatNumber(movedObservationOffsetMeters(props), "m"))} from predicted target</div>` : ""}
     <div class="popup-meta">${escapeHtml(props.observed_at || "")}</div>
     ${props.notes ? `<div class="popup-meta">${escapeHtml(props.notes)}</div>` : ""}
     <button type="button" class="popup-delete-observation" data-observation-delete="${escapeAttr(props.observation_id || "")}">Delete user point</button>
@@ -2531,10 +2543,35 @@ function observationPopupHtml(props) {
 }
 
 function observationTitle(props) {
+  if (isMovedObservation(props)) {
+    return "Moved prediction";
+  }
   if (observationStatus(props?.status) === "confirmed_culvert" && props?.source === "field_added_culvert") {
     return "Added by user";
   }
   return statusLabel(props?.status);
+}
+
+function observationListBadge(props) {
+  if (isMovedObservation(props)) return "MVD";
+  return observationStatus(props?.status) === "confirmed_culvert" ? "ABU" : "?";
+}
+
+function isMovedObservation(props) {
+  return String(props?.layout_source || props?.field_layout_source || "") === "moved_route_count_target";
+}
+
+function movedObservationOffsetMeters(props) {
+  const nearest = Number(props?.nearest_candidate_distance_m);
+  if (Number.isFinite(nearest)) return nearest;
+  const missed = Number(props?.missed_candidate_distance_m);
+  return Number.isFinite(missed) ? missed : NaN;
+}
+
+function movedObservationSummary(props) {
+  const target = formatReadableId(props?.nearest_candidate_id || props?.missed_candidate_id || "predicted target");
+  const offset = formatNumber(movedObservationOffsetMeters(props), "m");
+  return `Moved from ${target}; actual point is ${offset} from the predicted location.`;
 }
 
 function sourceLabel(source) {
