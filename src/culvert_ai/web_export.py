@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import json
 from pathlib import Path
 
@@ -79,6 +80,29 @@ WEB_COLUMNS = [
     "road_density_250m_m_per_sqkm",
 ]
 
+ROUTE_COUNT_COLUMNS = [
+    "candidate_id",
+    "discovery_rank",
+    "discovery_score",
+    "discovery_status",
+    "is_known_field_match",
+    "priority_rank",
+    "priority_bucket",
+    "culvert_likelihood_score",
+    "culvert_probability",
+    "road_name",
+    "stream_name",
+    "matched_route",
+    "road_id",
+    "source",
+    "evidence_summary",
+    "latitude",
+    "longitude",
+    "dist_to_known_culvert_m",
+    "is_culvert",
+    "nearest_field_report_route",
+]
+
 KNOWN_EXPORT_EXCLUSION_RADIUS_M = 15.0
 WEB_EXPORT_MIN_SPACING_M = 15.0
 WEB_EXPORT_MAX_PER_ROAD = 1000
@@ -110,6 +134,8 @@ def export_web_data(
     elif "priority_rank" in predictions.columns:
         predictions = predictions.sort_values("priority_rank")
 
+    route_count_predictions = predictions.copy()
+
     if limit:
         predictions = _limit_for_web(predictions, limit)
 
@@ -126,18 +152,45 @@ def export_web_data(
     output_dir.mkdir(parents=True, exist_ok=True)
     geojson_path = output_dir / "findings.geojson"
     summary_path = output_dir / "summary.json"
+    route_count_path = output_dir / "route_count_source.geojson.gz"
 
     ensure_parent_dir(geojson_path)
     web.to_file(geojson_path, driver="GeoJSON")
+    route_count_rows = _write_route_count_source(route_count_predictions, route_count_path)
     summary = _summary(web, sort_column, known_matches_total=known_matches_total)
+    summary["route_count_rows"] = route_count_rows
+    summary["route_count_source"] = route_count_path.name
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
     return {
         "findings_geojson": geojson_path,
         "summary_json": summary_path,
+        "route_count_source": route_count_path,
+        "route_count_rows": route_count_rows,
         "rows": int(len(web)),
         "score_column": sort_column or "",
     }
+
+
+def _write_route_count_source(predictions: gpd.GeoDataFrame, output_path: Path) -> int:
+    route_count = predictions.to_crs("EPSG:4326").copy()
+    if "longitude" not in route_count.columns:
+        route_count["longitude"] = route_count.geometry.x
+    if "latitude" not in route_count.columns:
+        route_count["latitude"] = route_count.geometry.y
+
+    selected_columns = [column for column in ROUTE_COUNT_COLUMNS if column in route_count.columns]
+    route_count = route_count[[*selected_columns, "geometry"]].copy()
+
+    ensure_parent_dir(output_path)
+    with gzip.open(output_path, "wt", encoding="utf-8") as handle:
+        handle.write('{"type":"FeatureCollection","features":[\n')
+        for index, feature in enumerate(route_count.iterfeatures(na="null")):
+            if index:
+                handle.write(",\n")
+            handle.write(json.dumps(feature, separators=(",", ":")))
+        handle.write("\n]}\n")
+    return int(len(route_count))
 
 
 def _score_column(table: gpd.GeoDataFrame) -> str | None:

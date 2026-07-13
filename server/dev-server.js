@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { isAuthorizedBearer, requireFeedbackWriteAuth } from "../api/_lib/auth.js";
+import { loadRouteCountCollection, buildRouteCountReport } from "../api/_lib/route-count.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -51,6 +52,16 @@ async function handleRequest(request, response) {
 
     if (url.pathname === "/api/summary" && request.method === "GET") {
       await sendFile(response, path.join(DATA_DIR, "summary.json"));
+      return;
+    }
+
+    if (url.pathname === "/api/route-count" && request.method === "GET") {
+      const findings = JSON.parse(await readFile(path.join(DATA_DIR, "findings.geojson"), "utf8"));
+      const { collection, source } = await loadRouteCountCollection(findings);
+      await sendJson(response, {
+        ...buildRouteCountReport(collection, url.searchParams),
+        data_source: source,
+      });
       return;
     }
 
@@ -172,7 +183,7 @@ function listenWithFallback(port, attempt = 0) {
     server.off("error", onError);
     console.log(`Culvert AI dev server running at http://${HOST}:${port}`);
     console.log("Frontend: /");
-    console.log("Backend:  /api/health, /api/findings, /api/summary, /api/run-actual");
+    console.log("Backend:  /api/health, /api/findings, /api/summary, /api/route-count, /api/run-actual");
   });
 }
 

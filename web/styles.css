@@ -238,6 +238,121 @@ output {
   background: #fbfcfa;
 }
 
+.route-count-panel {
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.route-count-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+#route-count-run,
+#route-count-kingston {
+  border: 0;
+  border-radius: 8px;
+  padding: 0 13px;
+  color: #fff;
+  background: var(--accent);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+#route-count-kingston {
+  border: 1px solid var(--line);
+  color: var(--ink);
+  background: #fbfcfa;
+}
+
+#route-count-run:disabled,
+#route-count-kingston:disabled {
+  cursor: progress;
+  opacity: 0.68;
+}
+
+.route-count-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.route-count-toggle {
+  border-style: dashed;
+}
+
+.route-count-result {
+  display: grid;
+  gap: 7px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  color: var(--muted);
+  background: #fff;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.route-count-result strong {
+  color: var(--ink);
+}
+
+.route-count-total {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.route-count-total strong {
+  font-size: 1.55rem;
+  line-height: 1;
+}
+
+.route-count-meta,
+.route-count-warning {
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.route-count-warning {
+  color: var(--high);
+  font-weight: 700;
+}
+
+.route-count-targets {
+  display: grid;
+  gap: 5px;
+}
+
+.route-count-target {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  gap: 7px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px;
+  color: var(--ink);
+  background: #fbfcfa;
+  text-align: left;
+  cursor: pointer;
+}
+
+.route-count-target span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.route-count-target small {
+  color: var(--muted);
+  font-weight: 800;
+}
+
 .list-section {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -1467,6 +1582,9 @@ output {
   .danger-action,
   .actions a,
   .feedback-buttons button,
+  #route-count-run,
+  #route-count-kingston,
+  .route-count-target,
   .candidate-button,
   .abu-select,
   .abu-delete {

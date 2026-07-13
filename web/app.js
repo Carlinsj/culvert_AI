@@ -3,6 +3,7 @@ const SUMMARY_URLS = ["/api/summary", "data/summary.json"];
 const MODEL_SUMMARY_URLS = ["data/model_summary.json"];
 const HEALTH_URL = "/api/health";
 const OBSERVATIONS_URL = "/api/observations";
+const ROUTE_COUNT_URL = "/api/route-count";
 const LOCAL_OBSERVATIONS_KEY = "culvert-ai-field-observations";
 const FEEDBACK_WRITE_TOKEN_KEY = "culvert-ai-feedback-write-token";
 
@@ -28,6 +29,10 @@ const MAX_LIST_ITEMS = 250;
 const CANDIDATE_HIT_TOLERANCE_PX = 8;
 const CANDIDATE_LABEL_MIN_ZOOM = 18;
 const CANDIDATE_LABEL_MAX_POINTS = 260;
+const KINGSTON_ROUTE_COUNT_BOUNDS = [
+  [41.86, -74.1],
+  [42.02, -73.9],
+];
 
 const MARKER_COLORS = {
   very_high: "#8f8a00",
@@ -62,6 +67,7 @@ const state = {
   listDiscoveryCount: 0,
   shouldFocusLocationOnNextUpdate: false,
   modelSummary: null,
+  routeCountRequestId: 0,
 };
 
 const els = {
@@ -98,6 +104,11 @@ const els = {
   locateMe: document.querySelector("#locate-me"),
   recenterLocation: document.querySelector("#recenter-location"),
   locationStatus: document.querySelector("#location-status"),
+  routeCountInput: document.querySelector("#route-count-input"),
+  routeCountRun: document.querySelector("#route-count-run"),
+  routeCountKingston: document.querySelector("#route-count-kingston"),
+  routeCountViewport: document.querySelector("#route-count-viewport"),
+  routeCountResult: document.querySelector("#route-count-result"),
 };
 
 init();
@@ -196,6 +207,14 @@ function bindControls() {
   els.drawerBackdrop?.addEventListener("click", () => setMobileDrawerOpen(false));
   els.locateMe?.addEventListener("click", toggleLocationTracking);
   els.recenterLocation?.addEventListener("click", recenterOnUserLocation);
+  els.routeCountRun?.addEventListener("click", runRouteCount);
+  els.routeCountKingston?.addEventListener("click", runKingstonRouteCount);
+  els.routeCountInput?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      runRouteCount();
+    }
+  });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
       setFilterPanelOpen(false);
@@ -203,6 +222,13 @@ function bindControls() {
     }
   });
   document.addEventListener("click", (event) => {
+    const routeCountTarget = event.target.closest("[data-route-count-candidate]");
+    if (routeCountTarget) {
+      event.preventDefault();
+      focusRouteCountTarget(routeCountTarget);
+      return;
+    }
+
     const deleteButton = event.target.closest("[data-observation-delete]");
     if (deleteButton) {
       event.preventDefault();
@@ -455,6 +481,188 @@ function hasApiBackend() {
   const port = window.location.port;
   if (window.location.protocol === "file:") return false;
   return !["127.0.0.1", "localhost"].includes(hostname) || port !== "8080";
+}
+
+async function runRouteCount() {
+  if (!els.routeCountResult || !els.routeCountRun) return;
+  if (window.location.protocol === "file:") {
+    showRouteCountMessage("Route count needs the deployed app or the local dev server.");
+    return;
+  }
+
+  const route = String(els.routeCountInput?.value || "").trim();
+  const bbox = els.routeCountViewport?.checked ? currentMapBbox() : "";
+
+  if (!route && !bbox) {
+    showRouteCountMessage("Turn on current map view to count all routes, or enter a route.");
+    return;
+  }
+
+  const requestId = ++state.routeCountRequestId;
+  els.routeCountRun.disabled = true;
+  if (els.routeCountKingston) {
+    els.routeCountKingston.disabled = true;
+  }
+  showRouteCountMessage("Calculating route count...");
+
+  try {
+    const url = new URL(ROUTE_COUNT_URL, window.location.href);
+    if (route) url.searchParams.set("route", route);
+    if (bbox) url.searchParams.set("bbox", bbox);
+    url.searchParams.set("clusterRadiusM", "30");
+    url.searchParams.set("topN", "8");
+    const report = await fetchRouteCount(url);
+    if (requestId === state.routeCountRequestId) {
+      renderRouteCountResult(report);
+    }
+  } catch (error) {
+    if (requestId === state.routeCountRequestId) {
+      showRouteCountMessage(`Route count failed: ${error.message || "unknown error"}`);
+    }
+  } finally {
+    if (requestId === state.routeCountRequestId) {
+      els.routeCountRun.disabled = false;
+      if (els.routeCountKingston) {
+        els.routeCountKingston.disabled = false;
+      }
+    }
+  }
+}
+
+function runKingstonRouteCount() {
+  if (!state.map || !els.routeCountRun) return;
+  if (els.routeCountInput) {
+    els.routeCountInput.value = "";
+  }
+  if (els.routeCountViewport) {
+    els.routeCountViewport.checked = true;
+  }
+
+  els.routeCountRun.disabled = true;
+  els.routeCountKingston.disabled = true;
+  showRouteCountMessage("Moving to Kingston and counting all visible routes...");
+  let counted = false;
+  const countAfterMove = () => {
+    if (counted) return;
+    counted = true;
+    runRouteCount();
+  };
+  state.map.once("moveend", countAfterMove);
+  state.map.fitBounds(KINGSTON_ROUTE_COUNT_BOUNDS, {
+    padding: [18, 18],
+    maxZoom: 13,
+  });
+  window.setTimeout(countAfterMove, 500);
+}
+
+async function fetchRouteCount(url) {
+  const response = await fetch(url, { cache: "no-store" });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(body.details || body.error || `${response.status}`);
+  }
+  return body;
+}
+
+function currentMapBbox() {
+  if (!state.map) return "";
+  const bounds = state.map.getBounds();
+  if (!bounds?.isValid()) return "";
+  return [
+    bounds.getWest(),
+    bounds.getSouth(),
+    bounds.getEast(),
+    bounds.getNorth(),
+  ]
+    .map((value) => Number(value).toFixed(6))
+    .join(",");
+}
+
+function renderRouteCountResult(report) {
+  if (!els.routeCountResult) return;
+  const recommended = report.recommended || {};
+  const predictedCount = Number(recommended.predicted_count ?? 0);
+  const expectedCount = Number(recommended.expected_count ?? 0);
+  const interval = Array.isArray(recommended.prediction_interval_90)
+    ? recommended.prediction_interval_90
+    : [0, 0];
+  const viewLabel = report.bbox ? "current view" : "full route";
+  const routeLabel = report.route ? escapeHtml(report.route) : "all routes";
+  const sourceRows = Number(report.data_source?.rows ?? report.source_rows ?? 0);
+  const coverage = report.data_source?.complete
+    ? `${sourceRows.toLocaleString()} route-count rows`
+    : `${sourceRows.toLocaleString()} dashboard rows only`;
+  const warningText = [
+    ...(report.data_source?.complete ? [] : ["Full route-count source is missing from this deployment."]),
+    ...(Array.isArray(report.warnings) ? report.warnings : []),
+  ].filter(Boolean);
+  const topTargets = Array.isArray(report.top_clusters) ? report.top_clusters.slice(0, 5) : [];
+
+  els.routeCountResult.innerHTML = `
+    <div class="route-count-total">
+      <span><strong>${escapeHtml(predictedCount.toLocaleString())}</strong> predicted</span>
+      <span>${escapeHtml(viewLabel)}</span>
+    </div>
+    <div class="route-count-meta">
+      ${routeLabel} · expected ${escapeHtml(expectedCount.toFixed(1))} · 90% ${escapeHtml(String(interval[0]))}-${escapeHtml(String(interval[1]))} · ${escapeHtml(String(report.candidate_clusters ?? 0))} clusters
+    </div>
+    <div class="route-count-meta">${escapeHtml(coverage)}</div>
+    ${warningText.map((warning) => `<div class="route-count-warning">${escapeHtml(warning)}</div>`).join("")}
+    ${routeCountTargetsHtml(topTargets)}
+  `;
+}
+
+function routeCountTargetsHtml(targets) {
+  if (!targets.length) return "";
+  return `
+    <div class="route-count-targets" aria-label="Top route-count targets">
+      ${targets
+        .map((target) => {
+          const candidateId = String(target.candidate_id || "");
+          const label = target.road_name || target.matched_route || candidateId || "Target";
+          const score = Number(target.score);
+          const probability = Number(target.predicted_site_probability);
+          return `
+            <button
+              type="button"
+              class="route-count-target"
+              data-route-count-candidate="${escapeAttr(candidateId)}"
+              data-route-count-latitude="${escapeAttr(target.latitude)}"
+              data-route-count-longitude="${escapeAttr(target.longitude)}"
+            >
+              <strong>${escapeHtml(`#${target.rank ?? ""}`)}</strong>
+              <span>${escapeHtml(label)}</span>
+              <small>${Number.isFinite(score) ? Math.round(score) : "n/a"} · ${formatPercent(probability)}</small>
+            </button>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function focusRouteCountTarget(button) {
+  const candidateId = String(button.dataset.routeCountCandidate || "");
+  if (candidateId && state.featureById.has(candidateId)) {
+    selectFeature(candidateId, { pan: true });
+    setFilterPanelOpen(false);
+    return;
+  }
+
+  const latitude = Number(button.dataset.routeCountLatitude);
+  const longitude = Number(button.dataset.routeCountLongitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || !state.map) return;
+  centerMapOnPoint([latitude, longitude]);
+  L.popup(selectedPopupOptions())
+    .setLatLng([latitude, longitude])
+    .setContent(`<div class="popup-title">Route-count target</div>`)
+    .openOn(state.map);
+  setFilterPanelOpen(false);
+}
+
+function showRouteCountMessage(message) {
+  if (!els.routeCountResult) return;
+  els.routeCountResult.innerHTML = escapeHtml(message);
 }
 
 function normalizeFeature(feature) {

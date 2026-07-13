@@ -14,5 +14,7 @@
     41.694131000000006,
     -73.92673921188366,
     42.159602886073976
-  ]
+  ],
+  "route_count_rows": 236188,
+  "route_count_source": "route_count_source.geojson.gz"
 }

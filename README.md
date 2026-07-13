@@ -310,6 +310,7 @@ Then it should commit or deploy these regenerated files:
 
 ```text
 web/data/findings.geojson
+web/data/route_count_source.geojson.gz
 web/data/summary.json
 web/data/model_summary.json
 ```
@@ -337,7 +338,8 @@ The main production-like workflow is:
 10. Score all candidates with interpretable evidence.
 11. Train and compare supervised models when enough positives and negatives exist.
 12. Blend evidence and supervised probability into discovery rankings.
-13. Export `web/data/findings.geojson`, `summary.json`, and `model_summary.json`.
+13. Export `web/data/findings.geojson`, `route_count_source.geojson.gz`,
+    `summary.json`, and `model_summary.json`.
 
 ## Setup
 
@@ -517,6 +519,7 @@ After a fresh run, these files should exist and be non-empty:
 
 ```text
 web/data/findings.geojson
+web/data/route_count_source.geojson.gz
 web/data/summary.json
 web/data/model_summary.json
 reports/actual_ulster_field_report_metrics.json

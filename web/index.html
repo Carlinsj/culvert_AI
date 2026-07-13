@@ -91,6 +91,24 @@
               <input id="show-known" type="checkbox" />
               <span>Include known culverts in list</span>
             </label>
+
+            <div class="route-count-panel" aria-label="Route count prediction">
+              <label class="control-label" for="route-count-input">Route count</label>
+              <div class="route-count-row">
+                <input id="route-count-input" type="search" placeholder="Optional route; blank counts all" />
+                <button id="route-count-run" type="button">Count</button>
+              </div>
+              <div class="route-count-actions">
+                <button id="route-count-kingston" type="button">Kingston</button>
+              </div>
+              <label class="toggle-row route-count-toggle">
+                <input id="route-count-viewport" type="checkbox" checked />
+                <span>Count current map view</span>
+              </label>
+              <div id="route-count-result" class="route-count-result" role="status" aria-live="polite">
+                Leave route blank to count all visible routes.
+              </div>
+            </div>
           </section>
 
           <ol id="candidate-list" class="candidate-list"></ol>

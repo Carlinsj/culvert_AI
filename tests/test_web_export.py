@@ -1,7 +1,15 @@
+import gzip
+import json
+
 import geopandas as gpd
 from shapely.geometry import Point
 
-from culvert_ai.web_export import _decluster_for_web, _limit_for_web, _prediction_export_pool
+from culvert_ai.web_export import (
+    _decluster_for_web,
+    _limit_for_web,
+    _prediction_export_pool,
+    export_web_data,
+)
 
 
 def test_limit_for_web_exports_discovery_candidates_only():
@@ -182,6 +190,64 @@ def test_prediction_export_pool_removes_known_and_denied_rows():
     filtered = _prediction_export_pool(predictions)
 
     assert filtered["candidate_id"].tolist() == ["discovery"]
+
+
+def test_export_web_data_writes_full_route_count_source(tmp_path):
+    predictions = gpd.GeoDataFrame(
+        [
+            {
+                "candidate_id": "route-a",
+                "discovery_status": "undiscovered_candidate",
+                "discovery_rank": 1,
+                "discovery_score": 80.0,
+                "culvert_probability": 0.8,
+                "dist_to_known_culvert_m": 100.0,
+                "matched_route": "212",
+                "road_name": "State Rte 212",
+                "geometry": Point(-74.0, 42.0),
+            },
+            {
+                "candidate_id": "route-b",
+                "discovery_status": "undiscovered_candidate",
+                "discovery_rank": 2,
+                "discovery_score": 70.0,
+                "culvert_probability": 0.7,
+                "dist_to_known_culvert_m": 100.0,
+                "matched_route": "212",
+                "road_name": "State Rte 212",
+                "geometry": Point(-74.01, 42.01),
+            },
+            {
+                "candidate_id": "route-c",
+                "discovery_status": "undiscovered_candidate",
+                "discovery_rank": 3,
+                "discovery_score": 60.0,
+                "culvert_probability": 0.6,
+                "dist_to_known_culvert_m": 100.0,
+                "matched_route": "32",
+                "road_name": "State Rte 32",
+                "geometry": Point(-74.02, 42.02),
+            },
+        ],
+        geometry="geometry",
+        crs="EPSG:4326",
+    )
+    predictions_path = tmp_path / "predictions.geojson"
+    output_dir = tmp_path / "web"
+    predictions.to_file(predictions_path, driver="GeoJSON")
+
+    result = export_web_data(predictions_path, output_dir, limit=1)
+
+    findings = json.loads((output_dir / "findings.geojson").read_text(encoding="utf-8"))
+    summary = json.loads((output_dir / "summary.json").read_text(encoding="utf-8"))
+    with gzip.open(result["route_count_source"], "rt", encoding="utf-8") as handle:
+        route_count_source = json.load(handle)
+
+    assert len(findings["features"]) == 1
+    assert len(route_count_source["features"]) == 3
+    assert summary["route_count_rows"] == 3
+    assert summary["route_count_source"] == "route_count_source.geojson.gz"
+    assert route_count_source["features"][0]["properties"]["matched_route"] == "212"
 
 
 def test_decluster_for_web_applies_spacing_and_road_cap():
