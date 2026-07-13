@@ -51,7 +51,7 @@ const MAP_MAX_ZOOM = 20;
 const MAX_LIST_ITEMS = 250;
 const CANDIDATE_HIT_TOLERANCE_PX = 8;
 const CANDIDATE_LABEL_MIN_ZOOM = 18;
-const CANDIDATE_LABEL_MAX_POINTS = 260;
+const CANDIDATE_LABEL_MAX_POINTS = 90;
 const KINGSTON_ROUTE_COUNT_BOUNDS = [
   [41.86, -74.1],
   [42.02, -73.9],
@@ -541,6 +541,7 @@ async function updateBackendStatus() {
   if (!els.backendStatus) return;
   if (!hasApiBackend()) {
     els.backendStatus.textContent = "Static preview";
+    appendLocalObservationStatus();
     return;
   }
 
@@ -551,6 +552,15 @@ async function updateBackendStatus() {
     els.backendStatus.textContent = dataReady && pythonReady ? "Backend ready" : "Backend needs setup";
   } catch {
     els.backendStatus.textContent = "Static preview";
+  }
+  appendLocalObservationStatus();
+}
+
+function appendLocalObservationStatus() {
+  if (!els.backendStatus) return;
+  const localCount = loadLocalObservations().length;
+  if (localCount > 0) {
+    els.backendStatus.textContent = `${els.backendStatus.textContent} · ${localCount} unsynced local`;
   }
 }
 
@@ -2197,8 +2207,11 @@ function createCandidateCanvasLayer() {
         drawCandidateCanvasPoint(context, item);
       }
 
+      const suppressPredictionLabels = state.routeTargetsActive;
       const labelItems =
-        zoom >= CANDIDATE_LABEL_MIN_ZOOM && drawItems.length <= CANDIDATE_LABEL_MAX_POINTS
+        !suppressPredictionLabels &&
+        zoom >= CANDIDATE_LABEL_MIN_ZOOM &&
+        drawItems.length <= CANDIDATE_LABEL_MAX_POINTS
           ? drawItems
           : drawItems.filter((item) => item.selected || isFieldObservedKnown(item.props));
       drawCandidateCanvasLabels(context, labelItems, zoom);
@@ -2573,6 +2586,7 @@ async function saveObservation(payload) {
   if (!hasApiBackend()) {
     storeLocalObservation(feature);
     addObservation(feature);
+    updateBackendStatus();
     return { feature, storage: "browser" };
   }
 
@@ -2606,6 +2620,7 @@ async function saveObservation(payload) {
   } catch {
     storeLocalObservation(feature);
     addObservation(feature);
+    updateBackendStatus();
     return { feature, storage: "browser" };
   }
 }
@@ -2613,7 +2628,10 @@ async function saveObservation(payload) {
 async function syncLocalObservationsToServer() {
   if (!hasApiBackend()) return;
   const local = loadLocalObservations();
-  if (!local.length) return;
+  if (!local.length) {
+    appendLocalObservationStatus();
+    return;
+  }
 
   let synced = 0;
   let latestRefresh = null;
@@ -2646,6 +2664,7 @@ async function syncLocalObservationsToServer() {
         preserveSelection: true,
       });
     }
+    updateBackendStatus();
   }
 }
 
