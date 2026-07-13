@@ -53,5 +53,7 @@
   "51": "Soft Voting Ensemble",
   "52": "io.py",
   "53": "evaluate_success_rate_at_actuals",
-  "54": "region.py"
+  "54": "region.py",
+  "55": "isMovedObservation",
+  "56": "render"
 }
