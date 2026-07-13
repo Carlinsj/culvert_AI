@@ -1378,6 +1378,48 @@ function renderFieldObservationList(view) {
   els.list.append(fragment);
 }
 
+function movedRepairActionHtml(feature) {
+  const context = movedRepairContextForObservation(feature);
+  if (!context) return "";
+
+  return `
+    <section class="field-feedback moved-repair" aria-label="Moved target repair">
+      <h4>Moved target</h4>
+      <p class="context-note">Use this only when this saved point came from moving a predicted target.</p>
+      <button type="button" class="secondary-action" data-mark-observation-moved>
+        Mark as MVD from ${escapeHtml(context.readableTarget)}
+      </button>
+      <p id="moved-repair-status" class="feedback-status"></p>
+    </section>
+  `;
+}
+
+function bindMovedRepairAction(feature) {
+  const button = els.detail.querySelector("[data-mark-observation-moved]");
+  if (!button) return;
+  const statusOutput = els.detail.querySelector("#moved-repair-status");
+
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    if (statusOutput) statusOutput.textContent = "Saving as moved target...";
+    try {
+      const result = await saveObservationAsMoved(feature);
+      const observationId = observationIdOf(result.feature);
+      if (statusOutput) {
+        statusOutput.textContent = `Saved as MVD. ${storageMessage(result.storage)}`;
+      }
+      if (observationId) {
+        selectObservation(observationId, { pan: false, openPopup: false });
+      }
+    } catch (error) {
+      button.disabled = false;
+      if (statusOutput) {
+        statusOutput.textContent = `Could not mark as MVD: ${error.message || error}`;
+      }
+    }
+  });
+}
+
 function updateListViewControls() {
   if (els.listHeading) {
     const label = FIELD_VIEW_LABELS[state.listView] || "Ranked";
@@ -2479,6 +2521,48 @@ async function saveObservationAtPoint(latLng, status, notes, options = {}) {
   });
 }
 
+async function saveObservationAsMoved(feature) {
+  const props = feature?.properties || {};
+  const context = movedRepairContextForObservation(feature);
+  if (!context) {
+    throw new Error("This point does not have a target that can be linked as moved.");
+  }
+
+  const existingFieldId =
+    props.field_culvert_id ||
+    (String(props.candidate_id || "").startsWith(CONFIRMED_FIELD_ID_PREFIX) ? props.candidate_id : "") ||
+    makeFieldCulvertId();
+
+  return saveObservation({
+    observation_id: props.observation_id || "",
+    observed_at: props.observed_at || "",
+    status: "confirmed_culvert",
+    notes: props.notes || "",
+    latitude: context.actualLatLng.lat,
+    longitude: context.actualLatLng.lng,
+    candidate_id: existingFieldId,
+    field_culvert_id: existingFieldId,
+    road_name: context.roadName,
+    stream_name: context.streamName,
+    source: "field_added_culvert",
+    layout_source: "moved_route_count_target",
+    layout_scan_summary: `Marked ${context.readableTarget} as moved ${formatNumber(
+      context.offsetMeters,
+      "m",
+    )} to the field-confirmed culvert location.`,
+    predicted_latitude: context.originalLatLng.lat,
+    predicted_longitude: context.originalLatLng.lng,
+    nearest_candidate_id: context.targetId,
+    nearest_candidate_distance_m: context.offsetMeters,
+    missed_candidate_id: context.offsetMeters > PREDICTION_HIT_RADIUS_M ? context.targetId : "",
+    missed_candidate_distance_m: context.offsetMeters > PREDICTION_HIT_RADIUS_M ? context.offsetMeters : null,
+    inferred_from_candidate: context.offsetMeters <= PREDICTION_HIT_RADIUS_M ? 1 : 0,
+    prediction_score: context.predictionScore,
+    priority_rank: context.priorityRank,
+    priority_bucket: context.priorityBucket,
+  });
+}
+
 async function saveObservation(payload) {
   const feature = observationFeatureFromPayload(payload);
 
@@ -2788,8 +2872,10 @@ function renderObservationDetail(feature) {
       <a href="${escapeAttr(mapsUrl)}" target="_blank" rel="noreferrer">Google Maps</a>
       <button type="button" class="danger-action" data-observation-delete="${escapeAttr(props.observation_id || "")}">${escapeHtml(deleteLabel)}</button>
     </div>
+    ${movedRepairActionHtml(feature)}
   `;
   bindDetailCloseAction();
+  bindMovedRepairAction(feature);
 }
 
 function observationPopupHtml(props) {
@@ -3121,6 +3207,59 @@ function routeTargetContextForPoint(latLng, target) {
       ? `Moved ${nearestDisplayId} ${formatNumber(distanceMetersValue, "m")} to the field-confirmed culvert location.`
       : `Moved ${nearestDisplayId} to the field-confirmed culvert location.`,
   };
+}
+
+function movedRepairContextForObservation(feature) {
+  const props = feature?.properties || {};
+  if (isMovedObservation(props)) return null;
+  if (observationStatus(props.status) !== "confirmed_culvert") return null;
+  if (String(props.source || "") !== "field_added_culvert") return null;
+
+  const actualValues = observationLatLng(feature);
+  const actualLatLng = actualValues ? latLngFromValues(actualValues[0], actualValues[1]) : null;
+  if (!actualLatLng) return null;
+
+  const targetFeature = movedRepairTargetFeature(props);
+  if (!targetFeature) return null;
+  const targetValues = featureLatLng(targetFeature);
+  const originalLatLng = targetValues ? latLngFromValues(targetValues[0], targetValues[1]) : null;
+  if (!originalLatLng) return null;
+
+  const targetProps = targetFeature.properties || {};
+  const targetId = idOf(targetFeature);
+  const offsetMeters = distanceMeters(actualLatLng.lat, actualLatLng.lng, originalLatLng.lat, originalLatLng.lng);
+  if (!Number.isFinite(offsetMeters)) return null;
+
+  const score = Number(targetProps.score ?? targetProps.discovery_score);
+  const rank = Number(targetProps.rank ?? targetProps.discovery_rank);
+  return {
+    actualLatLng,
+    originalLatLng,
+    targetId,
+    readableTarget: formatReadableId(targetId),
+    offsetMeters,
+    roadName: props.road_name || targetProps.road_name || "",
+    streamName: props.stream_name || targetProps.stream_name || "",
+    predictionScore: Number.isFinite(score) ? score : null,
+    priorityRank: Number.isFinite(rank) ? rank : null,
+    priorityBucket: targetProps.bucket || bucketFromScore(score),
+  };
+}
+
+function movedRepairTargetFeature(props) {
+  const ids = [
+    props.nearest_candidate_id,
+    props.missed_candidate_id,
+    props.candidate_id,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+
+  for (const id of ids) {
+    if (state.featureById.has(id)) return state.featureById.get(id);
+  }
+
+  return null;
 }
 
 function isMissablePredictionCandidate(props) {
