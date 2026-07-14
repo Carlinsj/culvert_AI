@@ -40,11 +40,11 @@ const LOCATION_RECENTER_THRESHOLD_M = 120;
 const ROUTE_TARGET_AUTO_RADIUS_M = 500;
 const ROUTE_TARGET_AUTO_MIN_MOVE_M = 70;
 const ROUTE_TARGET_AUTO_DEBOUNCE_MS = 900;
-const ROUTE_TARGET_AUTO_TOP_N = 14;
-const ROUTE_TARGET_AUTO_MAP_LIMIT = 4;
-const ROUTE_TARGET_MANUAL_TOP_N = 18;
-const ROUTE_TARGET_MANUAL_MAP_LIMIT = 5;
-const ROUTE_TARGET_MAP_MIN_GAP_PX = 96;
+const ROUTE_TARGET_AUTO_TOP_N = 40;
+const ROUTE_TARGET_AUTO_MAP_LIMIT = 40;
+const ROUTE_TARGET_MANUAL_TOP_N = 80;
+const ROUTE_TARGET_MANUAL_MAP_LIMIT = 80;
+const ROUTE_TARGET_MAP_MIN_GAP_PX = 0;
 const ROUTE_TARGET_CLUSTER_RADIUS_M = 1;
 const ROUTE_TARGET_MANUAL_COOLDOWN_MS = 30000;
 const OSM_MAX_NATIVE_ZOOM = 19;
@@ -884,7 +884,7 @@ function renderRouteCountResult(report, viewLabelOverride = "") {
     ...(report.data_source?.complete ? [] : ["Full route-count source is missing from this deployment."]),
     ...(Array.isArray(report.warnings) ? report.warnings : []),
   ].filter(Boolean);
-  const topTargets = Array.isArray(report.top_clusters) ? report.top_clusters.slice(0, 5) : [];
+  const topTargets = roadRouteTargets(report.top_clusters || []).slice(0, 5);
 
   els.routeCountResult.innerHTML = `
     <div class="route-count-total">
@@ -932,13 +932,14 @@ function routeCountTargetsHtml(targets) {
 function renderRouteCountTargetsOnMap(targets, options = {}) {
   if (!state.routeCountLayer || !Array.isArray(targets)) return 0;
   state.routeCountLayer.clearLayers();
-  targets.forEach((target) => {
+  const roadTargets = roadRouteTargets(targets);
+  roadTargets.forEach((target) => {
     const candidateId = String(target?.candidate_id || "");
     if (candidateId) {
       state.routeCountTargetsById.set(candidateId, target);
     }
   });
-  const visibleTargets = declutterRouteCountTargets(targets, options);
+  const visibleTargets = declutterRouteCountTargets(roadTargets, options);
   visibleTargets.forEach((target, index) => {
     const latitude = Number(target.latitude);
     const longitude = Number(target.longitude);
@@ -960,6 +961,20 @@ function renderRouteCountTargetsOnMap(targets, options = {}) {
   });
   renderSavedMovedOffsetOverlays();
   return visibleTargets.length;
+}
+
+function roadRouteTargets(targets) {
+  return (Array.isArray(targets) ? targets : []).filter(isRoadRouteTarget);
+}
+
+function isRoadRouteTarget(target) {
+  const source = String(target?.source || "").toLowerCase();
+  const matchedRoute = String(target?.matched_route || "").trim();
+  const roadName = String(target?.road_name || "").trim();
+  const roadText = `${roadName} ${matchedRoute}`.toLowerCase();
+  if (source === "route_interval_sample") return true;
+  if (matchedRoute) return true;
+  return /\b(?:route|rte|road|rd|highway|hwy|state|county|us|ny)\b/i.test(roadText);
 }
 
 function declutterRouteCountTargets(targets, options = {}) {
