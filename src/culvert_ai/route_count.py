@@ -270,6 +270,13 @@ def _cluster_predictions(
             cluster_members.append([])
             grid.setdefault(cell, []).append(cluster_id)
         cluster_members[cluster_id].append(int(row_index))
+        member_count = len(cluster_members[cluster_id])
+        if member_count > 1:
+            current = cluster_points[cluster_id]
+            cluster_points[cluster_id] = Point(
+                current.x + (point.x - current.x) / member_count,
+                current.y + (point.y - current.y) / member_count,
+            )
 
     rows = []
     for cluster_id, member_indices in enumerate(cluster_members, start=1):
