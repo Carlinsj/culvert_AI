@@ -7,7 +7,7 @@ from math import atan2, cos, degrees, floor, isnan, radians, sin
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-from shapely.geometry import GeometryCollection, MultiPoint, Point
+from shapely.geometry import GeometryCollection, Point
 from shapely.ops import nearest_points
 
 from culvert_ai.io import add_wgs84_coordinates, clean_geometry, project_layers_to_metric

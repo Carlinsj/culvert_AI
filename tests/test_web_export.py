@@ -99,7 +99,7 @@ def test_limit_for_web_reserves_field_recall_candidates():
     assert len(limited) == 3
 
 
-def test_limit_for_web_keeps_field_scale_discovery_spacing():
+def test_limit_for_web_applies_presentation_spacing_to_discovery_candidates():
     predictions = gpd.GeoDataFrame(
         [
             {
@@ -136,7 +136,40 @@ def test_limit_for_web_keeps_field_scale_discovery_spacing():
 
     limited = _limit_for_web(predictions, limit=3)
 
-    assert limited["candidate_id"].tolist() == ["a1", "a2", "a3"]
+    assert limited["candidate_id"].tolist() == ["a1"]
+
+
+def test_limit_for_web_filters_weak_scores_when_scores_exist():
+    predictions = gpd.GeoDataFrame(
+        [
+            {
+                "candidate_id": "strong",
+                "discovery_status": "undiscovered_candidate",
+                "discovery_rank": 1,
+                "discovery_score": 50.0,
+                "field_recall_score": 0.0,
+                "dist_to_known_culvert_m": 500.0,
+                "road_id": "road-a",
+                "geometry": Point(0, 0),
+            },
+            {
+                "candidate_id": "weak",
+                "discovery_status": "undiscovered_candidate",
+                "discovery_rank": 2,
+                "discovery_score": 25.0,
+                "field_recall_score": 0.0,
+                "dist_to_known_culvert_m": 500.0,
+                "road_id": "road-b",
+                "geometry": Point(100, 0),
+            },
+        ],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+
+    limited = _limit_for_web(predictions, limit=10)
+
+    assert limited["candidate_id"].tolist() == ["strong"]
 
 
 def test_prediction_export_pool_removes_known_and_denied_rows():

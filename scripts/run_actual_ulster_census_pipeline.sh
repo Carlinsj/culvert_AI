@@ -190,7 +190,7 @@ if [ "$BUILD_NUMBERED_ROAD_CANDIDATES" = "1" ] || { [ -n "$EXTRACTED_POINTS_PATH
   if [ "$BUILD_NUMBERED_ROAD_CANDIDATES" = "1" ]; then
     ROUTE_CANDIDATE_ARGS=(
       --roads "$ROADS_PATH"
-      --interval-m "${ROUTE_SAMPLE_INTERVAL_M:-10}"
+      --interval-m "${ROUTE_SAMPLE_INTERVAL_M:-25}"
       --lateral-offsets-m ${ROUTE_NUMBERED_SAMPLE_OFFSETS_M:-0}
       --output data/interim/actual_ulster_route_candidates.gpkg
       --all-numbered-roads
@@ -206,8 +206,8 @@ if [ "$BUILD_NUMBERED_ROAD_CANDIDATES" = "1" ] || { [ -n "$EXTRACTED_POINTS_PATH
   if [ "${#ROUTE_CORRIDOR_ARGS[@]}" -gt 0 ]; then
     OBSERVED_ROUTE_CANDIDATE_ARGS=(
       --roads "$ROADS_PATH"
-      --interval-m "${ROUTE_CORRIDOR_SAMPLE_INTERVAL_M:-10}"
-      --lateral-offsets-m ${ROUTE_CORRIDOR_SAMPLE_OFFSETS_M:--40 -20 0 20 40}
+      --interval-m "${ROUTE_CORRIDOR_SAMPLE_INTERVAL_M:-25}"
+      --lateral-offsets-m ${ROUTE_CORRIDOR_SAMPLE_OFFSETS_M:-0}
       --output data/interim/actual_ulster_observed_route_candidates.gpkg
       --routes "${ROUTE_CORRIDOR_ARGS[@]}"
     )
@@ -223,7 +223,7 @@ if [ "$BUILD_NUMBERED_ROAD_CANDIDATES" = "1" ] || { [ -n "$EXTRACTED_POINTS_PATH
 
   scripts/python.sh -m culvert_ai.cli merge-candidates \
     --inputs data/interim/actual_ulster_candidates.gpkg "${ROUTE_CANDIDATE_INPUTS[@]}" \
-    --min-spacing-m "${MERGE_CANDIDATE_MIN_SPACING_M:-5}" \
+    --min-spacing-m "${MERGE_CANDIDATE_MIN_SPACING_M:-15}" \
     --output data/interim/actual_ulster_candidates_with_route_samples.gpkg
   CANDIDATES_PATH="data/interim/actual_ulster_candidates_with_route_samples.gpkg"
 fi
@@ -404,7 +404,7 @@ fi
 scripts/python.sh -m culvert_ai.cli export-web \
   --predictions data/processed/actual_ulster_discovery_predictions.gpkg \
   --output-dir web/data \
-  --limit "${WEB_EXPORT_LIMIT:-5000}"
+  --limit "${WEB_EXPORT_LIMIT:-1200}"
 
 if [ -f data/processed/confirmed_field_observations.gpkg ]; then
   scripts/python.sh -m culvert_ai.cli evaluate-success-rate \

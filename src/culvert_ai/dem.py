@@ -7,7 +7,6 @@ import urllib.request
 from contextlib import ExitStack
 from pathlib import Path
 
-import geopandas as gpd
 import rasterio
 from rasterio.merge import merge
 

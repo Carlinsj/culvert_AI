@@ -52,8 +52,5 @@
   "50": "normalizeLongitude",
   "51": "Soft Voting Ensemble",
   "52": "io.py",
-  "53": "Path",
-  "54": "Point",
-  "55": "isMovedObservation",
-  "56": "Series"
+  "55": "isMovedObservation"
 }

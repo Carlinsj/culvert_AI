@@ -11,19 +11,23 @@ from culvert_ai.io import ensure_parent_dir
 
 
 DEFAULT_WEIGHTS = {
-    "road_stream_proximity_score": 0.16,
-    "drainage_strength_score": 0.16,
-    "valley_position_score": 0.15,
+    "road_alignment_score": 0.12,
+    "road_stream_proximity_score": 0.14,
+    "drainage_strength_score": 0.15,
+    "valley_position_score": 0.14,
     "crossing_geometry_score": 0.05,
-    "terrain_break_score": 0.12,
-    "road_context_score": 0.05,
-    "dem_route_drainage_score": 0.18,
-    "osm_culvert_tag_score": 0.04,
-    "field_corridor_support_score": 0.08,
+    "terrain_break_score": 0.13,
+    "road_context_score": 0.04,
+    "dem_route_drainage_score": 0.17,
+    "osm_culvert_tag_score": 0.03,
+    "field_corridor_support_score": 0.03,
 }
 
-FIELD_RECALL_MIN_CORRIDOR_SCORE = 0.35
-FIELD_RECALL_MAX_SCORE = 0.62
+FIELD_RECALL_MIN_CORRIDOR_SCORE = 0.55
+FIELD_RECALL_MIN_DEM_ROUTE_SCORE = 0.20
+FIELD_RECALL_MIN_ROAD_ALIGNMENT_SCORE = 0.60
+FIELD_RECALL_MIN_MODEL_SIGNAL = 0.35
+FIELD_RECALL_MAX_SCORE = 0.58
 
 
 def score_unlabeled_candidates(
@@ -39,6 +43,7 @@ def score_unlabeled_candidates(
     weights = weights or DEFAULT_WEIGHTS
     scored = features.copy()
 
+    scored["road_alignment_score"] = _road_alignment_score(scored)
     scored["road_stream_proximity_score"] = _road_stream_proximity_score(scored)
     scored["drainage_strength_score"] = _drainage_strength_score(scored)
     scored["valley_position_score"] = _valley_position_score(scored)
@@ -61,10 +66,12 @@ def score_unlabeled_candidates(
             continue
         score += scored[column].fillna(0.0).astype(float).clip(0, 1) * float(weight)
 
-    scored["culvert_likelihood_score"] = (100 * score / total_weight) - (
+    raw_score = (100 * score / total_weight) - (
         20 * scored["non_culvert_structure_penalty"]
     )
-    scored["culvert_likelihood_score"] = scored["culvert_likelihood_score"].clip(0, 100)
+    scored["culvert_likelihood_score"] = (
+        raw_score * _route_sample_precision_gate(scored)
+    ).clip(0, 100)
     denied = pd.Series(False, index=scored.index)
     if "field_denied" in scored.columns:
         denied = pd.to_numeric(scored["field_denied"], errors="coerce").fillna(0).astype(int) == 1
@@ -112,16 +119,17 @@ def build_discovery_ranking(
     evidence_score = _score_0_to_1(ranked, "culvert_likelihood_score", scale=100.0)
     model_probability = _score_0_to_1(ranked, "culvert_probability", scale=1.0)
     model_rank_score = _model_rank_score(model_probability)
-    field_recall_score = _field_recall_score(ranked, evidence_score, model_rank_score)
+    model_signal = _model_signal_score(model_probability, model_rank_score)
+    field_recall_score = _field_recall_score(ranked, evidence_score, model_signal)
     has_model = model_rank_score.notna()
 
     blended = evidence_score.copy()
     total_weight = evidence_weight + model_weight
     weighted_signal = (
-        evidence_weight * evidence_score.loc[has_model] + model_weight * model_rank_score.loc[has_model]
+        evidence_weight * evidence_score.loc[has_model] + model_weight * model_signal.loc[has_model]
     ) / total_weight
     agreement_signal = np.sqrt(
-        evidence_score.loc[has_model].clip(0, 1) * model_rank_score.loc[has_model].clip(0, 1)
+        evidence_score.loc[has_model].clip(0, 1) * model_signal.loc[has_model].clip(0, 1)
     )
     blended.loc[has_model] = (
         0.55 * agreement_signal + 0.25 * evidence_score.loc[has_model] + 0.20 * weighted_signal
@@ -238,6 +246,21 @@ def _road_stream_proximity_score(table: pd.DataFrame) -> pd.Series:
     distance_score = 1.0 / (1.0 + distance / 20.0)
     exact = table.get("is_exact_road_stream_intersection", pd.Series(0, index=table.index)).fillna(0)
     return (0.75 * distance_score + 0.25 * exact.astype(float)).clip(0, 1)
+
+
+def _road_alignment_score(table: pd.DataFrame) -> pd.Series:
+    if "distance_to_nearest_road_m" not in table.columns:
+        return pd.Series(1.0, index=table.index)
+
+    distance = pd.to_numeric(table["distance_to_nearest_road_m"], errors="coerce").clip(lower=0)
+    return (1.0 / (1.0 + (distance / 12.0) ** 2)).fillna(0.0).clip(0, 1)
+
+
+def _route_sample_precision_gate(table: pd.DataFrame) -> pd.Series:
+    route_signal = _route_sample_signal(table)
+    alignment = _score_0_to_1(table, "road_alignment_score", scale=1.0).fillna(1.0)
+    route_gate = (0.20 + 0.80 * alignment).clip(0, 1)
+    return (1.0 - route_signal + route_signal * route_gate).clip(0, 1)
 
 
 def _drainage_strength_score(table: pd.DataFrame) -> pd.Series:
@@ -482,22 +505,35 @@ def _model_rank_score(model_probability: pd.Series) -> pd.Series:
     return model_probability.rank(pct=True).fillna(0.0).clip(0, 1)
 
 
+def _model_signal_score(model_probability: pd.Series, model_rank_score: pd.Series) -> pd.Series:
+    probability = model_probability.fillna(0.0).clip(0, 1)
+    rank = model_rank_score.fillna(probability).clip(0, 1)
+    return np.sqrt(probability * rank).clip(0, 1)
+
+
 def _field_recall_score(
     table: pd.DataFrame,
     evidence_score: pd.Series,
-    model_rank_score: pd.Series,
+    model_signal_score: pd.Series,
 ) -> pd.Series:
     route_signal = _route_sample_signal(table)
     corridor = _score_0_to_1(table, "field_corridor_support_score", scale=1.0).fillna(0.0)
     dem_route = _score_0_to_1(table, "dem_route_drainage_score", scale=1.0).fillna(0.0)
-    model_signal = model_rank_score.fillna(0.0).clip(0, 1)
+    road_alignment = _score_0_to_1(table, "road_alignment_score", scale=1.0).fillna(1.0)
+    model_signal = model_signal_score.fillna(0.0).clip(0, 1)
     evidence_signal = evidence_score.fillna(0.0).clip(0, 1)
-    eligible = (route_signal > 0) & (corridor >= FIELD_RECALL_MIN_CORRIDOR_SCORE)
+    eligible = (
+        (route_signal > 0)
+        & (corridor >= FIELD_RECALL_MIN_CORRIDOR_SCORE)
+        & (dem_route >= FIELD_RECALL_MIN_DEM_ROUTE_SCORE)
+        & (road_alignment >= FIELD_RECALL_MIN_ROAD_ALIGNMENT_SCORE)
+        & (model_signal >= FIELD_RECALL_MIN_MODEL_SIGNAL)
+    )
     recall = (
-        0.60 * corridor
+        0.45 * corridor
         + 0.25 * model_signal
+        + 0.20 * dem_route
         + 0.10 * evidence_signal
-        + 0.05 * dem_route
     ).clip(0, FIELD_RECALL_MAX_SCORE)
     return recall.where(eligible, 0.0).fillna(0.0)
 

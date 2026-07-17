@@ -1,16 +1,16 @@
-# Graph Report - culvert_AI  (2026-07-15)
+# Graph Report - culvert_AI  (2026-07-14)
 
 ## Corpus Check
-- 72 files · ~120,819 words
+- 72 files · ~120,791 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1070 nodes · 2610 edges · 57 communities (30 shown, 27 thin omitted)
+- 1070 nodes · 2609 edges · 54 communities (32 shown, 22 thin omitted)
 - Extraction: 91% EXTRACTED · 9% INFERRED · 0% AMBIGUOUS · INFERRED: 235 edges (avg confidence: 0.71)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `f39214a2`
+- Built from commit: `5a15815d`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -67,10 +67,7 @@
 - [[_COMMUNITY_normalizeLongitude|normalizeLongitude]]
 - [[_COMMUNITY_Soft Voting Ensemble|Soft Voting Ensemble]]
 - [[_COMMUNITY_io.py|io.py]]
-- [[_COMMUNITY_Path|Path]]
-- [[_COMMUNITY_Point|Point]]
 - [[_COMMUNITY_isMovedObservation|isMovedObservation]]
-- [[_COMMUNITY_Series|Series]]
 
 ## God Nodes (most connected - your core abstractions)
 1. `build_parser()` - 30 edges
@@ -102,7 +99,7 @@
 ## Hyperedges (group relationships)
 - **Contact Sheet Validation Roadmap** — outputs_culvert_ai_research_portfolio_contact_sheet_soft_voting_ensemble, outputs_culvert_ai_research_portfolio_contact_sheet_discovery_score, outputs_culvert_ai_research_portfolio_contact_sheet_validation_roadmap [INFERRED 0.85]
 
-## Communities (57 total, 27 thin omitted)
+## Communities (54 total, 22 thin omitted)
 
 ### Community 0 - "Retraining API"
 Cohesion: 0.08
@@ -112,13 +109,17 @@ Nodes (65): handler(), handler(), appendEvidenceSummary(), applyFeedbackToFindin
 Cohesion: 0.09
 Nodes (58): add_approved_known_dem_similarity_features(), add_candidate_derived_features(), add_dem_culvert_terrain_features(), add_dem_hydrology_proxies(), add_hydrology_raster_features(), add_known_culvert_labels(), add_known_culvert_pattern_features(), add_known_culvert_pattern_score() (+50 more)
 
+### Community 2 - "Candidate Generation"
+Cohesion: 0.14
+Nodes (33): build_route_count_report(), _cluster_predictions(), _cluster_probability_series(), _default_thresholds(), _empty_clusters(), _filter_by_segment(), _line_length_m(), _nearby_cluster_id() (+25 more)
+
 ### Community 3 - "Model Training"
 Cohesion: 0.11
 Nodes (44): ExtraTreesClassifier, Auto Model Family Comparison, Data Quality Improvement Levers, Model Improvement Query, HistGradientBoostingClassifier, ndarray, _balanced_hist_gradient_boosting(), _candidate_models() (+36 more)
 
 ### Community 4 - "Discovery Scoring"
-Cohesion: 0.06
-Nodes (92): DataFrame, GeoDataFrame, Path, Series, build_route_count_report(), _cluster_predictions(), _cluster_probability_series(), _default_thresholds() (+84 more)
+Cohesion: 0.16
+Nodes (40): DataFrame, Series, _attach_supervised_probability(), _boolean_score(), build_discovery_ranking(), _crossing_geometry_score(), _dem_route_drainage_score(), _discovery_evidence_summary() (+32 more)
 
 ### Community 5 - "Map App Core"
 Cohesion: 0.06
@@ -151,6 +152,10 @@ Nodes (40): compactEvidenceSummary(), definitionItem(), detailCell(), discoveryS
 ### Community 13 - "Point Analysis"
 Cohesion: 0.05
 Nodes (87): Point, _actual_id(), evaluate_predictions(), evaluate_success_rate_at_actuals(), _optional_number(), GeoDataFrame, Path, Measure field success as actual culverts with a prediction within max_distance_m (+79 more)
+
+### Community 14 - "Web Export"
+Cohesion: 0.18
+Nodes (24): GeoDataFrame, Path, write_google_earth_kml(), _decluster_for_web(), _drop_exported_candidates(), _export_key_value(), export_web_data(), _field_recall_export_pool() (+16 more)
 
 ### Community 15 - "Census Inputs"
 Cohesion: 0.13
@@ -223,14 +228,14 @@ Nodes (14): bindFeedbackActions(), fieldObservationView(), isConfirmedPrediction
 ## Knowledge Gaps
 - **135 isolated node(s):** `DATA_URLS`, `SUMMARY_URLS`, `MODEL_SUMMARY_URLS`, `OBSERVATION_STATUSES`, `FIELD_VIEW_LABELS` (+130 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **27 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **22 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `build_feature_table()` connect `Feature Engineering` to `CLI Pipeline`, `Model Training`, `Census Inputs`?**
-  _High betweenness centrality (0.012) - this node is a cross-community bridge._
-- **Why does `score_unlabeled_candidates()` connect `Discovery Scoring` to `Model Training`, `Census Inputs`?**
+  _High betweenness centrality (0.011) - this node is a cross-community bridge._
+- **Why does `run_demo_pipeline()` connect `Census Inputs` to `Feature Engineering`, `Model Training`, `Discovery Scoring`, `CLI Pipeline`, `Point Analysis`, `Web Export`?**
   _High betweenness centrality (0.008) - this node is a cross-community bridge._
 - **Why does `write_vector()` connect `Point Analysis` to `Census Inputs`?**
   _High betweenness centrality (0.007) - this node is a cross-community bridge._
@@ -238,7 +243,7 @@ _Questions this graph is uniquely positioned to answer:_
   _`build_parser()` has 27 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 10 inferred relationships involving `build_feature_table()` (e.g. with `_build_features()` and `run_demo_pipeline()`) actually correct?**
   _`build_feature_table()` has 10 INFERRED edges - model-reasoned connections that need verification._
-- **What connects `DATA_URLS`, `SUMMARY_URLS`, `MODEL_SUMMARY_URLS` to the rest of the system?**
+- **Are the 6 inferred relationships involving `score_unlabeled_candidates()` (e.g. with `run_demo_pipeline()` and `_evidence_summary()`) actually correct?**
+  _`score_unlabeled_candidates()` has 6 INFERRED edges - model-reasoned connections that need verification._
+- **What connects `Rank likely culvert locations without local known culvert labels.      This is n`, `Create a field-work ranking that prioritizes not-yet-observed candidates.      F`, `DATA_URLS` to the rest of the system?**
   _153 weakly-connected nodes found - possible documentation gaps or missing edges._
-- **Should `Retraining API` be split into smaller, more focused modules?**
-  _Cohesion score 0.0776255707762557 - nodes in this community are weakly interconnected._

@@ -1,16 +1,16 @@
-# Graph Report - culvert_AI  (2026-07-15)
+# Graph Report - culvert_AI  (2026-07-14)
 
 ## Corpus Check
-- 72 files · ~120,819 words
+- 72 files · ~120,791 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1070 nodes · 2610 edges · 57 communities (30 shown, 27 thin omitted)
+- 1069 nodes · 2609 edges · 56 communities (38 shown, 18 thin omitted)
 - Extraction: 91% EXTRACTED · 9% INFERRED · 0% AMBIGUOUS · INFERRED: 235 edges (avg confidence: 0.71)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `f39214a2`
+- Built from commit: `4143d1ad`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -67,17 +67,16 @@
 - [[_COMMUNITY_normalizeLongitude|normalizeLongitude]]
 - [[_COMMUNITY_Soft Voting Ensemble|Soft Voting Ensemble]]
 - [[_COMMUNITY_io.py|io.py]]
-- [[_COMMUNITY_Path|Path]]
-- [[_COMMUNITY_Point|Point]]
+- [[_COMMUNITY_evaluate_success_rate_at_actuals|evaluate_success_rate_at_actuals]]
+- [[_COMMUNITY_region.py|region.py]]
 - [[_COMMUNITY_isMovedObservation|isMovedObservation]]
-- [[_COMMUNITY_Series|Series]]
 
 ## God Nodes (most connected - your core abstractions)
 1. `build_parser()` - 30 edges
 2. `build_feature_table()` - 29 edges
 3. `escapeHtml()` - 23 edges
-4. `score_unlabeled_candidates()` - 22 edges
-5. `write_vector()` - 22 edges
+4. `write_vector()` - 22 edges
+5. `score_unlabeled_candidates()` - 22 edges
 6. `bindControls()` - 21 edges
 7. `renderList()` - 21 edges
 8. `_records_from_text()` - 21 edges
@@ -89,12 +88,12 @@
   outputs/culvert-ai-research-portfolio.pdf → model.md
 - `Supervised Classification Task` --semantically_similar_to--> `Supervised Model`  [INFERRED] [semantically similar]
   outputs/culvert-ai-research-portfolio.pdf → model.md
-- `Model Improvement Query` --references--> `score_unlabeled_candidates()`  [EXTRACTED]
-  graphify-out/memory/query_20260707_173049_now_how_to_improve_model_train_this_model_or_switc.md → src/culvert_ai/scoring.py
-- `Model Improvement Query` --references--> `build_discovery_ranking()`  [EXTRACTED]
-  graphify-out/memory/query_20260707_173049_now_how_to_improve_model_train_this_model_or_switc.md → src/culvert_ai/scoring.py
 - `Data Needed` --semantically_similar_to--> `Accuracy Bottlenecks`  [INFERRED] [semantically similar]
   docs/research_notes.md → README.md
+- `Model Improvement Query` --references--> `build_feature_table()`  [EXTRACTED]
+  graphify-out/memory/query_20260707_173049_now_how_to_improve_model_train_this_model_or_switc.md → src/culvert_ai/features.py
+- `Model Improvement Query` --references--> `score_unlabeled_candidates()`  [EXTRACTED]
+  graphify-out/memory/query_20260707_173049_now_how_to_improve_model_train_this_model_or_switc.md → src/culvert_ai/scoring.py
 
 ## Import Cycles
 - None detected.
@@ -102,7 +101,7 @@
 ## Hyperedges (group relationships)
 - **Contact Sheet Validation Roadmap** — outputs_culvert_ai_research_portfolio_contact_sheet_soft_voting_ensemble, outputs_culvert_ai_research_portfolio_contact_sheet_discovery_score, outputs_culvert_ai_research_portfolio_contact_sheet_validation_roadmap [INFERRED 0.85]
 
-## Communities (57 total, 27 thin omitted)
+## Communities (56 total, 18 thin omitted)
 
 ### Community 0 - "Retraining API"
 Cohesion: 0.08
@@ -112,13 +111,17 @@ Nodes (65): handler(), handler(), appendEvidenceSummary(), applyFeedbackToFindin
 Cohesion: 0.09
 Nodes (58): add_approved_known_dem_similarity_features(), add_candidate_derived_features(), add_dem_culvert_terrain_features(), add_dem_hydrology_proxies(), add_hydrology_raster_features(), add_known_culvert_labels(), add_known_culvert_pattern_features(), add_known_culvert_pattern_score() (+50 more)
 
+### Community 2 - "Candidate Generation"
+Cohesion: 0.14
+Nodes (33): build_route_count_report(), _cluster_predictions(), _cluster_probability_series(), _default_thresholds(), _empty_clusters(), _filter_by_segment(), _line_length_m(), _nearby_cluster_id() (+25 more)
+
 ### Community 3 - "Model Training"
 Cohesion: 0.11
 Nodes (44): ExtraTreesClassifier, Auto Model Family Comparison, Data Quality Improvement Levers, Model Improvement Query, HistGradientBoostingClassifier, ndarray, _balanced_hist_gradient_boosting(), _candidate_models() (+36 more)
 
 ### Community 4 - "Discovery Scoring"
-Cohesion: 0.06
-Nodes (92): DataFrame, GeoDataFrame, Path, Series, build_route_count_report(), _cluster_predictions(), _cluster_probability_series(), _default_thresholds() (+84 more)
+Cohesion: 0.15
+Nodes (43): _attach_supervised_probability(), _boolean_score(), build_discovery_ranking(), _crossing_geometry_score(), _dem_route_drainage_score(), _discovery_evidence_summary(), _drainage_strength_score(), _evidence_summary() (+35 more)
 
 ### Community 5 - "Map App Core"
 Cohesion: 0.06
@@ -148,17 +151,29 @@ Nodes (33): appendObservation(), canRead(), DATA_DIR, deleteObservation(), __dir
 Cohesion: 0.09
 Nodes (40): compactEvidenceSummary(), definitionItem(), detailCell(), discoveryStatusLabel(), draftPointSaveHtml(), drainageLabel(), escapeAttr(), escapeHtml() (+32 more)
 
+### Community 12 - "renderDetail"
+Cohesion: 0.28
+Nodes (14): _clean_float(), _clean_string(), import_llm_reviewed_labels(), Any, Path, _queue_row(), _read_jsonl(), _review_id() (+6 more)
+
 ### Community 13 - "Point Analysis"
-Cohesion: 0.05
-Nodes (87): Point, _actual_id(), evaluate_predictions(), evaluate_success_rate_at_actuals(), _optional_number(), GeoDataFrame, Path, Measure field success as actual culverts with a prediction within max_distance_m (+79 more)
+Cohesion: 0.24
+Nodes (19): _analysis_flag(), analyze_extracted_points(), _attach_nearest_candidate(), _attach_nearest_line(), _candidate_score(), _cluster_ids(), _distance_stats(), _feature_name() (+11 more)
+
+### Community 14 - "Web Export"
+Cohesion: 0.18
+Nodes (24): GeoDataFrame, Path, Series, _decluster_for_web(), _drop_exported_candidates(), _export_key_value(), export_web_data(), _field_recall_export_pool() (+16 more)
 
 ### Community 15 - "Census Inputs"
-Cohesion: 0.13
-Nodes (30): LineString, _county_boundary(), _download_if_missing(), download_ulster_census_inputs(), _normalize_linear_water(), _normalize_roads(), GeoDataFrame, Path (+22 more)
+Cohesion: 0.19
+Nodes (21): LineString, create_demo_dataset(), _demo_known_culverts(), _demo_roads(), _demo_streams(), _move_to_ulster_pilot(), GeoDataFrame, Path (+13 more)
 
 ### Community 16 - "LLM Label Import"
 Cohesion: 0.06
 Nodes (38): Example Candidate Generation Parameters, Example Feature Parameters, Example Model Parameters, Example Project Configuration, Ulster Candidate Generation Parameters, Ulster Model Parameters, Ulster Poughkeepsie Project Configuration, Candidate Generation (+30 more)
+
+### Community 17 - "renderDraftPointDetail"
+Cohesion: 0.32
+Nodes (15): Point, ensure_parent_dir(), Path, read_vector(), write_vector(), merge_confirmed_observations(), write_high_confidence_training_points(), test_merge_confirmed_observations_adds_confirmed_points() (+7 more)
 
 ### Community 18 - "DEM Acquisition"
 Cohesion: 0.23
@@ -212,9 +227,25 @@ Nodes (26): Data Needed, Field Search Time Bottleneck, LLM Role Boundary, Resear
 Cohesion: 0.29
 Nodes (6): findings, modelSummary, requiredFiles, root, routeCountSource, summary
 
+### Community 36 - "observations.py"
+Cohesion: 0.34
+Nodes (16): _confirmed_observations_as_known(), _date_part(), _dedupe_observation_rows(), _denied_observations_as_negative(), _empty_observation_labels(), _field_negative_observations(), _first_non_empty_series(), _is_prediction_candidate_id() (+8 more)
+
 ### Community 50 - "normalizeLongitude"
 Cohesion: 0.10
 Nodes (33): bucketFromScore(), clusterCanvasCandidateItems(), compareCanvasCandidatePriority(), declutterCanvasItems(), distanceMeters(), featureLatLng(), fitVisibleMarkers(), idOf() (+25 more)
+
+### Community 52 - "io.py"
+Cohesion: 0.24
+Nodes (14): _county_boundary(), _download_if_missing(), download_ulster_census_inputs(), _normalize_linear_water(), _normalize_roads(), GeoDataFrame, Path, Download actual county-level TIGER/Line roads and linear-water data for Ulster C (+6 more)
+
+### Community 53 - "evaluate_success_rate_at_actuals"
+Cohesion: 0.29
+Nodes (10): _actual_id(), evaluate_predictions(), evaluate_success_rate_at_actuals(), _optional_number(), GeoDataFrame, Path, Measure field success as actual culverts with a prediction within max_distance_m, _unknown_prediction_pool() (+2 more)
+
+### Community 54 - "region.py"
+Cohesion: 0.38
+Nodes (8): filter_to_region(), get_region(), GeoDataFrame, Path, Region, region_boundary(), write_region_boundary(), test_filter_to_ulster_poughkeepsie_region()
 
 ### Community 55 - "isMovedObservation"
 Cohesion: 0.22
@@ -223,22 +254,22 @@ Nodes (14): bindFeedbackActions(), fieldObservationView(), isConfirmedPrediction
 ## Knowledge Gaps
 - **135 isolated node(s):** `DATA_URLS`, `SUMMARY_URLS`, `MODEL_SUMMARY_URLS`, `OBSERVATION_STATUSES`, `FIELD_VIEW_LABELS` (+130 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **27 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **18 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `build_feature_table()` connect `Feature Engineering` to `CLI Pipeline`, `Model Training`, `Census Inputs`?**
-  _High betweenness centrality (0.012) - this node is a cross-community bridge._
-- **Why does `score_unlabeled_candidates()` connect `Discovery Scoring` to `Model Training`, `Census Inputs`?**
-  _High betweenness centrality (0.008) - this node is a cross-community bridge._
-- **Why does `write_vector()` connect `Point Analysis` to `Census Inputs`?**
-  _High betweenness centrality (0.007) - this node is a cross-community bridge._
+  _High betweenness centrality (0.009) - this node is a cross-community bridge._
+- **Why does `write_vector()` connect `renderDraftPointDetail` to `renderDetail`, `Point Analysis`, `Census Inputs`, `io.py`, `region.py`?**
+  _High betweenness centrality (0.009) - this node is a cross-community bridge._
+- **Why does `build_discovery_ranking()` connect `Discovery Scoring` to `Model Training`?**
+  _High betweenness centrality (0.009) - this node is a cross-community bridge._
 - **Are the 27 inferred relationships involving `build_parser()` (e.g. with `_add_field_report_candidates()` and `_analyze_extracted_points()`) actually correct?**
   _`build_parser()` has 27 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 10 inferred relationships involving `build_feature_table()` (e.g. with `_build_features()` and `run_demo_pipeline()`) actually correct?**
   _`build_feature_table()` has 10 INFERRED edges - model-reasoned connections that need verification._
+- **Are the 18 inferred relationships involving `write_vector()` (e.g. with `download_ulster_census_inputs()` and `create_demo_dataset()`) actually correct?**
+  _`write_vector()` has 18 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `DATA_URLS`, `SUMMARY_URLS`, `MODEL_SUMMARY_URLS` to the rest of the system?**
   _153 weakly-connected nodes found - possible documentation gaps or missing edges._
-- **Should `Retraining API` be split into smaller, more focused modules?**
-  _Cohesion score 0.0776255707762557 - nodes in this community are weakly interconnected._

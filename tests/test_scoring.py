@@ -148,6 +148,53 @@ def test_score_unlabeled_candidates_promotes_approved_known_corridor_pattern():
     ]
 
 
+def test_score_unlabeled_candidates_penalizes_off_road_route_samples():
+    features = gpd.GeoDataFrame(
+        [
+            {
+                "candidate_id": "near-road",
+                "source": "route_interval_sample",
+                "distance_to_nearest_road_m": 2.0,
+                "road_stream_distance_m": np.nan,
+                "valley_depth_9x9_m": 3.0,
+                "topographic_wetness_proxy_9x9": 1.0,
+                "low_slope_valley_score_31x31": 0.8,
+                "terrain_break_score_proxy_9x9": 2.0,
+                "stream_density_250m_m_per_sqkm": 40,
+                "road_density_250m_m_per_sqkm": 80,
+                "latitude": 42.12,
+                "longitude": -73.94,
+                "geometry": Point(0, 0),
+            },
+            {
+                "candidate_id": "off-road",
+                "source": "route_interval_sample",
+                "distance_to_nearest_road_m": 40.0,
+                "road_stream_distance_m": np.nan,
+                "valley_depth_9x9_m": 3.0,
+                "topographic_wetness_proxy_9x9": 1.0,
+                "low_slope_valley_score_31x31": 0.8,
+                "terrain_break_score_proxy_9x9": 2.0,
+                "stream_density_250m_m_per_sqkm": 40,
+                "road_density_250m_m_per_sqkm": 80,
+                "latitude": 42.13,
+                "longitude": -73.95,
+                "geometry": Point(40, 0),
+            },
+        ],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+
+    scored = score_unlabeled_candidates(features).set_index("candidate_id")
+
+    assert scored.loc["near-road", "road_alignment_score"] > 0.9
+    assert scored.loc["off-road", "road_alignment_score"] < 0.1
+    assert scored.loc["near-road", "culvert_likelihood_score"] > (
+        2 * scored.loc["off-road", "culvert_likelihood_score"]
+    )
+
+
 def test_discovery_ranking_prioritizes_undiscovered_candidates():
     evidence = gpd.GeoDataFrame(
         [
@@ -197,7 +244,8 @@ def test_discovery_ranking_applies_bounded_field_recall_to_route_samples():
                 "source": "route_interval_sample",
                 "culvert_likelihood_score": 35.0,
                 "dem_route_drainage_score": 0.30,
-                "field_corridor_support_score": 0.50,
+                "field_corridor_support_score": 0.65,
+                "road_alignment_score": 1.0,
                 "is_culvert": 0,
                 "dist_to_known_culvert_m": 450.0,
                 "latitude": 42.12,
@@ -210,6 +258,7 @@ def test_discovery_ranking_applies_bounded_field_recall_to_route_samples():
                 "culvert_likelihood_score": 48.0,
                 "dem_route_drainage_score": 0.30,
                 "field_corridor_support_score": 0.0,
+                "road_alignment_score": 1.0,
                 "is_culvert": 0,
                 "dist_to_known_culvert_m": 3000.0,
                 "latitude": 42.13,
@@ -243,10 +292,69 @@ def test_discovery_ranking_applies_bounded_field_recall_to_route_samples():
         known_radius_m=10,
     ).set_index("candidate_id")
 
-    assert 50.0 < ranked.loc["corridor", "field_recall_score"] <= 70.0
+    assert 50.0 < ranked.loc["corridor", "field_recall_score"] <= 60.0
     assert ranked.loc["corridor", "discovery_score"] > 35.0
     assert ranked.loc["corridor", "discovery_score"] > ranked.loc["other", "discovery_score"]
     assert ranked.loc["other", "field_recall_score"] == 0
+
+
+def test_discovery_ranking_does_not_promote_low_probability_corridor_samples():
+    evidence = gpd.GeoDataFrame(
+        [
+            {
+                "candidate_id": "weak-model-corridor",
+                "source": "route_interval_sample",
+                "culvert_likelihood_score": 45.0,
+                "dem_route_drainage_score": 0.45,
+                "field_corridor_support_score": 0.90,
+                "road_alignment_score": 1.0,
+                "is_culvert": 0,
+                "dist_to_known_culvert_m": 450.0,
+                "latitude": 42.12,
+                "longitude": -73.94,
+                "geometry": Point(-73.94, 42.12),
+            },
+            {
+                "candidate_id": "weaker-model-corridor",
+                "source": "route_interval_sample",
+                "culvert_likelihood_score": 44.0,
+                "dem_route_drainage_score": 0.45,
+                "field_corridor_support_score": 0.90,
+                "road_alignment_score": 1.0,
+                "is_culvert": 0,
+                "dist_to_known_culvert_m": 500.0,
+                "latitude": 42.13,
+                "longitude": -73.95,
+                "geometry": Point(-73.95, 42.13),
+            },
+        ],
+        geometry="geometry",
+        crs="EPSG:4326",
+    )
+    supervised = gpd.GeoDataFrame(
+        [
+            {
+                "candidate_id": "weak-model-corridor",
+                "culvert_probability": 0.05,
+                "geometry": Point(-73.94, 42.12),
+            },
+            {
+                "candidate_id": "weaker-model-corridor",
+                "culvert_probability": 0.04,
+                "geometry": Point(-73.95, 42.13),
+            },
+        ],
+        geometry="geometry",
+        crs="EPSG:4326",
+    )
+
+    ranked = build_discovery_ranking(evidence, supervised_predictions=supervised).set_index(
+        "candidate_id"
+    )
+
+    assert ranked.loc["weak-model-corridor", "model_rank_score"] == 100.0
+    assert ranked.loc["weak-model-corridor", "field_recall_score"] == 0.0
+    assert ranked.loc["weak-model-corridor", "discovery_score"] < 45.0
 
 
 def test_discovery_ranking_does_not_count_50m_as_known_match():

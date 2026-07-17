@@ -205,9 +205,9 @@
     "semantic_hash": "d7f7509d20e6c0ef986f2da3f316cb05"
   },
   "src/culvert_ai/scoring.py": {
-    "mtime": 1784064236.993893,
-    "ast_hash": "e1a154cb685c7850b867d1307c5c8134",
-    "semantic_hash": ""
+    "mtime": 1783537378.9788141,
+    "ast_hash": "0792cc351feb6f25ef5e652dded969c4",
+    "semantic_hash": "0792cc351feb6f25ef5e652dded969c4"
   },
   "src/culvert_ai/web_export.py": {
     "mtime": 1783942279.7248068,
@@ -280,18 +280,18 @@
     "semantic_hash": ""
   },
   "web/app.js": {
-    "mtime": 1784145607.8858287,
-    "ast_hash": "b956165e4c90f7722314c3aba3e406b2",
+    "mtime": 1784062523.1962001,
+    "ast_hash": "276954d468e5ab43d9d293f72ac7c370",
     "semantic_hash": ""
   },
   "web/data/model_summary.json": {
-    "mtime": 1784064112.0716243,
-    "ast_hash": "1020fad773303f0662029a7cd3d743cf",
+    "mtime": 1783913851.2836971,
+    "ast_hash": "eeb80f4f59645ba604bf2839f5b8c541",
     "semantic_hash": ""
   },
   "web/data/summary.json": {
-    "mtime": 1784064332.5460718,
-    "ast_hash": "59d5c76a2bc3f16ff166501ff413a04c",
+    "mtime": 1783942437.8215213,
+    "ast_hash": "536504537b78c5103168af3d9134b927",
     "semantic_hash": ""
   },
   "README.md": {
@@ -365,8 +365,8 @@
     "semantic_hash": ""
   },
   "src/culvert_ai/route_count.py": {
-    "mtime": 1784145499.905813,
-    "ast_hash": "e3e846b6eefba32743250c4bf67bba43",
+    "mtime": 1783941782.2241166,
+    "ast_hash": "de1b681e61ab625d593f738055a074a9",
     "semantic_hash": ""
   },
   "tests/test_route_count.py": {

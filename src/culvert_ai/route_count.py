@@ -21,6 +21,7 @@ DEFAULT_SCORE_COLUMNS = (
     "culvert_likelihood_score",
     "culvert_probability",
 )
+KNOWN_ROUTE_COUNT_EXCLUSION_RADIUS_M = 35.0
 ROUTE_TOKEN_RE = re.compile(
     r"\b(?P<prefix>NY|NYS|US|U\.S\.|I|CR|COUNTY|STATE)\s*-?\s*"
     r"(?:(?:HWY|HIGHWAY|RTE|ROUTE|RT|ROAD|RD)\s*-?\s*)?"
@@ -512,6 +513,9 @@ def _unknown_prediction_pool(predictions: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     if "is_known_field_match" in filtered.columns:
         known = pd.to_numeric(filtered["is_known_field_match"], errors="coerce").fillna(0).astype(int)
         filtered = filtered[known != 1]
+    if "dist_to_known_culvert_m" in filtered.columns:
+        distance = pd.to_numeric(filtered["dist_to_known_culvert_m"], errors="coerce")
+        filtered = filtered[distance.isna() | (distance > KNOWN_ROUTE_COUNT_EXCLUSION_RADIUS_M)]
     return filtered.copy()
 
 

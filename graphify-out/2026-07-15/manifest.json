@@ -280,8 +280,8 @@
     "semantic_hash": ""
   },
   "web/app.js": {
-    "mtime": 1784145607.8858287,
-    "ast_hash": "b956165e4c90f7722314c3aba3e406b2",
+    "mtime": 1784062523.1962001,
+    "ast_hash": "276954d468e5ab43d9d293f72ac7c370",
     "semantic_hash": ""
   },
   "web/data/model_summary.json": {
@@ -365,8 +365,8 @@
     "semantic_hash": ""
   },
   "src/culvert_ai/route_count.py": {
-    "mtime": 1784145499.905813,
-    "ast_hash": "e3e846b6eefba32743250c4bf67bba43",
+    "mtime": 1783941782.2241166,
+    "ast_hash": "de1b681e61ab625d593f738055a074a9",
     "semantic_hash": ""
   },
   "tests/test_route_count.py": {

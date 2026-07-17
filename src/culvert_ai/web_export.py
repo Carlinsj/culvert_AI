@@ -36,7 +36,10 @@ WEB_COLUMNS = [
     "latitude",
     "longitude",
     "road_stream_distance_m",
+    "distance_to_nearest_road_m",
+    "route_lateral_offset_m",
     "crossing_angle_degrees",
+    "road_alignment_score",
     "road_stream_proximity_score",
     "drainage_strength_score",
     "valley_position_score",
@@ -103,13 +106,14 @@ ROUTE_COUNT_COLUMNS = [
     "nearest_field_report_route",
 ]
 
-KNOWN_EXPORT_EXCLUSION_RADIUS_M = 15.0
-WEB_EXPORT_MIN_SPACING_M = 15.0
-WEB_EXPORT_MAX_PER_ROAD = 1000
-WEB_EXPORT_FIELD_RECALL_SHARE = 0.35
-WEB_EXPORT_FIELD_RECALL_MIN_SCORE = 45.0
-WEB_EXPORT_FIELD_RECALL_MIN_SPACING_M = 15.0
-WEB_EXPORT_FIELD_RECALL_MAX_PER_ROAD = 1000
+KNOWN_EXPORT_EXCLUSION_RADIUS_M = 35.0
+WEB_EXPORT_MIN_SCORE = 35.0
+WEB_EXPORT_MIN_SPACING_M = 45.0
+WEB_EXPORT_MAX_PER_ROAD = 120
+WEB_EXPORT_FIELD_RECALL_SHARE = 0.20
+WEB_EXPORT_FIELD_RECALL_MIN_SCORE = 50.0
+WEB_EXPORT_FIELD_RECALL_MIN_SPACING_M = 60.0
+WEB_EXPORT_FIELD_RECALL_MAX_PER_ROAD = 60
 
 
 def export_web_data(
@@ -204,7 +208,7 @@ def _limit_for_web(predictions: gpd.GeoDataFrame, limit: int) -> gpd.GeoDataFram
     if "discovery_status" not in predictions.columns:
         return predictions.head(limit)
 
-    pool = _prediction_export_pool(predictions)
+    pool = _minimum_score_export_pool(_prediction_export_pool(predictions))
     recall = _field_recall_export_pool(pool)
     recall_limit = int(round(limit * WEB_EXPORT_FIELD_RECALL_SHARE))
     recall = _decluster_for_web(
@@ -245,6 +249,24 @@ def _prediction_export_pool(predictions: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         source = filtered["source"].fillna("").astype(str)
         filtered = filtered[source != "field_report_observed_culvert"]
     return gpd.GeoDataFrame(filtered, geometry="geometry", crs=predictions.crs)
+
+
+def _minimum_score_export_pool(predictions: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    score_column = _score_column(predictions)
+    if not score_column:
+        return predictions
+
+    threshold = (
+        WEB_EXPORT_MIN_SCORE / 100.0
+        if score_column == "culvert_probability"
+        else WEB_EXPORT_MIN_SCORE
+    )
+    score = pd.to_numeric(predictions[score_column], errors="coerce").fillna(0.0)
+    return gpd.GeoDataFrame(
+        predictions[score >= threshold].copy(),
+        geometry="geometry",
+        crs=predictions.crs,
+    )
 
 
 def _field_recall_export_pool(predictions: gpd.GeoDataFrame) -> gpd.GeoDataFrame:

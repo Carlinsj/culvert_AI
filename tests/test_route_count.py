@@ -109,6 +109,34 @@ def test_route_count_report_can_filter_to_walked_segment_buffer():
     assert clusters.iloc[0]["candidate_id"] == "inside"
 
 
+def test_route_count_report_excludes_predictions_near_known_culverts():
+    predictions = gpd.GeoDataFrame(
+        [
+            {
+                "candidate_id": "near-known",
+                "road_name": "State Rte 32",
+                "discovery_score": 80.0,
+                "dist_to_known_culvert_m": 20.0,
+                "geometry": Point(0, 0),
+            },
+            {
+                "candidate_id": "new-site",
+                "road_name": "State Rte 32",
+                "discovery_score": 70.0,
+                "dist_to_known_culvert_m": 100.0,
+                "geometry": Point(100, 0),
+            },
+        ],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+
+    report, clusters = build_route_count_report(predictions, route="32")
+
+    assert report["filtered_prediction_rows"] == 1
+    assert clusters["candidate_id"].tolist() == ["new-site"]
+
+
 def test_write_route_count_report_writes_json_csv_and_geojson(tmp_path):
     predictions_path = tmp_path / "predictions.geojson"
     output_path = tmp_path / "route-count.json"
