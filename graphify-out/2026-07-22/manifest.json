@@ -70,8 +70,8 @@
     "semantic_hash": "70ac533a54eb82d68bf8a9c3c5e4b3d6"
   },
   "scripts/run_actual_ulster_census_pipeline.sh": {
-    "mtime": 1784745217.9213507,
-    "ast_hash": "939a3a93603baa1a5c1d646c9744b35a",
+    "mtime": 1784304750.1456065,
+    "ast_hash": "5f365af5f142fda811ae5c60f6d91d62",
     "semantic_hash": ""
   },
   "scripts/run_actual_ulster_osm_pipeline.sh": {
@@ -140,8 +140,8 @@
     "semantic_hash": "528effdd2f24575a6e17bc7154aa17dc"
   },
   "src/culvert_ai/cli.py": {
-    "mtime": 1784745275.9177408,
-    "ast_hash": "e151fa07b077ea72a1c8ca25ef217f7b",
+    "mtime": 1783941539.8460145,
+    "ast_hash": "4b6e19c3cfee5b4975f4a0b8d41db7f4",
     "semantic_hash": ""
   },
   "src/culvert_ai/dem.py": {
@@ -160,13 +160,13 @@
     "semantic_hash": "03fe8282cc56063d18ae002edd17f216"
   },
   "src/culvert_ai/features.py": {
-    "mtime": 1784745879.7148807,
-    "ast_hash": "75e0e041d563a90146ea0962814e6c0f",
+    "mtime": 1783907477.226587,
+    "ast_hash": "cddfbfadfefd99d0b463979ad34e453e",
     "semantic_hash": ""
   },
   "src/culvert_ai/field_reports.py": {
-    "mtime": 1784745170.2736914,
-    "ast_hash": "ea733dc9aae364dacc8aa2d464bf4623",
+    "mtime": 1783910029.240115,
+    "ast_hash": "44247c7c2d31759686ac058c8fc1e88f",
     "semantic_hash": ""
   },
   "src/culvert_ai/io.py": {
@@ -180,14 +180,14 @@
     "semantic_hash": "39eba2da6117d0d98cd15a2765bc23d8"
   },
   "src/culvert_ai/model.py": {
-    "mtime": 1784745236.732123,
-    "ast_hash": "86dad430dd9048d5dda1f311604a916b",
-    "semantic_hash": ""
+    "mtime": 1784310820.6870906,
+    "ast_hash": "27012cc472d8dfbcb09e5c00e16aaa6d",
+    "semantic_hash": "27012cc472d8dfbcb09e5c00e16aaa6d"
   },
   "src/culvert_ai/observations.py": {
-    "mtime": 1784745153.4314272,
-    "ast_hash": "9eb3b9d1129fab78ccf0c0b221feb6a7",
-    "semantic_hash": ""
+    "mtime": 1782335205.1058125,
+    "ast_hash": "f890391cbfc95a5218d47c84affbe249",
+    "semantic_hash": "f890391cbfc95a5218d47c84affbe249"
   },
   "src/culvert_ai/osm.py": {
     "mtime": 1781454549.2384765,
@@ -205,13 +205,13 @@
     "semantic_hash": "d7f7509d20e6c0ef986f2da3f316cb05"
   },
   "src/culvert_ai/scoring.py": {
-    "mtime": 1784745271.0981417,
-    "ast_hash": "668a0216f59932b8d0517c230589ecfc",
+    "mtime": 1784304770.1172285,
+    "ast_hash": "52974840868a4ee582074838a8f90976",
     "semantic_hash": ""
   },
   "src/culvert_ai/web_export.py": {
-    "mtime": 1784745342.1177428,
-    "ast_hash": "544415d69d92b3d799ed6d253b4ccb22",
+    "mtime": 1784310825.3732643,
+    "ast_hash": "e6058bbde2ee684f082d2425b4076ab9",
     "semantic_hash": ""
   },
   "tests/test_candidates.py": {
@@ -230,8 +230,8 @@
     "semantic_hash": "df2376c37d306d21b04f7ec1e860856e"
   },
   "tests/test_field_reports.py": {
-    "mtime": 1784745433.0335803,
-    "ast_hash": "965e2ce81b118ad2460f549b5f9a204a",
+    "mtime": 1783907866.188112,
+    "ast_hash": "323637322a4bb6a325dbfe4eec53f504",
     "semantic_hash": ""
   },
   "tests/test_llm_review.py": {
@@ -240,14 +240,14 @@
     "semantic_hash": "d72bb5d433f318da20616e23845e318d"
   },
   "tests/test_model_features.py": {
-    "mtime": 1784745405.4831033,
-    "ast_hash": "11875b008f147af97e96c1a83eda6213",
-    "semantic_hash": ""
+    "mtime": 1783537468.3143654,
+    "ast_hash": "0e02ade1c821ec68d664cce090f53a0d",
+    "semantic_hash": "0e02ade1c821ec68d664cce090f53a0d"
   },
   "tests/test_observations.py": {
-    "mtime": 1784745419.1074023,
-    "ast_hash": "c46a9b49db88fca61d6899d9efc7e977",
-    "semantic_hash": ""
+    "mtime": 1782335225.506197,
+    "ast_hash": "8c4387002f9a0099c9d1ac0c27358dde",
+    "semantic_hash": "8c4387002f9a0099c9d1ac0c27358dde"
   },
   "tests/test_point_analysis.py": {
     "mtime": 1782168676.703261,
@@ -265,13 +265,13 @@
     "semantic_hash": ""
   },
   "tests/test_topography_features.py": {
-    "mtime": 1784745890.4572117,
-    "ast_hash": "59f00f9ca2dbf2eb18d0eea1a5d85df0",
+    "mtime": 1783907518.0368543,
+    "ast_hash": "15b7a49bc2075cfb384cbfa38e66e833",
     "semantic_hash": ""
   },
   "tests/test_web_export.py": {
-    "mtime": 1784745405.6643038,
-    "ast_hash": "a862d42f42a8072440a1f63a3d7a96c0",
+    "mtime": 1784304820.2915535,
+    "ast_hash": "db107831677b818f76d4ad92f064f4ba",
     "semantic_hash": ""
   },
   "vercel.json": {
@@ -285,13 +285,13 @@
     "semantic_hash": ""
   },
   "web/data/model_summary.json": {
-    "mtime": 1784746209.3051007,
-    "ast_hash": "aef392e65d4be0ff128d81e9b2ec09a4",
+    "mtime": 1784305439.0427074,
+    "ast_hash": "1ee9e9e8c796fae8f98710aea238656a",
     "semantic_hash": ""
   },
   "web/data/summary.json": {
-    "mtime": 1784746206.5568767,
-    "ast_hash": "956a8ece983e8f38e843ea2df46ef658",
+    "mtime": 1784305436.333945,
+    "ast_hash": "48c839e557514a4b12e0180774da72a1",
     "semantic_hash": ""
   },
   "README.md": {
@@ -365,8 +365,8 @@
     "semantic_hash": ""
   },
   "src/culvert_ai/route_count.py": {
-    "mtime": 1784745359.8364277,
-    "ast_hash": "7f73f87853d9e0482a45a53975424b99",
+    "mtime": 1784304732.226987,
+    "ast_hash": "0ea2c242d35932f6194decdc91eee31a",
     "semantic_hash": ""
   },
   "tests/test_route_count.py": {
@@ -385,8 +385,8 @@
     "semantic_hash": ""
   },
   "api/_lib/route-count.js": {
-    "mtime": 1784745360.0160508,
-    "ast_hash": "e555385683aeab6cda8dc30f92229b04",
+    "mtime": 1783942512.1359813,
+    "ast_hash": "df257022e5c7c527b69cedd0ea7b6ef1",
     "semantic_hash": ""
   },
   "api/route-count.js": {

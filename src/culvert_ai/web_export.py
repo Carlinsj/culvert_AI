@@ -111,12 +111,23 @@ ROUTE_COUNT_COLUMNS = [
     "nearest_field_report_route",
 ]
 
-KNOWN_EXPORT_EXCLUSION_RADIUS_M = 35.0
+KNOWN_EXPORT_FALLBACK_RADIUS_M = 10.0
 WEB_EXPORT_MIN_SCORE = 40.0
-WEB_EXPORT_MIN_SPACING_M = 8.0
+WEB_EXPORT_MIN_SPACING_M = 1.0
 WEB_EXPORT_MAX_PER_ROAD = 120
 WEB_EXPORT_ROUTE_MIN_GEOSPATIAL_SCORE = 45.0
-WEB_EXPORT_ROUTE_PEAK_RADIUS_M = 75.0
+WEB_EXPORT_ROUTE_PROFILE_MAX_GAP_M = 40.0
+WEB_EXPORT_ROUTE_SCORE_PEAK_MIN_PROMINENCE = 0.25
+WEB_EXPORT_ROUTE_COMPONENT_PEAK_MIN = 0.60
+WEB_EXPORT_ROUTE_COMPONENT_PEAK_MIN_PROMINENCE = 0.05
+ROUTE_COMPONENT_PEAK_COLUMNS = (
+    "road_stream_proximity_score",
+    "drainage_strength_score",
+    "valley_position_score",
+    "crossing_geometry_score",
+    "terrain_break_score",
+    "dem_route_drainage_score",
+)
 
 
 def export_web_data(
@@ -230,7 +241,7 @@ def _quality_export_pool(predictions: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
 def _select_geospatial_route_peaks(
     predictions: gpd.GeoDataFrame,
     min_geospatial_score: float = WEB_EXPORT_ROUTE_MIN_GEOSPATIAL_SCORE,
-    neighborhood_m: float = WEB_EXPORT_ROUTE_PEAK_RADIUS_M,
+    neighborhood_m: float = WEB_EXPORT_ROUTE_PROFILE_MAX_GAP_M,
 ) -> gpd.GeoDataFrame:
     if predictions.empty or "source" not in predictions.columns:
         return predictions
@@ -260,65 +271,113 @@ def _select_geospatial_route_peaks(
     route["_geospatial_peak_score"] = pd.to_numeric(
         route[geospatial_column], errors="coerce"
     ).fillna(0.0)
-    route = route[route["_geospatial_peak_score"] >= float(min_geospatial_score)].copy()
-    if route.empty:
+    eligible = route["_geospatial_peak_score"] >= float(min_geospatial_score)
+    if not eligible.any():
         return gpd.GeoDataFrame(non_route, geometry="geometry", crs=predictions.crs)
     if neighborhood_m <= 0:
-        route = route.drop(columns=["_geospatial_peak_score"])
+        route = route[eligible].drop(columns=["_geospatial_peak_score"])
         combined = pd.concat([non_route, route], ignore_index=False)
         return _sort_for_web(gpd.GeoDataFrame(combined, geometry="geometry", crs=predictions.crs))
 
-    metric_crs = route.estimate_utm_crs() or "EPSG:3857"
-    metric = route.to_crs(metric_crs)
-    route_keys = metric.apply(_road_export_key, axis=1)
-    scores = route["_geospatial_peak_score"]
-    ranks = (
-        pd.to_numeric(route["discovery_rank"], errors="coerce").fillna(np.inf)
-        if "discovery_rank" in route.columns
-        else pd.Series(np.inf, index=route.index)
+    peak_mask = _route_profile_peak_mask(
+        route,
+        route["_geospatial_peak_score"],
+        max_profile_gap_m=float(neighborhood_m),
+        min_prominence=WEB_EXPORT_ROUTE_SCORE_PEAK_MIN_PROMINENCE,
     )
-    spatial_index = metric.sindex
-    accepted_indices = []
-
-    for row_index, point in metric.geometry.items():
-        neighbor_positions = spatial_index.query(
-            point.buffer(float(neighborhood_m)), predicate="intersects"
+    for column in ROUTE_COMPONENT_PEAK_COLUMNS:
+        if column not in route.columns:
+            continue
+        component = pd.to_numeric(route[column], errors="coerce")
+        if component.max(skipna=True) > 1.0:
+            component = component / 100.0
+        strong_component = component >= WEB_EXPORT_ROUTE_COMPONENT_PEAK_MIN
+        peak_mask |= strong_component.fillna(False) & _route_profile_peak_mask(
+            route,
+            component,
+            max_profile_gap_m=float(neighborhood_m),
+            min_prominence=WEB_EXPORT_ROUTE_COMPONENT_PEAK_MIN_PROMINENCE,
         )
-        row_score = float(scores.loc[row_index])
-        row_rank = float(ranks.loc[row_index])
-        keep = True
-        for position in neighbor_positions:
-            neighbor_index = metric.index[int(position)]
-            if neighbor_index == row_index or route_keys.loc[neighbor_index] != route_keys.loc[row_index]:
-                continue
-            if point.distance(metric.at[neighbor_index, "geometry"]) > float(neighborhood_m):
-                continue
-            neighbor_score = float(scores.loc[neighbor_index])
-            neighbor_rank = float(ranks.loc[neighbor_index])
-            if neighbor_score > row_score or (
-                np.isclose(neighbor_score, row_score) and neighbor_rank < row_rank
-            ):
-                keep = False
-                break
-        if keep:
-            accepted_indices.append(row_index)
 
-    route = route.loc[accepted_indices].drop(columns=["_geospatial_peak_score"])
+    route = route[eligible & peak_mask].drop(columns=["_geospatial_peak_score"])
     combined = pd.concat([non_route, route], ignore_index=False)
     return _sort_for_web(gpd.GeoDataFrame(combined, geometry="geometry", crs=predictions.crs))
 
 
+def _route_profile_peak_mask(
+    route: gpd.GeoDataFrame,
+    values: pd.Series,
+    max_profile_gap_m: float,
+    min_prominence: float,
+) -> pd.Series:
+    """Find local peaks along a road profile without imposing minimum target spacing."""
+
+    peaks = pd.Series(False, index=route.index)
+    if "route_sample_distance_m" not in route.columns:
+        return pd.Series(True, index=route.index)
+
+    distances = pd.to_numeric(route["route_sample_distance_m"], errors="coerce")
+    profile_keys = route.apply(_route_profile_key, axis=1)
+
+    for profile_key in profile_keys.unique():
+        profile_indices = profile_keys[profile_keys == profile_key].index
+        finite_indices = [index for index in profile_indices if pd.notna(distances.loc[index])]
+        missing_indices = [index for index in profile_indices if pd.isna(distances.loc[index])]
+        peaks.loc[missing_indices] = True
+        ordered = sorted(finite_indices, key=lambda index: float(distances.loc[index]))
+
+        for position, row_index in enumerate(ordered):
+            neighbors = []
+            if position > 0:
+                previous = ordered[position - 1]
+                if distances.loc[row_index] - distances.loc[previous] <= max_profile_gap_m:
+                    neighbors.append(previous)
+            if position + 1 < len(ordered):
+                following = ordered[position + 1]
+                if distances.loc[following] - distances.loc[row_index] <= max_profile_gap_m:
+                    neighbors.append(following)
+
+            row_value = values.loc[row_index]
+            comparable = [index for index in neighbors if pd.notna(values.loc[index])]
+            if pd.isna(row_value):
+                continue
+            if not comparable:
+                peaks.loc[row_index] = True
+                continue
+
+            neighbor_values = [float(values.loc[index]) for index in comparable]
+            row_value = float(row_value)
+            if any(value > row_value and not np.isclose(value, row_value) for value in neighbor_values):
+                continue
+            if row_value - max(neighbor_values) >= float(min_prominence):
+                peaks.loc[row_index] = True
+                continue
+
+    return peaks
+
+
+def _route_profile_key(row: pd.Series) -> str:
+    road_id = _export_key_value(row.get("road_id", ""))
+    route = _road_export_key(row)
+    part = _export_key_value(row.get("route_part_index", 0)) or "0"
+    offset = _export_key_value(row.get("route_lateral_offset_m", 0)) or "0"
+    return f"{road_id or route}|part:{part}|offset:{offset}"
+
+
 def _prediction_export_pool(predictions: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     filtered = predictions.copy()
+    has_explicit_known_status = False
     if "discovery_status" in filtered.columns:
         status = filtered["discovery_status"].fillna("").astype(str)
         filtered = filtered[~status.isin({"known_field_match", "field_denied"})]
+        has_explicit_known_status = True
     if "is_known_field_match" in filtered.columns:
         known = pd.to_numeric(filtered["is_known_field_match"], errors="coerce").fillna(0).astype(int)
         filtered = filtered[known != 1]
-    if "dist_to_known_culvert_m" in filtered.columns:
+        has_explicit_known_status = True
+    if not has_explicit_known_status and "dist_to_known_culvert_m" in filtered.columns:
         distance = pd.to_numeric(filtered["dist_to_known_culvert_m"], errors="coerce")
-        filtered = filtered[distance.isna() | (distance > KNOWN_EXPORT_EXCLUSION_RADIUS_M)]
+        filtered = filtered[distance.isna() | (distance > KNOWN_EXPORT_FALLBACK_RADIUS_M)]
     if "source" in filtered.columns:
         source = filtered["source"].fillna("").astype(str)
         filtered = filtered[

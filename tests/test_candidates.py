@@ -229,3 +229,61 @@ def test_merge_candidate_layers_prefers_road_stream_crossing_over_route_sample()
     assert len(merged) == 1
     assert merged.iloc[0]["candidate_id"] == "cand_000001"
     assert merged.iloc[0]["source"] == "exact_road_stream_intersection"
+
+
+def test_merge_candidate_layers_preserves_distinct_close_crossings():
+    crossings = gpd.GeoDataFrame(
+        [
+            {
+                "candidate_id": "crossing-1",
+                "road_id": "road-1",
+                "stream_id": "stream-1",
+                "source": "exact_road_stream_intersection",
+                "road_stream_distance_m": 0.0,
+                "geometry": Point(0, 0),
+            },
+            {
+                "candidate_id": "crossing-2",
+                "road_id": "road-1",
+                "stream_id": "stream-2",
+                "source": "exact_road_stream_intersection",
+                "road_stream_distance_m": 0.0,
+                "geometry": Point(4, 0),
+            },
+        ],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+
+    merged = merge_candidate_layers([crossings], min_spacing_m=20)
+
+    assert len(merged) == 2
+
+
+def test_merge_candidate_layers_collapses_same_coordinate_artifacts():
+    crossings = gpd.GeoDataFrame(
+        [
+            {
+                "candidate_id": "crossing-1",
+                "road_id": "road-1",
+                "stream_id": "stream-1",
+                "source": "exact_road_stream_intersection",
+                "road_stream_distance_m": 0.0,
+                "geometry": Point(0, 0),
+            },
+            {
+                "candidate_id": "crossing-2",
+                "road_id": "road-1",
+                "stream_id": "stream-2",
+                "source": "exact_road_stream_intersection",
+                "road_stream_distance_m": 0.0,
+                "geometry": Point(0.5, 0),
+            },
+        ],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+
+    merged = merge_candidate_layers([crossings], min_spacing_m=20)
+
+    assert len(merged) == 1

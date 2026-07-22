@@ -13,7 +13,7 @@ from culvert_ai.web_export import (
 )
 
 
-def test_limit_for_web_exports_discovery_candidates_only():
+def test_limit_for_web_keeps_explicitly_undiscovered_candidate_near_known_site():
     predictions = gpd.GeoDataFrame(
         [
             {
@@ -45,7 +45,7 @@ def test_limit_for_web_exports_discovery_candidates_only():
 
     limited = _limit_for_web(predictions, limit=3)
 
-    assert set(limited["candidate_id"]) == {"top"}
+    assert set(limited["candidate_id"]) == {"top", "near-field"}
 
 
 def test_limit_for_web_does_not_reserve_weak_field_recall_candidates():
@@ -100,7 +100,7 @@ def test_limit_for_web_does_not_reserve_weak_field_recall_candidates():
     assert len(limited) == 3
 
 
-def test_limit_for_web_only_removes_true_near_duplicates():
+def test_limit_for_web_does_not_impose_minimum_target_spacing():
     predictions = gpd.GeoDataFrame(
         [
             {
@@ -119,7 +119,7 @@ def test_limit_for_web_only_removes_true_near_duplicates():
                 "field_recall_score": 0.0,
                 "dist_to_known_culvert_m": 500.0,
                 "road_id": "road-a",
-                "geometry": Point(20, 0),
+                "geometry": Point(2, 0),
             },
             {
                 "candidate_id": "a3",
@@ -128,7 +128,7 @@ def test_limit_for_web_only_removes_true_near_duplicates():
                 "field_recall_score": 0.0,
                 "dist_to_known_culvert_m": 500.0,
                 "road_id": "road-a",
-                "geometry": Point(40, 0),
+                "geometry": Point(4, 0),
             },
         ],
         geometry="geometry",
@@ -146,7 +146,10 @@ def test_route_samples_are_selected_as_geospatial_local_peaks():
             {
                 "candidate_id": "sample-1",
                 "source": "route_interval_sample",
+                "road_id": "road-28",
                 "matched_route": "28",
+                "route_part_index": 0,
+                "route_sample_distance_m": 0.0,
                 "discovery_rank": 3,
                 "geospatial_evidence_score": 48.0,
                 "geometry": Point(0, 0),
@@ -154,7 +157,10 @@ def test_route_samples_are_selected_as_geospatial_local_peaks():
             {
                 "candidate_id": "local-peak",
                 "source": "route_interval_sample",
+                "road_id": "road-28",
                 "matched_route": "28",
+                "route_part_index": 0,
+                "route_sample_distance_m": 25.0,
                 "discovery_rank": 1,
                 "geospatial_evidence_score": 67.0,
                 "geometry": Point(25, 0),
@@ -162,7 +168,10 @@ def test_route_samples_are_selected_as_geospatial_local_peaks():
             {
                 "candidate_id": "sample-3",
                 "source": "route_interval_sample",
+                "road_id": "road-28",
                 "matched_route": "28",
+                "route_part_index": 0,
+                "route_sample_distance_m": 50.0,
                 "discovery_rank": 2,
                 "geospatial_evidence_score": 55.0,
                 "geometry": Point(50, 0),
@@ -170,7 +179,10 @@ def test_route_samples_are_selected_as_geospatial_local_peaks():
             {
                 "candidate_id": "separate-peak",
                 "source": "route_interval_sample",
+                "road_id": "road-28",
                 "matched_route": "28",
+                "route_part_index": 0,
+                "route_sample_distance_m": 200.0,
                 "discovery_rank": 4,
                 "geospatial_evidence_score": 52.0,
                 "geometry": Point(200, 0),
@@ -183,6 +195,84 @@ def test_route_samples_are_selected_as_geospatial_local_peaks():
     selected = _select_geospatial_route_peaks(predictions)
 
     assert selected["candidate_id"].tolist() == ["local-peak", "separate-peak"]
+
+
+def test_route_samples_keep_adjacent_independent_geospatial_peaks():
+    predictions = gpd.GeoDataFrame(
+        [
+            {
+                "candidate_id": "drainage-peak",
+                "source": "route_interval_sample",
+                "road_id": "road-28",
+                "matched_route": "28",
+                "route_part_index": 0,
+                "route_sample_distance_m": 0.0,
+                "discovery_rank": 1,
+                "geospatial_evidence_score": 60.0,
+                "drainage_strength_score": 0.90,
+                "terrain_break_score": 0.10,
+                "geometry": Point(0, 0),
+            },
+            {
+                "candidate_id": "terrain-peak",
+                "source": "route_interval_sample",
+                "road_id": "road-28",
+                "matched_route": "28",
+                "route_part_index": 0,
+                "route_sample_distance_m": 10.0,
+                "discovery_rank": 2,
+                "geospatial_evidence_score": 58.0,
+                "drainage_strength_score": 0.20,
+                "terrain_break_score": 0.90,
+                "geometry": Point(10, 0),
+            },
+            {
+                "candidate_id": "weak-sample",
+                "source": "route_interval_sample",
+                "road_id": "road-28",
+                "matched_route": "28",
+                "route_part_index": 0,
+                "route_sample_distance_m": 20.0,
+                "discovery_rank": 3,
+                "geospatial_evidence_score": 46.0,
+                "drainage_strength_score": 0.10,
+                "terrain_break_score": 0.20,
+                "geometry": Point(20, 0),
+            },
+        ],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+
+    selected = _select_geospatial_route_peaks(predictions)
+
+    assert selected["candidate_id"].tolist() == ["drainage-peak", "terrain-peak"]
+
+
+def test_route_samples_do_not_treat_flat_evidence_as_repeated_peaks():
+    predictions = gpd.GeoDataFrame(
+        [
+            {
+                "candidate_id": f"flat-{index}",
+                "source": "route_interval_sample",
+                "road_id": "road-28",
+                "route_part_index": 0,
+                "route_sample_distance_m": float(index * 10),
+                "discovery_rank": index + 1,
+                "geospatial_evidence_score": 55.0,
+                "drainage_strength_score": 0.70,
+                "terrain_break_score": 0.70,
+                "geometry": Point(index * 10, 0),
+            }
+            for index in range(4)
+        ],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+
+    selected = _select_geospatial_route_peaks(predictions)
+
+    assert selected.empty
 
 
 def test_limit_for_web_filters_weak_scores_when_scores_exist():
@@ -276,7 +366,7 @@ def test_prediction_export_pool_removes_known_and_denied_rows():
 
     filtered = _prediction_export_pool(predictions)
 
-    assert filtered["candidate_id"].tolist() == ["discovery"]
+    assert filtered["candidate_id"].tolist() == ["discovery", "near-known"]
 
 
 def test_export_web_data_writes_full_route_count_source(tmp_path):

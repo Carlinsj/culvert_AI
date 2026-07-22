@@ -333,15 +333,18 @@ def _deduplicate(candidates: gpd.GeoDataFrame, min_spacing_m: float) -> gpd.GeoD
 
     cell_size = float(min_spacing_m)
     accepted_rows = []
-    accepted_cells: dict[tuple[int, int], list[Point]] = {}
+    accepted_cells: dict[tuple[int, int], list[pd.Series]] = {}
     for _, row in ordered.iterrows():
         point = row.geometry
         cell = (floor(point.x / cell_size), floor(point.y / cell_size))
         too_close = False
         for x_offset in (-1, 0, 1):
             for y_offset in (-1, 0, 1):
-                nearby_points = accepted_cells.get((cell[0] + x_offset, cell[1] + y_offset), [])
-                if any(point.distance(existing) < min_spacing_m for existing in nearby_points):
+                nearby_rows = accepted_cells.get((cell[0] + x_offset, cell[1] + y_offset), [])
+                if any(
+                    point.distance(existing.geometry) < _duplicate_radius_m(row, existing, min_spacing_m)
+                    for existing in nearby_rows
+                ):
                     too_close = True
                     break
             if too_close:
@@ -349,7 +352,7 @@ def _deduplicate(candidates: gpd.GeoDataFrame, min_spacing_m: float) -> gpd.GeoD
 
         if not too_close:
             accepted_rows.append(row)
-            accepted_cells.setdefault(cell, []).append(point)
+            accepted_cells.setdefault(cell, []).append(row)
 
     if not accepted_rows:
         return candidates.iloc[0:0].copy()
@@ -357,6 +360,52 @@ def _deduplicate(candidates: gpd.GeoDataFrame, min_spacing_m: float) -> gpd.GeoD
     return gpd.GeoDataFrame(accepted_rows, geometry="geometry", crs=candidates.crs).reset_index(
         drop=True
     )
+
+
+def _duplicate_radius_m(candidate: pd.Series, existing: pd.Series, min_spacing_m: float) -> float:
+    """Return a deduplication radius, preserving distinct nearby crossing identities."""
+
+    coordinate_duplicate_radius_m = min(1.0, float(min_spacing_m))
+    candidate_source = str(candidate.get("source", "") or "")
+    existing_source = str(existing.get("source", "") or "")
+    candidate_route = candidate_source == "route_interval_sample"
+    existing_route = existing_source == "route_interval_sample"
+
+    if candidate_route or existing_route:
+        if _same_road(candidate, existing):
+            return float(min_spacing_m)
+        return coordinate_duplicate_radius_m
+
+    same_pair = _same_identity(candidate, existing, "road") and _same_identity(
+        candidate, existing, "stream"
+    )
+    if not same_pair:
+        return coordinate_duplicate_radius_m
+
+    exact_sources = {"exact_road_stream_intersection"}
+    if candidate_source in exact_sources and existing_source in exact_sources:
+        return coordinate_duplicate_radius_m
+    return float(min_spacing_m)
+
+
+def _same_road(left: pd.Series, right: pd.Series) -> bool:
+    return _same_identity(left, right, "road")
+
+
+def _same_identity(left: pd.Series, right: pd.Series, prefix: str) -> bool:
+    for column in (f"{prefix}_id", f"{prefix}_name"):
+        left_value = _identity_value(left.get(column))
+        right_value = _identity_value(right.get(column))
+        if left_value and right_value:
+            return left_value == right_value
+    return False
+
+
+def _identity_value(value) -> str:
+    if value is None or pd.isna(value):
+        return ""
+    text = " ".join(str(value).strip().lower().split())
+    return "" if text in {"", "nan", "none", "<na>"} else text
 
 
 def _line_parts(geometry):

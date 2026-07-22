@@ -556,9 +556,10 @@ def _field_recall_score(
 
 
 def _known_field_match_mask(table: pd.DataFrame, known_radius_m: float) -> pd.Series:
-    known = pd.Series(False, index=table.index)
     if "is_culvert" in table.columns:
-        known |= pd.to_numeric(table["is_culvert"], errors="coerce").fillna(0).astype(int) == 1
+        return pd.to_numeric(table["is_culvert"], errors="coerce").fillna(0).astype(int) == 1
+
+    known = pd.Series(False, index=table.index)
     if "dist_to_known_culvert_m" in table.columns:
         distance = pd.to_numeric(table["dist_to_known_culvert_m"], errors="coerce")
         known |= distance.notna() & (distance <= known_radius_m)

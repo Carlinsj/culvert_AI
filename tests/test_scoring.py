@@ -391,6 +391,34 @@ def test_discovery_ranking_does_not_count_50m_as_known_match():
     assert by_id.loc["denied", "discovery_score"] == 0
 
 
+def test_discovery_ranking_keeps_separately_labeled_candidate_near_known_culvert():
+    evidence = gpd.GeoDataFrame(
+        [
+            {
+                "candidate_id": "known",
+                "culvert_likelihood_score": 95.0,
+                "is_culvert": 1,
+                "dist_to_known_culvert_m": 0.0,
+                "geometry": Point(0, 0),
+            },
+            {
+                "candidate_id": "nearby-independent",
+                "culvert_likelihood_score": 90.0,
+                "is_culvert": 0,
+                "dist_to_known_culvert_m": 4.0,
+                "geometry": Point(4, 0),
+            },
+        ],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+
+    ranked = build_discovery_ranking(evidence, known_radius_m=10).set_index("candidate_id")
+
+    assert ranked.loc["known", "discovery_status"] == "known_field_match"
+    assert ranked.loc["nearby-independent", "discovery_status"] == "undiscovered_candidate"
+
+
 def test_discovery_ranking_trusts_field_denied_flag_over_distance():
     evidence = gpd.GeoDataFrame(
         [
