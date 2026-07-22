@@ -308,6 +308,16 @@ PY
     fi
     if [ -f data/processed/no_culvert_observations.gpkg ]; then
       DENIED_CULVERTS_PATH="data/processed/no_culvert_observations.gpkg"
+      ADD_NEGATIVE_OBSERVATION_ARGS=(
+        --candidates "$CANDIDATES_PATH"
+        --field-reports "$DENIED_CULVERTS_PATH"
+        --output data/interim/actual_ulster_candidates_with_field_feedback.gpkg
+      )
+      if [ -f "$BOUNDARY_PATH" ]; then
+        ADD_NEGATIVE_OBSERVATION_ARGS+=(--boundary "$BOUNDARY_PATH")
+      fi
+      scripts/python.sh -m culvert_ai.cli add-field-report-candidates "${ADD_NEGATIVE_OBSERVATION_ARGS[@]}"
+      CANDIDATES_PATH="data/interim/actual_ulster_candidates_with_field_feedback.gpkg"
     fi
   fi
 fi

@@ -23,6 +23,8 @@ DEFAULT_WEIGHTS = {
     "field_corridor_support_score": 0.03,
 }
 
+MAX_FEEDBACK_PATTERN_BOOST = 0.08
+
 FIELD_RECALL_MIN_CORRIDOR_SCORE = 0.55
 FIELD_RECALL_MIN_DEM_ROUTE_SCORE = 0.20
 FIELD_RECALL_MIN_ROAD_ALIGNMENT_SCORE = 0.60
@@ -56,22 +58,31 @@ def score_unlabeled_candidates(
     scored["field_corridor_support_score"] = _field_corridor_support_score(scored)
     scored["non_culvert_structure_penalty"] = _non_culvert_structure_penalty(scored)
 
-    total_weight = sum(weights.values())
+    geospatial_weights = {
+        column: weight
+        for column, weight in weights.items()
+        if column != "field_corridor_support_score"
+    }
+    total_weight = sum(geospatial_weights.values())
     if total_weight <= 0:
-        raise ValueError("Scoring weights must sum to a positive value.")
+        raise ValueError("Geospatial scoring weights must sum to a positive value.")
 
     score = np.zeros(len(scored), dtype=float)
-    for column, weight in weights.items():
+    for column, weight in geospatial_weights.items():
         if column not in scored.columns:
             continue
         score += scored[column].fillna(0.0).astype(float).clip(0, 1) * float(weight)
 
-    raw_score = (100 * score / total_weight) - (
+    raw_geospatial_score = (100 * score / total_weight) - (
         20 * scored["non_culvert_structure_penalty"]
     )
-    scored["culvert_likelihood_score"] = (
-        raw_score * _route_sample_precision_gate(scored)
-    ).clip(0, 100)
+    route_gate = _route_sample_precision_gate(scored)
+    geospatial_score = (raw_geospatial_score * route_gate).clip(0, 100)
+    feedback_support = scored["field_corridor_support_score"].fillna(0.0).clip(0, 1)
+    feedback_boost = MAX_FEEDBACK_PATTERN_BOOST * geospatial_score * feedback_support
+    scored["geospatial_evidence_score"] = geospatial_score
+    scored["feedback_pattern_boost"] = feedback_boost
+    scored["culvert_likelihood_score"] = (geospatial_score + feedback_boost).clip(0, 100)
     denied = pd.Series(False, index=scored.index)
     if "field_denied" in scored.columns:
         denied = pd.to_numeric(scored["field_denied"], errors="coerce").fillna(0).astype(int) == 1
@@ -96,8 +107,8 @@ def score_unlabeled_candidates(
 def build_discovery_ranking(
     evidence_predictions: gpd.GeoDataFrame,
     supervised_predictions: gpd.GeoDataFrame | None = None,
-    evidence_weight: float = 0.40,
-    model_weight: float = 0.60,
+    evidence_weight: float = 0.70,
+    model_weight: float = 0.30,
     known_radius_m: float = 75.0,
 ) -> gpd.GeoDataFrame:
     """Create a field-work ranking that prioritizes not-yet-observed candidates.
@@ -116,28 +127,32 @@ def build_discovery_ranking(
     if supervised_predictions is not None and not supervised_predictions.empty:
         ranked = _attach_supervised_probability(ranked, supervised_predictions)
 
-    evidence_score = _score_0_to_1(ranked, "culvert_likelihood_score", scale=100.0)
+    evidence_column = (
+        "geospatial_evidence_score"
+        if "geospatial_evidence_score" in ranked.columns
+        else "culvert_likelihood_score"
+    )
+    evidence_score = _score_0_to_1(ranked, evidence_column, scale=100.0)
     model_probability = _score_0_to_1(ranked, "culvert_probability", scale=1.0)
     model_rank_score = _model_rank_score(model_probability)
-    model_signal = _model_signal_score(model_probability, model_rank_score)
+    model_signal = model_probability.fillna(0.0).clip(0, 1)
     field_recall_score = _field_recall_score(ranked, evidence_score, model_signal)
     has_model = model_rank_score.notna()
+    feedback_support = _score_0_to_1(
+        ranked,
+        "field_corridor_support_score",
+        scale=1.0,
+    ).fillna(0.0)
 
     blended = evidence_score.copy()
     total_weight = evidence_weight + model_weight
-    weighted_signal = (
+    blended.loc[has_model] = (
         evidence_weight * evidence_score.loc[has_model] + model_weight * model_signal.loc[has_model]
     ) / total_weight
-    agreement_signal = np.sqrt(
-        evidence_score.loc[has_model].clip(0, 1) * model_signal.loc[has_model].clip(0, 1)
-    )
-    blended.loc[has_model] = (
-        0.55 * agreement_signal + 0.25 * evidence_score.loc[has_model] + 0.20 * weighted_signal
+    blended = (
+        blended.fillna(evidence_score).fillna(0.0)
+        + 0.05 * evidence_score.fillna(0.0) * feedback_support
     ).clip(0, 1)
-    blended = pd.Series(
-        np.maximum(blended.fillna(0.0).to_numpy(), field_recall_score.to_numpy()),
-        index=ranked.index,
-    )
 
     denied = _field_denied_mask(ranked, known_radius_m=known_radius_m)
     known = _known_field_match_mask(ranked, known_radius_m=known_radius_m) & ~denied
@@ -150,6 +165,7 @@ def build_discovery_ranking(
     ranked["evidence_score"] = (evidence_score.fillna(0.0) * 100).clip(0, 100)
     ranked["model_probability_score"] = (model_probability.fillna(0.0) * 100).clip(0, 100)
     ranked["model_rank_score"] = (model_rank_score.fillna(0.0) * 100).clip(0, 100)
+    ranked["feedback_support_score"] = (feedback_support * 100).clip(0, 100)
     ranked["field_recall_score"] = (field_recall_score.fillna(0.0) * 100).clip(0, 100)
     ranked["discovery_score"] = (blended.fillna(evidence_score).fillna(0.0) * 100).clip(0, 100)
     ranked.loc[known, ["field_recall_score", "discovery_score"]] = 0
@@ -159,6 +175,7 @@ def build_discovery_ranking(
             "evidence_score",
             "model_probability_score",
             "model_rank_score",
+            "feedback_support_score",
             "field_recall_score",
             "discovery_score",
         ],

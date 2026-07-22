@@ -18,8 +18,10 @@ WEB_COLUMNS = [
     "discovery_status",
     "is_known_field_match",
     "evidence_score",
+    "geospatial_evidence_score",
     "model_probability_score",
     "model_rank_score",
+    "feedback_support_score",
     "field_recall_score",
     "priority_rank",
     "priority_bucket",
@@ -89,6 +91,9 @@ ROUTE_COUNT_COLUMNS = [
     "discovery_score",
     "discovery_status",
     "is_known_field_match",
+    "evidence_score",
+    "geospatial_evidence_score",
+    "model_probability_score",
     "priority_rank",
     "priority_bucket",
     "culvert_likelihood_score",
@@ -107,13 +112,11 @@ ROUTE_COUNT_COLUMNS = [
 ]
 
 KNOWN_EXPORT_EXCLUSION_RADIUS_M = 35.0
-WEB_EXPORT_MIN_SCORE = 35.0
-WEB_EXPORT_MIN_SPACING_M = 45.0
+WEB_EXPORT_MIN_SCORE = 40.0
+WEB_EXPORT_MIN_SPACING_M = 8.0
 WEB_EXPORT_MAX_PER_ROAD = 120
-WEB_EXPORT_FIELD_RECALL_SHARE = 0.20
-WEB_EXPORT_FIELD_RECALL_MIN_SCORE = 50.0
-WEB_EXPORT_FIELD_RECALL_MIN_SPACING_M = 60.0
-WEB_EXPORT_FIELD_RECALL_MAX_PER_ROAD = 60
+WEB_EXPORT_ROUTE_MIN_GEOSPATIAL_SCORE = 45.0
+WEB_EXPORT_ROUTE_PEAK_RADIUS_M = 75.0
 
 
 def export_web_data(
@@ -138,7 +141,7 @@ def export_web_data(
     elif "priority_rank" in predictions.columns:
         predictions = predictions.sort_values("priority_rank")
 
-    route_count_predictions = predictions.copy()
+    route_count_predictions = _quality_export_pool(predictions)
 
     if limit:
         predictions = _limit_for_web(predictions, limit)
@@ -208,30 +211,101 @@ def _limit_for_web(predictions: gpd.GeoDataFrame, limit: int) -> gpd.GeoDataFram
     if "discovery_status" not in predictions.columns:
         return predictions.head(limit)
 
-    pool = _minimum_score_export_pool(_prediction_export_pool(predictions))
-    recall = _field_recall_export_pool(pool)
-    recall_limit = int(round(limit * WEB_EXPORT_FIELD_RECALL_SHARE))
-    recall = _decluster_for_web(
-        recall,
-        limit=recall_limit,
-        min_spacing_m=WEB_EXPORT_FIELD_RECALL_MIN_SPACING_M,
-        max_per_road=WEB_EXPORT_FIELD_RECALL_MAX_PER_ROAD,
-    )
+    pool = _quality_export_pool(_prediction_export_pool(predictions))
+    return _sort_for_web(
+        _decluster_for_web(
+            pool,
+            limit=limit,
+            min_spacing_m=WEB_EXPORT_MIN_SPACING_M,
+            max_per_road=WEB_EXPORT_MAX_PER_ROAD,
+        )
+    ).head(limit)
 
-    remaining = _drop_exported_candidates(pool, recall)
-    discovery = _decluster_for_web(
-        remaining,
-        limit=limit,
-        min_spacing_m=WEB_EXPORT_MIN_SPACING_M,
-        max_per_road=WEB_EXPORT_MAX_PER_ROAD,
+
+def _quality_export_pool(predictions: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    pool = _minimum_score_export_pool(predictions)
+    return _select_geospatial_route_peaks(pool)
+
+
+def _select_geospatial_route_peaks(
+    predictions: gpd.GeoDataFrame,
+    min_geospatial_score: float = WEB_EXPORT_ROUTE_MIN_GEOSPATIAL_SCORE,
+    neighborhood_m: float = WEB_EXPORT_ROUTE_PEAK_RADIUS_M,
+) -> gpd.GeoDataFrame:
+    if predictions.empty or "source" not in predictions.columns:
+        return predictions
+
+    source = predictions["source"].fillna("").astype(str)
+    route_mask = source.eq("route_interval_sample")
+    route = predictions[route_mask].copy()
+    non_route = predictions[~route_mask].copy()
+    if route.empty:
+        return predictions
+
+    geospatial_column = next(
+        (
+            column
+            for column in (
+                "geospatial_evidence_score",
+                "evidence_score",
+                "culvert_likelihood_score",
+            )
+            if column in route.columns
+        ),
+        None,
     )
-    remaining_slots = max(0, limit - len(recall))
-    discovery = discovery.head(remaining_slots)
-    combined = pd.concat([recall, discovery], ignore_index=True)
-    if "candidate_id" in combined.columns:
-        combined = combined.drop_duplicates("candidate_id")
-    combined = gpd.GeoDataFrame(combined, geometry="geometry", crs=predictions.crs)
-    return _sort_for_web(combined).head(limit)
+    if geospatial_column is None:
+        return predictions
+
+    route["_geospatial_peak_score"] = pd.to_numeric(
+        route[geospatial_column], errors="coerce"
+    ).fillna(0.0)
+    route = route[route["_geospatial_peak_score"] >= float(min_geospatial_score)].copy()
+    if route.empty:
+        return gpd.GeoDataFrame(non_route, geometry="geometry", crs=predictions.crs)
+    if neighborhood_m <= 0:
+        route = route.drop(columns=["_geospatial_peak_score"])
+        combined = pd.concat([non_route, route], ignore_index=False)
+        return _sort_for_web(gpd.GeoDataFrame(combined, geometry="geometry", crs=predictions.crs))
+
+    metric_crs = route.estimate_utm_crs() or "EPSG:3857"
+    metric = route.to_crs(metric_crs)
+    route_keys = metric.apply(_road_export_key, axis=1)
+    scores = route["_geospatial_peak_score"]
+    ranks = (
+        pd.to_numeric(route["discovery_rank"], errors="coerce").fillna(np.inf)
+        if "discovery_rank" in route.columns
+        else pd.Series(np.inf, index=route.index)
+    )
+    spatial_index = metric.sindex
+    accepted_indices = []
+
+    for row_index, point in metric.geometry.items():
+        neighbor_positions = spatial_index.query(
+            point.buffer(float(neighborhood_m)), predicate="intersects"
+        )
+        row_score = float(scores.loc[row_index])
+        row_rank = float(ranks.loc[row_index])
+        keep = True
+        for position in neighbor_positions:
+            neighbor_index = metric.index[int(position)]
+            if neighbor_index == row_index or route_keys.loc[neighbor_index] != route_keys.loc[row_index]:
+                continue
+            if point.distance(metric.at[neighbor_index, "geometry"]) > float(neighborhood_m):
+                continue
+            neighbor_score = float(scores.loc[neighbor_index])
+            neighbor_rank = float(ranks.loc[neighbor_index])
+            if neighbor_score > row_score or (
+                np.isclose(neighbor_score, row_score) and neighbor_rank < row_rank
+            ):
+                keep = False
+                break
+        if keep:
+            accepted_indices.append(row_index)
+
+    route = route.loc[accepted_indices].drop(columns=["_geospatial_peak_score"])
+    combined = pd.concat([non_route, route], ignore_index=False)
+    return _sort_for_web(gpd.GeoDataFrame(combined, geometry="geometry", crs=predictions.crs))
 
 
 def _prediction_export_pool(predictions: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
@@ -247,7 +321,9 @@ def _prediction_export_pool(predictions: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         filtered = filtered[distance.isna() | (distance > KNOWN_EXPORT_EXCLUSION_RADIUS_M)]
     if "source" in filtered.columns:
         source = filtered["source"].fillna("").astype(str)
-        filtered = filtered[source != "field_report_observed_culvert"]
+        filtered = filtered[
+            ~source.isin({"field_report_observed_culvert", "field_observed_non_culvert"})
+        ]
     return gpd.GeoDataFrame(filtered, geometry="geometry", crs=predictions.crs)
 
 
@@ -267,37 +343,6 @@ def _minimum_score_export_pool(predictions: gpd.GeoDataFrame) -> gpd.GeoDataFram
         geometry="geometry",
         crs=predictions.crs,
     )
-
-
-def _field_recall_export_pool(predictions: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-    if predictions.empty or "field_recall_score" not in predictions.columns:
-        return predictions.head(0)
-
-    score = pd.to_numeric(predictions["field_recall_score"], errors="coerce").fillna(0.0)
-    recall = predictions[score >= WEB_EXPORT_FIELD_RECALL_MIN_SCORE].copy()
-    if recall.empty:
-        return recall
-
-    sort_columns = [
-        column
-        for column in ("field_recall_score", "discovery_score", "culvert_likelihood_score")
-        if column in recall.columns
-    ]
-    if sort_columns:
-        recall = recall.sort_values(sort_columns, ascending=[False] * len(sort_columns))
-    return gpd.GeoDataFrame(recall, geometry="geometry", crs=predictions.crs)
-
-
-def _drop_exported_candidates(
-    predictions: gpd.GeoDataFrame,
-    exported: gpd.GeoDataFrame,
-) -> gpd.GeoDataFrame:
-    if exported.empty:
-        return predictions
-    if "candidate_id" in predictions.columns and "candidate_id" in exported.columns:
-        exported_ids = set(exported["candidate_id"].fillna("").astype(str))
-        return predictions[~predictions["candidate_id"].fillna("").astype(str).isin(exported_ids)]
-    return predictions.drop(index=exported.index.intersection(predictions.index), errors="ignore")
 
 
 def _sort_for_web(predictions: gpd.GeoDataFrame) -> gpd.GeoDataFrame:

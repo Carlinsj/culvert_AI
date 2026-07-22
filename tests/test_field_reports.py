@@ -220,3 +220,39 @@ def test_append_field_report_candidates_continues_existing_field_ids(tmp_path):
     combined = read_vector(output_path)
     assert combined["candidate_id"].tolist() == ["cand_000001", "field_000012", "field_000013"]
     assert pd.isna(combined.iloc[-1]["road_stream_distance_m"])
+
+
+def test_append_field_report_candidates_preserves_negative_feedback_type(tmp_path):
+    candidates = gpd.GeoDataFrame(
+        [{"candidate_id": "cand_000001", "geometry": Point(0, 0)}],
+        geometry="geometry",
+        crs="EPSG:4326",
+    )
+    feedback = gpd.GeoDataFrame(
+        [
+            {
+                "candidate_id": "old-candidate",
+                "label": "no_culvert",
+                "feedback_type": "inc",
+                "observation_id": "obs-inc",
+                "layout_source": "route_count_target_review",
+                "source_file": "field_observations.geojson",
+                "geometry": Point(1, 1),
+            }
+        ],
+        geometry="geometry",
+        crs="EPSG:4326",
+    )
+    candidates_path = tmp_path / "candidates.gpkg"
+    feedback_path = tmp_path / "feedback.gpkg"
+    output_path = tmp_path / "combined.gpkg"
+    write_vector(candidates, candidates_path)
+    write_vector(feedback, feedback_path)
+
+    append_field_report_candidates(candidates_path, feedback_path, output_path)
+
+    combined = read_vector(output_path)
+    row = combined.iloc[-1]
+    assert row["source"] == "field_observed_non_culvert"
+    assert row["field_observation_label"] == "no_culvert"
+    assert row["field_feedback_type"] == "inc"

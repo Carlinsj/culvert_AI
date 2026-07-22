@@ -180,7 +180,7 @@ def append_field_report_candidates(
         boundary = read_vector(boundary_path).to_crs(candidates.crs)
         field_points = gpd.clip(field_points, boundary)
 
-    field_points = clean_geometry(field_points)
+    field_points = clean_geometry(field_points).reset_index(drop=True)
     if field_points.empty:
         write_vector(candidates, output_path)
         return {
@@ -191,6 +191,16 @@ def append_field_report_candidates(
         }
 
     first_field_index = _next_field_candidate_index(candidates)
+    field_labels = field_points.get("label", pd.Series("", index=field_points.index)).fillna("")
+    is_negative_feedback = field_labels.astype(str).isin({"no_culvert", "missed_prediction"})
+    candidate_source = pd.Series(
+        np.where(
+            is_negative_feedback,
+            "field_observed_non_culvert",
+            "field_report_observed_culvert",
+        ),
+        index=field_points.index,
+    )
     field_candidates = gpd.GeoDataFrame(
         {
             "candidate_id": [
@@ -204,9 +214,26 @@ def append_field_report_candidates(
             "stream_name": field_points.get("culvert_id", pd.Series("", index=field_points.index))
             .fillna("")
             .replace("", "Field observed culvert"),
-            "source": "field_report_observed_culvert",
+            "source": candidate_source,
             "road_stream_distance_m": np.nan,
             "crossing_angle_degrees": np.nan,
+            "field_observation_label": field_labels,
+            "field_feedback_type": field_points.get(
+                "feedback_type",
+                pd.Series("", index=field_points.index),
+            ).fillna(""),
+            "field_feedback_observation_id": field_points.get(
+                "observation_id",
+                pd.Series("", index=field_points.index),
+            ).fillna(""),
+            "field_feedback_layout_source": field_points.get(
+                "layout_source",
+                pd.Series("", index=field_points.index),
+            ).fillna(""),
+            "field_feedback_source": field_points.get(
+                "feedback_source",
+                pd.Series("", index=field_points.index),
+            ).fillna(""),
             "field_report_source_file": field_points.get(
                 "source_file",
                 pd.Series("", index=field_points.index),

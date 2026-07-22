@@ -73,6 +73,8 @@ def test_merge_confirmed_observations_adds_confirmed_points(tmp_path):
     assert "nearest_map_candidate" in set(combined["layout_source"])
     assert "cand-2" not in set(combined["culvert_id"])
     assert denied.iloc[0]["label"] == "no_culvert"
+    assert confirmed.iloc[0]["feedback_type"] == "abu"
+    assert denied.iloc[0]["feedback_type"] == "inc"
     assert denied.iloc[0]["candidate_id"] == "cand-2"
 
 
@@ -147,6 +149,9 @@ def test_merge_observations_turns_far_confirmed_points_into_missed_prediction_la
                 "missed_candidate_distance_m": 100.0,
                 "nearest_candidate_id": "cand_000001",
                 "nearest_candidate_distance_m": 100.0,
+                "predicted_latitude": 42.0005,
+                "predicted_longitude": -74.1005,
+                "layout_source": "moved_route_count_target",
                 "road_name": "State Rte 28",
                 "geometry": Point(-74.1, 42.0),
             },
@@ -172,8 +177,10 @@ def test_merge_observations_turns_far_confirmed_points_into_missed_prediction_la
     assert result["confirmed_added"] == 0
     assert result["denied_saved_for_review"] == 1
     assert denied.iloc[0]["label"] == "missed_prediction"
+    assert denied.iloc[0]["feedback_type"] == "mvd_origin"
     assert denied.iloc[0]["candidate_id"] == "cand_000001"
     assert denied.iloc[0]["miss_distance_m"] == 100.0
+    assert denied.geometry.iloc[0].equals(Point(-74.1005, 42.0005))
 
 
 def test_merge_confirmed_observations_deduplicates_repeated_field_ids(tmp_path):

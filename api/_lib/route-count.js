@@ -20,7 +20,10 @@ const UNKNOWN_EXCLUDED_STATUSES = new Set([
   "field_denied",
   "confirmed_field_observation",
 ]);
-const UNKNOWN_EXCLUDED_SOURCES = new Set(["field_report_observed_culvert"]);
+const UNKNOWN_EXCLUDED_SOURCES = new Set([
+  "field_report_observed_culvert",
+  "field_observed_non_culvert",
+]);
 const ROUTE_TOKEN_RE =
   /\b(?<prefix>NY|NYS|US|U\.S\.|I|CR|COUNTY|STATE)\s*-?\s*(?:(?:HWY|HIGHWAY|RTE|ROUTE|RT|ROAD|RD)\s*-?\s*)?(?<number>\d+[A-Z]?)\b/gi;
 const GENERIC_ROUTE_TOKEN_RE =

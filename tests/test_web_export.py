@@ -8,6 +8,7 @@ from culvert_ai.web_export import (
     _decluster_for_web,
     _limit_for_web,
     _prediction_export_pool,
+    _select_geospatial_route_peaks,
     export_web_data,
 )
 
@@ -47,7 +48,7 @@ def test_limit_for_web_exports_discovery_candidates_only():
     assert set(limited["candidate_id"]) == {"top"}
 
 
-def test_limit_for_web_reserves_field_recall_candidates():
+def test_limit_for_web_does_not_reserve_weak_field_recall_candidates():
     predictions = gpd.GeoDataFrame(
         [
             {
@@ -95,11 +96,11 @@ def test_limit_for_web_reserves_field_recall_candidates():
 
     limited = _limit_for_web(predictions, limit=3)
 
-    assert "field-corridor" in set(limited["candidate_id"])
+    assert "field-corridor" not in set(limited["candidate_id"])
     assert len(limited) == 3
 
 
-def test_limit_for_web_applies_presentation_spacing_to_discovery_candidates():
+def test_limit_for_web_only_removes_true_near_duplicates():
     predictions = gpd.GeoDataFrame(
         [
             {
@@ -136,7 +137,52 @@ def test_limit_for_web_applies_presentation_spacing_to_discovery_candidates():
 
     limited = _limit_for_web(predictions, limit=3)
 
-    assert limited["candidate_id"].tolist() == ["a1"]
+    assert limited["candidate_id"].tolist() == ["a1", "a2", "a3"]
+
+
+def test_route_samples_are_selected_as_geospatial_local_peaks():
+    predictions = gpd.GeoDataFrame(
+        [
+            {
+                "candidate_id": "sample-1",
+                "source": "route_interval_sample",
+                "matched_route": "28",
+                "discovery_rank": 3,
+                "geospatial_evidence_score": 48.0,
+                "geometry": Point(0, 0),
+            },
+            {
+                "candidate_id": "local-peak",
+                "source": "route_interval_sample",
+                "matched_route": "28",
+                "discovery_rank": 1,
+                "geospatial_evidence_score": 67.0,
+                "geometry": Point(25, 0),
+            },
+            {
+                "candidate_id": "sample-3",
+                "source": "route_interval_sample",
+                "matched_route": "28",
+                "discovery_rank": 2,
+                "geospatial_evidence_score": 55.0,
+                "geometry": Point(50, 0),
+            },
+            {
+                "candidate_id": "separate-peak",
+                "source": "route_interval_sample",
+                "matched_route": "28",
+                "discovery_rank": 4,
+                "geospatial_evidence_score": 52.0,
+                "geometry": Point(200, 0),
+            },
+        ],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+
+    selected = _select_geospatial_route_peaks(predictions)
+
+    assert selected["candidate_id"].tolist() == ["local-peak", "separate-peak"]
 
 
 def test_limit_for_web_filters_weak_scores_when_scores_exist():
@@ -214,6 +260,14 @@ def test_prediction_export_pool_removes_known_and_denied_rows():
                 "dist_to_known_culvert_m": 100.0,
                 "source": "field_report_observed_culvert",
                 "geometry": Point(3, 0),
+            },
+            {
+                "candidate_id": "field-negative",
+                "discovery_status": "undiscovered_candidate",
+                "is_known_field_match": 0,
+                "dist_to_known_culvert_m": 100.0,
+                "source": "field_observed_non_culvert",
+                "geometry": Point(4, 0),
             },
         ],
         geometry="geometry",

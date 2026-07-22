@@ -509,7 +509,10 @@ def _unknown_prediction_pool(predictions: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         status = filtered["discovery_status"].fillna("").astype(str)
         filtered = filtered[~status.isin({"known_field_match", "field_denied"})]
     if "source" in filtered.columns:
-        filtered = filtered[filtered["source"].fillna("").astype(str) != "field_report_observed_culvert"]
+        source = filtered["source"].fillna("").astype(str)
+        filtered = filtered[
+            ~source.isin({"field_report_observed_culvert", "field_observed_non_culvert"})
+        ]
     if "is_known_field_match" in filtered.columns:
         known = pd.to_numeric(filtered["is_known_field_match"], errors="coerce").fillna(0).astype(int)
         filtered = filtered[known != 1]

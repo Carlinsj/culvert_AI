@@ -501,8 +501,8 @@ def build_parser() -> argparse.ArgumentParser:
     discovery.add_argument("--csv-output", help="Optional CSV export for field review.")
     discovery.add_argument("--kml-output", help="Optional KML export for Google Earth review.")
     discovery.add_argument("--kml-max-points", type=int, default=500)
-    discovery.add_argument("--evidence-weight", type=float, default=0.40)
-    discovery.add_argument("--model-weight", type=float, default=0.60)
+    discovery.add_argument("--evidence-weight", type=float, default=0.70)
+    discovery.add_argument("--model-weight", type=float, default=0.30)
     discovery.add_argument("--known-radius-m", type=float, default=10.0)
     discovery.set_defaults(func=_build_discovery_ranking)
 

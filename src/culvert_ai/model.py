@@ -76,7 +76,29 @@ DEFAULT_EXCLUDED_FEATURES = {
     "source_nearest_approach",
     "source_route_interval_sample",
     "source_field_report_observed",
+    "source_field_observed_non_culvert",
     "has_matched_route",
+    # Candidate-construction fields are missing on field-observed positives and
+    # otherwise let the model identify the row source instead of the terrain.
+    "road_speed_limit",
+    "stream_order",
+    "road_stream_distance_m",
+    "crossing_angle_degrees",
+    "log_road_stream_distance_m",
+    "is_exact_road_stream_intersection",
+    "road_stream_proximity_signal",
+    "crossing_angle_abs_from_90",
+    "crossing_angle_perpendicularity",
+    "crossing_geometry_signal",
+    "has_road_name",
+    "has_stream_name",
+    "road_bridge_flag",
+    "road_tunnel_flag",
+    "stream_culvert_flag",
+    "stream_tunnel_flag",
+    # Generated candidates lie on the road centerline; field GPS points do not.
+    # This was the strongest source-leakage feature in the old model.
+    "distance_to_nearest_road_m",
 }
 
 DEFAULT_EXCLUDED_FEATURE_PREFIXES = (
@@ -129,7 +151,8 @@ def train_model(
     if not feature_columns:
         raise ValueError("No numeric feature columns were found for training.")
 
-    x = _prepare_features(features, feature_columns)
+    fill_values = _feature_fill_values(features, feature_columns)
+    x = _prepare_features(features, feature_columns, fill_value=fill_values)
     sample_weight = _training_sample_weight(features)
 
     model_candidates = _candidate_models(random_state)
@@ -141,6 +164,7 @@ def train_model(
 
     metrics = {
         "feature_columns": feature_columns,
+        "missing_value_strategy": "training_feature_median",
         "rows": int(len(features)),
         "selection_metric": "spatial_holdout_average_precision_then_cross_validated_average_precision",
         "target_precision_floor": DEFAULT_TARGET_PRECISION,
@@ -211,7 +235,7 @@ def train_model(
         "model_family": selected_name,
         "feature_columns": feature_columns,
         "target_column": target_column,
-        "fill_value": -9999.0,
+        "fill_values": fill_values,
         "random_state": random_state,
         "training_rows": int(len(features)),
         "class_counts": metrics["class_counts"],
@@ -239,7 +263,8 @@ def predict_culvert_probability(
     bundle = joblib.load(model_path)
     model = bundle["model"]
     feature_columns = bundle["feature_columns"]
-    x = _prepare_features(features, feature_columns, fill_value=bundle.get("fill_value", -9999.0))
+    fill_value = bundle.get("fill_values", bundle.get("fill_value", -9999.0))
+    x = _prepare_features(features, feature_columns, fill_value=fill_value)
 
     result = features.copy()
     result["culvert_probability"] = model.predict_proba(x)[:, 1]
@@ -709,7 +734,7 @@ def _estimator_feature_importance(estimator) -> np.ndarray | None:
 def _prepare_features(
     table: pd.DataFrame,
     feature_columns: list[str],
-    fill_value: float = -9999.0,
+    fill_value: float | dict[str, float] | pd.Series = -9999.0,
 ) -> pd.DataFrame:
     prepared = table.copy()
     for column in feature_columns:
@@ -722,6 +747,12 @@ def _prepare_features(
         .fillna(fill_value)
         .astype(float)
     )
+
+
+def _feature_fill_values(table: pd.DataFrame, feature_columns: list[str]) -> dict[str, float]:
+    numeric = table.reindex(columns=feature_columns).replace([np.inf, -np.inf], np.nan)
+    medians = numeric.apply(pd.to_numeric, errors="coerce").median(axis=0).fillna(0.0)
+    return {column: float(medians.get(column, 0.0)) for column in feature_columns}
 
 
 def _classification_metrics(y_true, y_pred, y_probability) -> dict:

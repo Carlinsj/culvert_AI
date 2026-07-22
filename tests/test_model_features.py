@@ -39,7 +39,6 @@ def test_select_feature_columns_excludes_labels_and_coordinates():
     )
 
     assert select_feature_columns(table) == [
-        "road_stream_distance_m",
         "stream_density_m_per_sqkm",
         "dem_culvert_terrain_score",
     ]

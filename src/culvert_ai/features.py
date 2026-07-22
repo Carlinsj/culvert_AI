@@ -140,6 +140,9 @@ def add_candidate_derived_features(candidates: gpd.GeoDataFrame) -> gpd.GeoDataF
         features["source_field_report_observed"] = source.eq(
             "field_report_observed_culvert"
         ).astype(int)
+        features["source_field_observed_non_culvert"] = source.eq(
+            "field_observed_non_culvert"
+        ).astype(int)
 
     for column in ("road_name", "stream_name", "matched_route"):
         if column in features.columns:
@@ -188,7 +191,7 @@ def _best_training_match(candidates: gpd.GeoDataFrame, distances: pd.Series):
             "source_priority": source_priority,
         },
         index=candidates.index,
-    ).sort_values(["distance", "source_priority"], kind="mergesort")
+    ).sort_values(["source_priority", "distance"], kind="mergesort")
     return order.index[0]
 
 
@@ -198,10 +201,11 @@ def _known_label_source_priority(candidates: gpd.GeoDataFrame) -> pd.Series:
 
     source = candidates["source"].fillna("").astype(str)
     priority = pd.Series(5, index=candidates.index)
-    priority.loc[source == "field_report_observed_culvert"] = 0
-    priority.loc[source == "exact_road_stream_intersection"] = 1
-    priority.loc[source == "nearest_road_stream_approach"] = 2
-    priority.loc[source == "route_interval_sample"] = 3
+    priority.loc[source == "exact_road_stream_intersection"] = 0
+    priority.loc[source == "nearest_road_stream_approach"] = 1
+    priority.loc[source == "route_interval_sample"] = 2
+    priority.loc[source == "field_report_observed_culvert"] = 3
+    priority.loc[source == "field_observed_non_culvert"] = 9
     return priority
 
 
@@ -215,6 +219,10 @@ def add_nearest_known_culvert_metadata(
         "route": "nearest_field_report_route",
         "culvert_id": "nearest_field_report_culvert_id",
         "source_file": "nearest_field_report_source_file",
+        "feedback_type": "nearest_field_feedback_type",
+        "layout_source": "nearest_field_feedback_layout_source",
+        "feedback_source": "nearest_field_feedback_source",
+        "observation_id": "nearest_field_feedback_observation_id",
     }
 
     for output_column in metadata_columns.values():
@@ -379,6 +387,9 @@ def add_negative_culvert_labels(
     labeled["dist_to_denied_culvert_m"] = np.nan
     labeled["nearest_denied_observation_id"] = ""
     labeled["nearest_denied_notes"] = ""
+    labeled["nearest_denied_label"] = ""
+    labeled["nearest_denied_feedback_type"] = ""
+    labeled["nearest_denied_layout_source"] = ""
 
     if negative_culverts.empty:
         return labeled
@@ -395,6 +406,15 @@ def add_negative_culvert_labels(
             if candidate_id:
                 negative_by_candidate_id[candidate_id] = negative_reset.iloc[int(negative_index)]
 
+    direct_feedback_observation_ids: set[str] = set()
+    if {"source", "field_feedback_observation_id"}.issubset(labeled.columns):
+        direct_rows = labeled[
+            labeled["source"].fillna("").astype(str).eq("field_observed_non_culvert")
+        ]
+        direct_feedback_observation_ids = set(
+            direct_rows["field_feedback_observation_id"].fillna("").astype(str)
+        ) - {""}
+
     for row_index, geometry in labeled.geometry.items():
         distances = negative_reset.geometry.distance(geometry)
         nearest_index = int(distances.idxmin())
@@ -404,15 +424,29 @@ def add_negative_culvert_labels(
         candidate_id = (
             str(labeled.at[row_index, "candidate_id"]) if "candidate_id" in labeled else ""
         )
+        candidate_source = ""
+        if "source" in labeled:
+            source_value = labeled.at[row_index, "source"]
+            candidate_source = "" if pd.isna(source_value) else str(source_value)
+        direct_feedback_negative = candidate_source == "field_observed_non_culvert"
         exact_negative = negative_by_candidate_id.get(candidate_id)
-        if exact_negative is not None:
+        nearest_observation_value = nearest.get("observation_id", "")
+        nearest_observation_id = (
+            "" if pd.isna(nearest_observation_value) else str(nearest_observation_value)
+        )
+        has_direct_feedback_row = nearest_observation_id in direct_feedback_observation_ids
+        if has_direct_feedback_row and not direct_feedback_negative:
+            mark_negative = False
+        elif exact_negative is not None:
             nearest = exact_negative
             miss_distance_m = _optional_float(nearest.get("miss_distance_m"))
             if miss_distance_m is not None:
                 labeled.at[row_index, "dist_to_denied_culvert_m"] = miss_distance_m
             mark_negative = True
         else:
-            mark_negative = distance <= negative_radius_m and not _is_missed_prediction(nearest)
+            mark_negative = distance <= negative_radius_m and (
+                direct_feedback_negative or not _is_missed_prediction(nearest)
+            )
 
         if mark_negative:
             _mark_negative_label(labeled, row_index, nearest)
@@ -427,6 +461,14 @@ def _mark_negative_label(labeled: gpd.GeoDataFrame, row_index, nearest: pd.Serie
         labeled.at[row_index, "nearest_denied_observation_id"] = str(nearest["observation_id"])
     if "notes" in nearest.index and pd.notna(nearest["notes"]):
         labeled.at[row_index, "nearest_denied_notes"] = str(nearest["notes"])
+    metadata_columns = {
+        "label": "nearest_denied_label",
+        "feedback_type": "nearest_denied_feedback_type",
+        "layout_source": "nearest_denied_layout_source",
+    }
+    for source_column, output_column in metadata_columns.items():
+        if source_column in nearest.index and pd.notna(nearest[source_column]):
+            labeled.at[row_index, output_column] = str(nearest[source_column])
 
 
 def _is_missed_prediction(row: pd.Series) -> bool:
@@ -637,23 +679,30 @@ def add_hydrology_raster_features(points: gpd.GeoDataFrame, prefix: str) -> gpd.
 
 
 def add_training_sample_weights(points: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-    """Weight field-confirmed labels above weak unlabeled pseudo-negatives."""
+    """Make explicit field feedback outweigh unlabeled background samples."""
 
     weighted = points.copy()
-    weights = pd.Series(0.25, index=weighted.index, dtype=float)
+    weights = pd.Series(0.05, index=weighted.index, dtype=float)
 
     is_positive = _numeric_flag(weighted, "is_culvert")
     is_denied = _numeric_flag(weighted, "field_denied")
-    is_abu_positive = is_positive & _field_observation_match(weighted)
-    is_field_positive = is_positive & ~is_abu_positive
-    is_missed_negative = is_denied & _string_contains(
-        weighted, "nearest_denied_notes", "confirmed culvert was"
+    is_feedback_positive = is_positive & _field_observation_match(weighted)
+    is_field_positive = is_positive & ~is_feedback_positive
+    is_abu_positive = is_feedback_positive & _feedback_type_match(weighted, "abu")
+    is_cbu_positive = is_feedback_positive & _feedback_type_match(weighted, "cbu")
+    is_mvd_positive = is_feedback_positive & _feedback_type_match(weighted, "mvd")
+    is_missed_negative = is_denied & (
+        _feedback_type_match(weighted, "mvd_origin")
+        | _string_contains(weighted, "nearest_denied_notes", "confirmed culvert was")
     )
 
     weights.loc[is_field_positive] = 6.0
+    weights.loc[is_feedback_positive] = 18.0
     weights.loc[is_abu_positive] = 24.0
-    weights.loc[is_denied] = 12.0
-    weights.loc[is_missed_negative] = 16.0
+    weights.loc[is_cbu_positive] = 20.0
+    weights.loc[is_mvd_positive] = 32.0
+    weights.loc[is_denied] = 24.0
+    weights.loc[is_missed_negative] = 32.0
 
     weighted["training_sample_weight"] = weights
     return weighted
@@ -690,6 +739,18 @@ def _string_contains(table: pd.DataFrame, column: str, needle: str) -> pd.Series
     if column not in table.columns:
         return pd.Series(False, index=table.index)
     return table[column].fillna("").astype(str).str.contains(needle, case=False, regex=False)
+
+
+def _feedback_type_match(table: pd.DataFrame, feedback_type: str) -> pd.Series:
+    result = pd.Series(False, index=table.index)
+    for column in (
+        "field_feedback_type",
+        "nearest_field_feedback_type",
+        "nearest_denied_feedback_type",
+    ):
+        if column in table.columns:
+            result |= table[column].fillna("").astype(str).str.lower().eq(feedback_type)
+    return result
 
 
 def _density_radii(

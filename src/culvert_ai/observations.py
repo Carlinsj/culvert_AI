@@ -4,6 +4,7 @@ from pathlib import Path
 
 import geopandas as gpd
 import pandas as pd
+from shapely.geometry import Point
 
 from culvert_ai.io import read_vector, write_vector
 
@@ -45,6 +46,8 @@ def merge_confirmed_observations(
                 "observation_id",
                 "field_culvert_id",
                 "layout_source",
+                "feedback_source",
+                "feedback_type",
                 "notes",
                 "geometry",
             ],
@@ -113,6 +116,8 @@ def _confirmed_observations_as_known(
             "observation_id": _string_series(confirmed, "observation_id"),
             "field_culvert_id": _string_series(confirmed, "field_culvert_id"),
             "layout_source": _string_series(confirmed, "layout_source"),
+            "feedback_source": _string_series(confirmed, "source"),
+            "feedback_type": confirmed.apply(_feedback_type, axis=1),
             "notes": _string_series(confirmed, "notes"),
         },
         geometry=confirmed.geometry,
@@ -161,6 +166,8 @@ def _denied_observations_as_negative(observations: gpd.GeoDataFrame) -> gpd.GeoD
             "observation_id": _string_series(denied, "observation_id"),
             "field_culvert_id": _string_series(denied, "field_culvert_id"),
             "layout_source": _string_series(denied, "layout_source"),
+            "feedback_source": _string_series(denied, "source"),
+            "feedback_type": "inc",
             "candidate_id": _string_series(denied, "candidate_id"),
             "miss_distance_m": pd.Series([pd.NA] * len(denied), index=denied.index),
             "notes": _string_series(denied, "notes"),
@@ -209,6 +216,7 @@ def _missed_predictions_as_negative(
     )
     notes = notes.where(notes == "", notes + "; ") + miss_notes
 
+    geometry = missed.apply(_missed_prediction_geometry, axis=1)
     return gpd.GeoDataFrame(
         {
             "report_date": _string_series(missed, "observed_at").map(_date_part),
@@ -220,11 +228,13 @@ def _missed_predictions_as_negative(
             "observation_id": _string_series(missed, "observation_id"),
             "field_culvert_id": _string_series(missed, "field_culvert_id"),
             "layout_source": _string_series(missed, "layout_source"),
+            "feedback_source": _string_series(missed, "source"),
+            "feedback_type": "mvd_origin",
             "candidate_id": _string_series(missed, "miss_candidate_id"),
             "miss_distance_m": missed["miss_distance_m"],
             "notes": notes,
         },
-        geometry=missed.geometry,
+        geometry=geometry,
         crs=missed.crs,
     )
 
@@ -241,6 +251,8 @@ def _empty_observation_labels(crs) -> gpd.GeoDataFrame:
             "observation_id",
             "field_culvert_id",
             "layout_source",
+            "feedback_source",
+            "feedback_type",
             "candidate_id",
             "miss_distance_m",
             "notes",
@@ -280,6 +292,24 @@ def _observation_dedupe_key(row: pd.Series) -> str:
 
 def _is_prediction_candidate_id(candidate_id: str) -> bool:
     return str(candidate_id or "").strip().lower().startswith("cand_")
+
+
+def _feedback_type(row: pd.Series) -> str:
+    layout_source = str(row.get("layout_source", "") or "").strip().lower()
+    feedback_source = str(row.get("source", "") or "").strip().lower()
+    if layout_source == "moved_route_count_target":
+        return "mvd"
+    if layout_source == "route_count_target_review" or feedback_source == "prediction_review":
+        return "cbu"
+    return "abu"
+
+
+def _missed_prediction_geometry(row: pd.Series):
+    latitude = pd.to_numeric(pd.Series([row.get("predicted_latitude")]), errors="coerce").iloc[0]
+    longitude = pd.to_numeric(pd.Series([row.get("predicted_longitude")]), errors="coerce").iloc[0]
+    if pd.notna(latitude) and pd.notna(longitude):
+        return Point(float(longitude), float(latitude))
+    return row.geometry
 
 
 def _string_series(table: gpd.GeoDataFrame, column: str) -> pd.Series:

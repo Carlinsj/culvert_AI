@@ -256,6 +256,85 @@ def test_missed_prediction_negative_does_not_deny_true_culvert_geometry():
     assert features.loc["true-culvert", "is_culvert"] == 1
 
 
+def test_direct_mvd_origin_candidate_is_used_when_old_candidate_id_is_stale():
+    candidates = gpd.GeoDataFrame(
+        [
+            {
+                "candidate_id": "field_000001",
+                "source": "field_observed_non_culvert",
+                "field_observation_label": "missed_prediction",
+                "geometry": Point(0, 0),
+            }
+        ],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+    negatives = gpd.GeoDataFrame(
+        [
+            {
+                "observation_id": "obs-mvd",
+                "candidate_id": "stale-candidate-id",
+                "label": "missed_prediction",
+                "feedback_type": "mvd_origin",
+                "geometry": Point(0, 0),
+            }
+        ],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+
+    features = build_feature_table(
+        candidates,
+        negative_culverts=negatives,
+        negative_radius_m=10,
+    ).set_index("candidate_id")
+
+    assert features.loc["field_000001", "field_denied"] == 1
+    assert features.loc["field_000001", "nearest_denied_feedback_type"] == "mvd_origin"
+
+
+def test_direct_feedback_row_prevents_duplicate_negative_weighting():
+    candidates = gpd.GeoDataFrame(
+        [
+            {
+                "candidate_id": "generated-nearby",
+                "source": "route_interval_sample",
+                "geometry": Point(2, 0),
+            },
+            {
+                "candidate_id": "field_000001",
+                "source": "field_observed_non_culvert",
+                "field_feedback_observation_id": "obs-inc",
+                "geometry": Point(0, 0),
+            },
+        ],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+    negatives = gpd.GeoDataFrame(
+        [
+            {
+                "observation_id": "obs-inc",
+                "candidate_id": "old-candidate-id",
+                "label": "no_culvert",
+                "feedback_type": "inc",
+                "geometry": Point(0, 0),
+            }
+        ],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+
+    features = build_feature_table(
+        candidates,
+        negative_culverts=negatives,
+        negative_radius_m=10,
+    ).set_index("candidate_id")
+
+    assert features.loc["field_000001", "field_denied"] == 1
+    assert features.loc["generated-nearby", "field_denied"] == 0
+
+
 def test_known_culvert_labels_one_training_point_per_known_culvert():
     candidates = gpd.GeoDataFrame(
         [
@@ -296,8 +375,8 @@ def test_known_culvert_labels_one_training_point_per_known_culvert():
     ).set_index("candidate_id")
 
     assert int(features["is_culvert"].sum()) == 1
-    assert features.loc["field-point", "is_culvert"] == 1
-    assert features.loc["near-crossing", "is_culvert"] == 0
+    assert features.loc["field-point", "is_culvert"] == 0
+    assert features.loc["near-crossing", "is_culvert"] == 1
     assert features.loc["near-route", "is_culvert"] == 0
 
 
@@ -392,12 +471,21 @@ def test_training_sample_weights_prioritize_abu_inputs():
                 "candidate_id": "abu-positive",
                 "is_culvert": 1,
                 "nearest_field_report_source_file": "field_observations.geojson",
+                "nearest_field_feedback_type": "abu",
                 "geometry": Point(2, 0),
+            },
+            {
+                "candidate_id": "mvd-positive",
+                "is_culvert": 1,
+                "nearest_field_report_source_file": "field_observations.geojson",
+                "nearest_field_feedback_type": "mvd",
+                "geometry": Point(2.5, 0),
             },
             {
                 "candidate_id": "abu-denied",
                 "is_culvert": 0,
                 "field_denied": 1,
+                "nearest_denied_feedback_type": "inc",
                 "nearest_denied_notes": "no crossing found",
                 "geometry": Point(3, 0),
             },
@@ -405,6 +493,7 @@ def test_training_sample_weights_prioritize_abu_inputs():
                 "candidate_id": "abu-missed",
                 "is_culvert": 0,
                 "field_denied": 1,
+                "nearest_denied_feedback_type": "mvd_origin",
                 "nearest_denied_notes": "confirmed culvert was 100.0 m from this prediction",
                 "geometry": Point(4, 0),
             },
@@ -415,8 +504,9 @@ def test_training_sample_weights_prioritize_abu_inputs():
 
     weighted = add_training_sample_weights(features).set_index("candidate_id")
 
-    assert weighted.loc["weak-unlabeled", "training_sample_weight"] == 0.25
+    assert weighted.loc["weak-unlabeled", "training_sample_weight"] == 0.05
     assert weighted.loc["report-positive", "training_sample_weight"] == 6.0
     assert weighted.loc["abu-positive", "training_sample_weight"] == 24.0
-    assert weighted.loc["abu-denied", "training_sample_weight"] == 12.0
-    assert weighted.loc["abu-missed", "training_sample_weight"] == 16.0
+    assert weighted.loc["mvd-positive", "training_sample_weight"] == 32.0
+    assert weighted.loc["abu-denied", "training_sample_weight"] == 24.0
+    assert weighted.loc["abu-missed", "training_sample_weight"] == 32.0
