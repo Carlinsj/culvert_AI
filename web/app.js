@@ -423,30 +423,59 @@ function feedbackWriteHeaders(headers = {}) {
 
 function loadFeedbackWriteToken() {
   try {
-    return String(window.sessionStorage?.getItem(FEEDBACK_WRITE_TOKEN_KEY) || "").trim();
+    const persistentToken = String(
+      window.localStorage?.getItem(FEEDBACK_WRITE_TOKEN_KEY) || "",
+    ).trim();
+    if (persistentToken) return persistentToken;
+
+    const sessionToken = String(
+      window.sessionStorage?.getItem(FEEDBACK_WRITE_TOKEN_KEY) || "",
+    ).trim();
+    if (sessionToken) {
+      storeFeedbackWriteToken(sessionToken);
+    }
+    return sessionToken;
   } catch {
-    return "";
+    try {
+      return String(window.sessionStorage?.getItem(FEEDBACK_WRITE_TOKEN_KEY) || "").trim();
+    } catch {
+      return "";
+    }
   }
 }
 
 function promptFeedbackWriteToken() {
   if (typeof window.prompt !== "function") return "";
-  const token = String(window.prompt("Field update token") || "").trim();
+  const token = String(window.prompt("Field update password") || "").trim();
   if (!token) return "";
 
-  try {
-    window.sessionStorage?.setItem(FEEDBACK_WRITE_TOKEN_KEY, token);
-  } catch {
-    // Token memory is best-effort; the next write will prompt again if storage is unavailable.
-  }
+  storeFeedbackWriteToken(token);
   return token;
+}
+
+function storeFeedbackWriteToken(token) {
+  try {
+    window.localStorage?.setItem(FEEDBACK_WRITE_TOKEN_KEY, token);
+    window.sessionStorage?.removeItem(FEEDBACK_WRITE_TOKEN_KEY);
+  } catch {
+    try {
+      window.sessionStorage?.setItem(FEEDBACK_WRITE_TOKEN_KEY, token);
+    } catch {
+      // Credential storage is best-effort in private or restricted browsing modes.
+    }
+  }
 }
 
 function clearFeedbackWriteToken() {
   try {
+    window.localStorage?.removeItem(FEEDBACK_WRITE_TOKEN_KEY);
+  } catch {
+    // Local storage may be unavailable in private or restricted browsing modes.
+  }
+  try {
     window.sessionStorage?.removeItem(FEEDBACK_WRITE_TOKEN_KEY);
   } catch {
-    // Session storage may be unavailable in private or restricted browsing modes.
+    // Session storage may also be unavailable.
   }
 }
 

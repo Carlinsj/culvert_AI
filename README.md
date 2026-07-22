@@ -255,9 +255,11 @@ configured, opening the updated app on the same phone will try to sync those loc
 observations to `/api/observations`.
 
 Deployed `POST /api/observations` and `DELETE /api/observations?id=...` requests
-require `CULVERT_FEEDBACK_WRITE_TOKEN`. Field users enter that token once per
-browser session when the app asks for the field update token. Local development
-does not require it unless `CULVERT_REQUIRE_FEEDBACK_AUTH=1` is set.
+require `CULVERT_FEEDBACK_WRITE_TOKEN`. Field users enter that credential once per
+browser profile on a device when the app asks for the field update password. The
+browser keeps it across tabs and restarts, migrates credentials saved by older
+session-only versions, and removes it if the server rejects or revokes it. Local
+development does not require it unless `CULVERT_REQUIRE_FEEDBACK_AUTH=1` is set.
 
 The local dev server's `/api/run-*` endpoints can start pipeline commands. They
 remain available to loopback clients, but remote clients must send
