@@ -7,6 +7,7 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .cache/
+graphify-out/
 node_modules/
 npm-debug.log*
 
