@@ -402,10 +402,14 @@ def _dem_route_drainage_score(table: pd.DataFrame) -> pd.Series:
     ):
         if column in table.columns:
             pieces.append(_score_dem_route_column(table[column]))
-    if not pieces:
-        return _zero(table)
-
-    return (route_signal * _mean_score(table, pieces)).clip(0, 1)
+    base_score = _mean_score(table, pieces) if pieces else _zero(table)
+    low_point_score = _score_0_to_1(
+        table,
+        "route_low_point_score",
+        scale=1.0,
+    ).fillna(0.0)
+    combined = pd.concat([base_score, low_point_score], axis=1).max(axis=1)
+    return (route_signal * combined).clip(0, 1)
 
 
 def _score_dem_route_column(series: pd.Series) -> pd.Series:
@@ -447,6 +451,7 @@ def _evidence_summary(row: pd.Series) -> str:
         ("terrain_break_score", "terrain break or relief", 0.6),
         ("road_context_score", "road corridor context", 0.6),
         ("dem_route_drainage_score", "DEM road low point or drainage dip", 0.6),
+        ("route_low_point_score", "along-road DEM elevation dip", 0.55),
         ("osm_culvert_tag_score", "mapped culvert/tunnel signal", 0.6),
         ("field_report_support_score", "field report match", 0.6),
         ("field_corridor_support_score", "approved culvert corridor pattern", 0.35),
@@ -483,12 +488,15 @@ def _field_report_support_score(table: pd.DataFrame) -> pd.Series:
 def _field_corridor_support_score(table: pd.DataFrame) -> pd.Series:
     pieces = []
     for column in (
+        "field_route_feedback_score",
         "approved_known_culvert_pattern_score",
         "approved_known_culvert_corridor_score",
     ):
         if column in table.columns:
             pieces.append(pd.to_numeric(table[column], errors="coerce").fillna(0.0).clip(0, 1))
-    return _mean_score(table, pieces)
+    if not pieces:
+        return _zero(table)
+    return pd.concat(pieces, axis=1).max(axis=1).fillna(0.0).clip(0, 1)
 
 
 def _attach_supervised_probability(

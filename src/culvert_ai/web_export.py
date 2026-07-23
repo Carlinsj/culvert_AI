@@ -52,6 +52,9 @@ WEB_COLUMNS = [
     "osm_culvert_tag_score",
     "field_report_support_score",
     "field_corridor_support_score",
+    "field_route_feedback_reviews",
+    "field_route_feedback_precision",
+    "field_route_feedback_score",
     "non_culvert_structure_penalty",
     "dist_to_known_culvert_m",
     "is_culvert",
@@ -81,6 +84,9 @@ WEB_COLUMNS = [
     "drainage_area_log",
     "drainage_area_rank_pct",
     "terrain_roughness_9x9_m",
+    "route_elevation_dip_60m",
+    "route_elevation_dip_rank_pct",
+    "route_low_point_score",
     "stream_density_250m_m_per_sqkm",
     "road_density_250m_m_per_sqkm",
 ]
@@ -109,17 +115,24 @@ ROUTE_COUNT_COLUMNS = [
     "dist_to_known_culvert_m",
     "is_culvert",
     "nearest_field_report_route",
+    "field_route_feedback_reviews",
+    "field_route_feedback_precision",
+    "field_route_feedback_score",
+    "route_elevation_dip_60m",
+    "route_low_point_score",
 ]
 
 KNOWN_EXPORT_FALLBACK_RADIUS_M = 10.0
 WEB_EXPORT_MIN_SCORE = 40.0
 WEB_EXPORT_MIN_SPACING_M = 1.0
 WEB_EXPORT_MAX_PER_ROAD = 120
-WEB_EXPORT_ROUTE_MIN_GEOSPATIAL_SCORE = 45.0
+WEB_EXPORT_ROUTE_MIN_GEOSPATIAL_SCORE = 30.0
+WEB_EXPORT_ROUTE_FEEDBACK_MIN_GEOSPATIAL_SCORE = 20.0
+WEB_EXPORT_ROUTE_FEEDBACK_MIN_SCORE = 0.55
+WEB_EXPORT_ROUTE_FEEDBACK_MIN_REVIEWS = 4.0
 WEB_EXPORT_ROUTE_PROFILE_MAX_GAP_M = 40.0
 WEB_EXPORT_ROUTE_SCORE_PEAK_MIN_PROMINENCE = 0.25
-WEB_EXPORT_ROUTE_COMPONENT_PEAK_MIN = 0.60
-WEB_EXPORT_ROUTE_COMPONENT_PEAK_MIN_PROMINENCE = 0.05
+WEB_EXPORT_ROUTE_COMPONENT_PEAK_MIN_PROMINENCE = 0.03
 ROUTE_COMPONENT_PEAK_COLUMNS = (
     "road_stream_proximity_score",
     "drainage_strength_score",
@@ -127,6 +140,8 @@ ROUTE_COMPONENT_PEAK_COLUMNS = (
     "crossing_geometry_score",
     "terrain_break_score",
     "dem_route_drainage_score",
+    "route_low_point_score",
+    "culvert_probability",
 )
 
 
@@ -234,7 +249,18 @@ def _limit_for_web(predictions: gpd.GeoDataFrame, limit: int) -> gpd.GeoDataFram
 
 
 def _quality_export_pool(predictions: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-    pool = _minimum_score_export_pool(predictions)
+    if "source" not in predictions.columns:
+        return _minimum_score_export_pool(predictions)
+    source = predictions["source"].fillna("").astype(str)
+    route = predictions[source.eq("route_interval_sample")]
+    non_route = _minimum_score_export_pool(
+        predictions[~source.eq("route_interval_sample")]
+    )
+    pool = gpd.GeoDataFrame(
+        pd.concat([non_route, route], ignore_index=False),
+        geometry="geometry",
+        crs=predictions.crs,
+    )
     return _select_geospatial_route_peaks(pool)
 
 
@@ -271,7 +297,31 @@ def _select_geospatial_route_peaks(
     route["_geospatial_peak_score"] = pd.to_numeric(
         route[geospatial_column], errors="coerce"
     ).fillna(0.0)
-    eligible = route["_geospatial_peak_score"] >= float(min_geospatial_score)
+    feedback_score = pd.to_numeric(
+        route.get(
+            "field_route_feedback_score",
+            pd.Series(0.0, index=route.index),
+        ),
+        errors="coerce",
+    ).fillna(0.0)
+    feedback_reviews = pd.to_numeric(
+        route.get(
+            "field_route_feedback_reviews",
+            pd.Series(0.0, index=route.index),
+        ),
+        errors="coerce",
+    ).fillna(0.0)
+    feedback_eligible = (
+        (feedback_score >= WEB_EXPORT_ROUTE_FEEDBACK_MIN_SCORE)
+        & (feedback_reviews >= WEB_EXPORT_ROUTE_FEEDBACK_MIN_REVIEWS)
+        & (
+            route["_geospatial_peak_score"]
+            >= WEB_EXPORT_ROUTE_FEEDBACK_MIN_GEOSPATIAL_SCORE
+        )
+    )
+    eligible = (
+        route["_geospatial_peak_score"] >= float(min_geospatial_score)
+    ) | feedback_eligible
     if not eligible.any():
         return gpd.GeoDataFrame(non_route, geometry="geometry", crs=predictions.crs)
     if neighborhood_m <= 0:
@@ -291,7 +341,15 @@ def _select_geospatial_route_peaks(
         component = pd.to_numeric(route[column], errors="coerce")
         if component.max(skipna=True) > 1.0:
             component = component / 100.0
-        strong_component = component >= WEB_EXPORT_ROUTE_COMPONENT_PEAK_MIN
+        component_floor = 0.75
+        if column == "route_low_point_score":
+            component_floor = 0.65
+        elif column == "culvert_probability":
+            component_floor = max(
+                0.05,
+                float(component.quantile(0.60)) if component.notna().any() else 1.0,
+            )
+        strong_component = component >= component_floor
         peak_mask |= strong_component.fillna(False) & _route_profile_peak_mask(
             route,
             component,
@@ -325,33 +383,55 @@ def _route_profile_peak_mask(
         missing_indices = [index for index in profile_indices if pd.isna(distances.loc[index])]
         peaks.loc[missing_indices] = True
         ordered = sorted(finite_indices, key=lambda index: float(distances.loc[index]))
+        position = 0
+        while position < len(ordered):
+            row_index = ordered[position]
+            row_value = values.loc[row_index]
+            if pd.isna(row_value):
+                position += 1
+                continue
 
-        for position, row_index in enumerate(ordered):
+            plateau_end = position
+            while plateau_end + 1 < len(ordered):
+                current = ordered[plateau_end]
+                following = ordered[plateau_end + 1]
+                if distances.loc[following] - distances.loc[current] > max_profile_gap_m:
+                    break
+                if not np.isclose(
+                    float(values.loc[following]),
+                    float(row_value),
+                    rtol=1e-7,
+                    atol=1e-9,
+                ):
+                    break
+                plateau_end += 1
+
             neighbors = []
             if position > 0:
                 previous = ordered[position - 1]
                 if distances.loc[row_index] - distances.loc[previous] <= max_profile_gap_m:
                     neighbors.append(previous)
-            if position + 1 < len(ordered):
-                following = ordered[position + 1]
-                if distances.loc[following] - distances.loc[row_index] <= max_profile_gap_m:
+            if plateau_end + 1 < len(ordered):
+                following = ordered[plateau_end + 1]
+                last_plateau = ordered[plateau_end]
+                if distances.loc[following] - distances.loc[last_plateau] <= max_profile_gap_m:
                     neighbors.append(following)
 
-            row_value = values.loc[row_index]
             comparable = [index for index in neighbors if pd.notna(values.loc[index])]
-            if pd.isna(row_value):
-                continue
-            if not comparable:
+            if comparable:
+                neighbor_values = [float(values.loc[index]) for index in comparable]
+                row_value_float = float(row_value)
+                is_maximum = all(
+                    row_value_float >= value or np.isclose(row_value_float, value)
+                    for value in neighbor_values
+                )
+                prominence = row_value_float - max(neighbor_values)
+                if is_maximum and prominence >= float(min_prominence):
+                    representative_position = (position + plateau_end) // 2
+                    peaks.loc[ordered[representative_position]] = True
+            elif position == plateau_end:
                 peaks.loc[row_index] = True
-                continue
-
-            neighbor_values = [float(values.loc[index]) for index in comparable]
-            row_value = float(row_value)
-            if any(value > row_value and not np.isclose(value, row_value) for value in neighbor_values):
-                continue
-            if row_value - max(neighbor_values) >= float(min_prominence):
-                peaks.loc[row_index] = True
-                continue
+            position = plateau_end + 1
 
     return peaks
 

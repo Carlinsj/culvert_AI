@@ -45,6 +45,43 @@ warnings.filterwarnings(
 
 DEFAULT_TARGET_PRECISION = 0.60
 
+CORE_MODEL_FEATURES = (
+    "distance_to_nearest_stream_m",
+    "road_density_100m_m_per_sqkm",
+    "road_density_250m_m_per_sqkm",
+    "road_density_500m_m_per_sqkm",
+    "road_density_m_per_sqkm",
+    "stream_density_100m_m_per_sqkm",
+    "stream_density_250m_m_per_sqkm",
+    "stream_density_500m_m_per_sqkm",
+    "stream_density_m_per_sqkm",
+    "slope_degrees",
+    "elevation_relief_9x9_m",
+    "elevation_relief_31x31_m",
+    "terrain_roughness_9x9_m",
+    "terrain_roughness_31x31_m",
+    "topographic_position_9x9_m",
+    "topographic_position_31x31_m",
+    "valley_depth_9x9_m",
+    "valley_depth_31x31_m",
+    "topographic_wetness_proxy_9x9",
+    "topographic_wetness_proxy_31x31",
+    "low_slope_valley_score_9x9",
+    "low_slope_valley_score_31x31",
+    "terrain_break_score_proxy_9x9",
+    "terrain_break_score_proxy_31x31",
+    "negative_tpi_9x9_m",
+    "negative_tpi_31x31_m",
+    "dem_valley_position_score_9x9",
+    "dem_valley_position_score_31x31",
+    "dem_terrain_break_score_9x9",
+    "dem_terrain_break_score_31x31",
+    "dem_culvert_terrain_score",
+    "route_elevation_dip_60m",
+    "route_elevation_dip_rank_pct",
+    "route_low_point_score",
+)
+
 
 DEFAULT_EXCLUDED_FEATURES = {
     "is_culvert",
@@ -117,11 +154,13 @@ def select_feature_columns(
     if extra_excluded:
         excluded |= extra_excluded
 
-    numeric_columns = table.select_dtypes(include=[np.number]).columns
+    numeric_columns = set(table.select_dtypes(include=[np.number]).columns)
     return [
         column
-        for column in numeric_columns
-        if column not in excluded and not column.lower().endswith("_id")
+        for column in CORE_MODEL_FEATURES
+        if column in numeric_columns
+        and column not in excluded
+        and not column.lower().endswith("_id")
         and not column.startswith(DEFAULT_EXCLUDED_FEATURE_PREFIXES)
     ]
 

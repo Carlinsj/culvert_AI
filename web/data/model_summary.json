@@ -2,26 +2,26 @@
   "available": true,
   "selected_model": "soft_voting_ensemble",
   "selection_metric": "spatial_holdout_average_precision_then_cross_validated_average_precision",
-  "rows": 80337,
-  "positive_labels": 206,
-  "negative_labels": 80131,
-  "training_points": 213,
-  "feature_count": 66,
-  "random_holdout_average_precision": 0.037482022547746914,
-  "random_holdout_roc_auc": 0.834673749851207,
-  "spatial_holdout_average_precision": 0.08275600745041953,
-  "spatial_holdout_roc_auc": 0.8182945882324826,
-  "spatial_holdout_top10_precision": 0.4,
+  "rows": 80447,
+  "positive_labels": 233,
+  "negative_labels": 80214,
+  "training_points": 243,
+  "feature_count": 34,
+  "random_holdout_average_precision": 0.02577258408977051,
+  "random_holdout_roc_auc": 0.8267810532252573,
+  "spatial_holdout_average_precision": 0.011377019545038178,
+  "spatial_holdout_roc_auc": 0.763997940443568,
+  "spatial_holdout_top10_precision": 0.0,
   "target_precision_floor": 0.6,
   "operating_threshold": {
     "target_precision": 0.6,
-    "meets_precision_floor": true,
-    "threshold": 0.7421275729056165,
-    "precision": 0.6666666666666666,
-    "recall": 0.06060606060606061,
-    "f1": 0.1111111111111111,
-    "predicted_positive_count": 6,
-    "hits": 4,
+    "meets_precision_floor": false,
+    "threshold": 0.608889792144679,
+    "precision": 0.045454545454545456,
+    "recall": 0.07042253521126761,
+    "f1": 0.05524861878453039,
+    "predicted_positive_count": 110,
+    "hits": 5,
     "source": "spatial_holdout"
   },
   "point_qc": {
@@ -37,7 +37,7 @@
     {
       "path": "reports/actual_ulster_field_report_metrics.json",
       "exists": true,
-      "bytes": 19595
+      "bytes": 11713
     },
     {
       "path": "reports/extracted_points_analysis.json",
@@ -47,7 +47,7 @@
     {
       "path": "data/processed/training_known_culverts.csv",
       "exists": true,
-      "bytes": 47783
+      "bytes": 54426
     }
   ]
 }

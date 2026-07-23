@@ -4,7 +4,11 @@ import rasterio
 from rasterio.transform import from_origin
 from shapely.geometry import LineString, Point
 
-from culvert_ai.features import add_training_sample_weights, build_feature_table
+from culvert_ai.features import (
+    add_route_profile_dem_features,
+    add_training_sample_weights,
+    build_feature_table,
+)
 
 
 def test_build_feature_table_adds_dem_hydrology_proxies(tmp_path):
@@ -48,6 +52,143 @@ def test_build_feature_table_adds_dem_hydrology_proxies(tmp_path):
     assert "dem_culvert_terrain_score" in features.columns
     assert "crossing_geometry_signal" in features.columns
     assert features.iloc[0]["source_exact_intersection"] == 1
+
+
+def test_geographic_dem_slope_uses_metre_pixel_resolution(tmp_path):
+    dem_path = tmp_path / "geographic-dem.tif"
+    rows = cols = 45
+    _y, x = np.indices((rows, cols))
+    data = (100 + x).astype("float32")
+    pixel_degrees = 1 / 3600
+    with rasterio.open(
+        dem_path,
+        "w",
+        driver="GTiff",
+        height=rows,
+        width=cols,
+        count=1,
+        dtype="float32",
+        crs="EPSG:4269",
+        transform=from_origin(-74.01, 42.01, pixel_degrees, pixel_degrees),
+    ) as dst:
+        dst.write(data, 1)
+
+    candidates = gpd.GeoDataFrame(
+        [
+            {
+                "candidate_id": "geographic-slope",
+                "geometry": Point(
+                    -74.01 + (cols // 2 + 0.5) * pixel_degrees,
+                    42.01 - (rows // 2 + 0.5) * pixel_degrees,
+                ),
+            }
+        ],
+        geometry="geometry",
+        crs="EPSG:4269",
+    )
+
+    features = build_feature_table(candidates, dem_path=dem_path)
+
+    assert 0 < features.iloc[0]["slope_degrees"] < 10
+
+
+def test_route_profile_dem_features_find_real_low_point_without_regular_spacing():
+    elevations = [103.0, 102.5, 102.0, 100.0, 100.0, 100.0, 101.5, 102.0, 102.5]
+    points = gpd.GeoDataFrame(
+        [
+            {
+                "candidate_id": f"route-{index}",
+                "source": "route_interval_sample",
+                "road_id": "road-55",
+                "matched_route": "55",
+                "route_part_index": 0,
+                "route_lateral_offset_m": 0,
+                "route_sample_distance_m": float(index * 10),
+                "elevation_m": elevation,
+                "geometry": Point(index * 10, 0),
+            }
+            for index, elevation in enumerate(elevations)
+        ],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+
+    features = add_route_profile_dem_features(points).set_index("candidate_id")
+
+    assert features.loc["route-4", "route_elevation_dip_60m"] >= 1.5
+    assert features.loc["route-4", "route_low_point_score"] >= 0.7
+    assert features.loc["route-0", "route_low_point_score"] == 0
+
+
+def test_manual_and_moved_feedback_is_inferred_onto_nearest_route():
+    route_55 = [
+        {
+            "candidate_id": f"route-55-{position}",
+            "source": "route_interval_sample",
+            "road_id": "road-55",
+            "road_name": "State Rte 55",
+            "matched_route": "55",
+            "route_part_index": 0,
+            "route_sample_distance_m": float(position),
+            "geometry": Point(position, 0),
+        }
+        for position in range(0, 101, 20)
+    ]
+    candidates = gpd.GeoDataFrame(
+        [
+            *route_55,
+            {
+                "candidate_id": "route-32",
+                "source": "route_interval_sample",
+                "road_id": "road-32",
+                "road_name": "State Rte 32",
+                "matched_route": "32",
+                "route_part_index": 0,
+                "route_sample_distance_m": 0.0,
+                "geometry": Point(0, 500),
+            },
+        ],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+    known = gpd.GeoDataFrame(
+        [
+            {
+                "observation_id": f"positive-{index}",
+                "feedback_type": feedback_type,
+                "source_file": "field_observations.geojson",
+                "geometry": Point(position, 3),
+            }
+            for index, (position, feedback_type) in enumerate(
+                [(0, "cbu"), (20, "abu"), (40, "mvd"), (60, "cbu")]
+            )
+        ],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+    negative = gpd.GeoDataFrame(
+        [
+            {
+                "observation_id": "negative-1",
+                "feedback_type": "inc",
+                "geometry": Point(80, 3),
+            }
+        ],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+
+    features = build_feature_table(
+        candidates,
+        known_culverts=known,
+        negative_culverts=negative,
+        positive_radius_m=5,
+        negative_radius_m=5,
+    ).set_index("candidate_id")
+
+    assert features.loc["route-55-100", "field_route_feedback_reviews"] == 5.25
+    assert features.loc["route-55-100", "field_route_feedback_score"] > 0.60
+    assert features.loc["route-32", "field_route_feedback_reviews"] == 0
 
 
 def test_build_feature_table_applies_negative_observations_at_10m():
@@ -333,6 +474,48 @@ def test_direct_feedback_row_prevents_duplicate_negative_weighting():
 
     assert features.loc["field_000001", "field_denied"] == 1
     assert features.loc["generated-nearby", "field_denied"] == 0
+
+
+def test_direct_feedback_row_still_denies_original_candidate_id():
+    candidates = gpd.GeoDataFrame(
+        [
+            {
+                "candidate_id": "reviewed-candidate",
+                "source": "exact_road_stream_intersection",
+                "geometry": Point(0, 0),
+            },
+            {
+                "candidate_id": "field_000001",
+                "source": "field_observed_non_culvert",
+                "field_feedback_observation_id": "obs-inc",
+                "geometry": Point(0, 0),
+            },
+        ],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+    negatives = gpd.GeoDataFrame(
+        [
+            {
+                "observation_id": "obs-inc",
+                "candidate_id": "reviewed-candidate",
+                "label": "no_culvert",
+                "feedback_type": "inc",
+                "geometry": Point(0, 0),
+            }
+        ],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+
+    features = build_feature_table(
+        candidates,
+        negative_culverts=negatives,
+        negative_radius_m=10,
+    ).set_index("candidate_id")
+
+    assert features.loc["reviewed-candidate", "field_denied"] == 1
+    assert features.loc["field_000001", "field_denied"] == 1
 
 
 def test_known_culvert_labels_one_training_point_per_known_culvert():

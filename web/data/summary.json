@@ -1,21 +1,21 @@
 {
-  "rows": 1198,
-  "discovery_candidates": 1198,
-  "known_field_matches": 206,
+  "rows": 1200,
+  "discovery_candidates": 1200,
+  "known_field_matches": 233,
   "exported_known_field_matches": 0,
   "score_column": "discovery_score",
-  "max_score": 58.164609337485075,
-  "mean_score": 45.14832594662003,
+  "max_score": 63.32488080023364,
+  "mean_score": 54.416029962491244,
   "priority_buckets": {
-    "medium": 1193,
-    "high": 5
+    "medium": 733,
+    "high": 467
   },
   "bounds": [
-    -74.764928,
+    -74.729643,
     41.58787499999999,
-    -73.926788,
-    42.16166
+    -73.949545,
+    41.99911300000001
   ],
-  "route_count_rows": 1198,
+  "route_count_rows": 5629,
   "route_count_source": "route_count_source.geojson.gz"
 }

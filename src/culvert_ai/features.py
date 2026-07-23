@@ -13,6 +13,11 @@ from culvert_ai.io import add_wgs84_coordinates, clean_geometry, project_layers_
 
 
 KNOWN_PATTERN_RADII_M = (250.0, 500.0, 1000.0)
+FIELD_ROUTE_INFERENCE_MAX_DISTANCE_M = 40.0
+FIELD_ROUTE_LOCAL_SUPPORT_DECAY_M = 750.0
+FIELD_ROUTE_LOCAL_SUPPORT_MAX_DISTANCE_M = 3000.0
+ROUTE_PROFILE_DIP_WINDOW_M = 60.0
+ROUTE_PROFILE_DIP_SHOULDER_M = 20.0
 ROUTE_TOKEN_RE = re.compile(
     r"\b(?P<prefix>NY|US|I|CR)\s*-?\s*"
     r"(?:(?:HWY|HIGHWAY|RTE|ROUTE|RT)\s*-?\s*)?"
@@ -48,6 +53,7 @@ def build_feature_table(
 
     density_radii = _density_radii(density_radius_m, density_radii_m)
     known_m = None
+    negative_m = None
 
     if known_culverts is not None:
         known_m = clean_geometry(known_culverts).to_crs(metric_crs)
@@ -61,6 +67,13 @@ def build_feature_table(
     if negative_culverts is not None:
         negative_m = clean_geometry(negative_culverts).to_crs(metric_crs)
         features = add_negative_culvert_labels(features, negative_m, negative_radius_m)
+
+    if known_m is not None or negative_m is not None:
+        features = add_field_route_feedback_features(
+            features,
+            known_culverts=known_m,
+            negative_culverts=negative_m,
+        )
 
     if roads is not None:
         roads_m = clean_geometry(roads).to_crs(metric_crs)
@@ -84,6 +97,7 @@ def build_feature_table(
         features = add_raster_samples(features, dem_path, prefix="dem")
         features = add_dem_hydrology_proxies(features)
         features = add_dem_culvert_terrain_features(features)
+        features = add_route_profile_dem_features(features)
         if known_m is not None:
             features = add_approved_known_dem_similarity_features(
                 features,
@@ -377,6 +391,91 @@ def add_known_culvert_pattern_score(points: gpd.GeoDataFrame) -> gpd.GeoDataFram
     return enriched
 
 
+def add_field_route_feedback_features(
+    candidates: gpd.GeoDataFrame,
+    known_culverts: gpd.GeoDataFrame | None,
+    negative_culverts: gpd.GeoDataFrame | None,
+) -> gpd.GeoDataFrame:
+    """Learn route-level field precision after assigning feedback to its nearest road profile."""
+
+    enriched = candidates.copy()
+    output_columns = (
+        "field_route_positive_reviews",
+        "field_route_negative_reviews",
+        "field_route_feedback_reviews",
+        "field_route_feedback_precision",
+        "field_route_positive_support",
+        "field_route_negative_support",
+        "field_route_feedback_score",
+    )
+    for column in output_columns:
+        enriched[column] = 0.0
+
+    route_keys = enriched.apply(_candidate_feedback_route_key, axis=1)
+    route_reference = enriched[
+        enriched.get("source", pd.Series("", index=enriched.index))
+        .fillna("")
+        .astype(str)
+        .eq("route_interval_sample")
+        & route_keys.ne("")
+    ].copy()
+    if route_reference.empty:
+        return enriched
+    route_reference["_field_route_key"] = route_keys.loc[route_reference.index]
+
+    positives = _field_feedback_rows(known_culverts, positive=True)
+    negatives = _field_feedback_rows(negative_culverts, positive=False)
+    positive_assignments = _infer_feedback_route_assignments(positives, route_reference)
+    negative_assignments = _infer_feedback_route_assignments(negatives, route_reference)
+    if positive_assignments.empty and negative_assignments.empty:
+        return enriched
+
+    positive_counts = _weighted_feedback_counts(positive_assignments, positive=True)
+    negative_counts = _weighted_feedback_counts(negative_assignments, positive=False)
+    candidate_groups = route_keys[route_keys.ne("")].groupby(route_keys).groups
+
+    for route_key, candidate_indices in candidate_groups.items():
+        positive_rows = positive_assignments[
+            positive_assignments["_field_route_key"].eq(route_key)
+        ]
+        negative_rows = negative_assignments[
+            negative_assignments["_field_route_key"].eq(route_key)
+        ]
+        positive_count = float(positive_counts.get(route_key, 0.0))
+        negative_count = float(negative_counts.get(route_key, 0.0))
+        review_count = positive_count + negative_count
+        if review_count <= 0:
+            continue
+
+        route_precision = (positive_count + 2.0) / (review_count + 4.0)
+        indices = list(candidate_indices)
+        positive_support = _feedback_distance_support(
+            enriched.loc[indices].geometry,
+            positive_rows,
+            positive=True,
+        )
+        negative_support = _feedback_distance_support(
+            enriched.loc[indices].geometry,
+            negative_rows,
+            positive=False,
+        )
+        support_total = positive_support + negative_support
+        local_precision = (
+            positive_support + 2.0 * route_precision
+        ) / (support_total + 2.0)
+        feedback_score = (0.65 * route_precision + 0.35 * local_precision).clip(0, 1)
+
+        enriched.loc[indices, "field_route_positive_reviews"] = positive_count
+        enriched.loc[indices, "field_route_negative_reviews"] = negative_count
+        enriched.loc[indices, "field_route_feedback_reviews"] = review_count
+        enriched.loc[indices, "field_route_feedback_precision"] = route_precision
+        enriched.loc[indices, "field_route_positive_support"] = positive_support.to_numpy()
+        enriched.loc[indices, "field_route_negative_support"] = negative_support.to_numpy()
+        enriched.loc[indices, "field_route_feedback_score"] = feedback_score.to_numpy()
+
+    return enriched
+
+
 def add_negative_culvert_labels(
     candidates: gpd.GeoDataFrame,
     negative_culverts: gpd.GeoDataFrame,
@@ -435,14 +534,14 @@ def add_negative_culvert_labels(
             "" if pd.isna(nearest_observation_value) else str(nearest_observation_value)
         )
         has_direct_feedback_row = nearest_observation_id in direct_feedback_observation_ids
-        if has_direct_feedback_row and not direct_feedback_negative:
-            mark_negative = False
-        elif exact_negative is not None:
+        if exact_negative is not None:
             nearest = exact_negative
             miss_distance_m = _optional_float(nearest.get("miss_distance_m"))
             if miss_distance_m is not None:
                 labeled.at[row_index, "dist_to_denied_culvert_m"] = miss_distance_m
             mark_negative = True
+        elif has_direct_feedback_row and not direct_feedback_negative:
+            mark_negative = False
         else:
             mark_negative = distance <= negative_radius_m and (
                 direct_feedback_negative or not _is_missed_prediction(nearest)
@@ -614,6 +713,83 @@ def add_dem_culvert_terrain_features(points: gpd.GeoDataFrame) -> gpd.GeoDataFra
         + 0.35 * enriched["dem_terrain_break_score"]
     ).clip(0, 1)
     return enriched
+
+
+def add_route_profile_dem_features(points: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Find DEM depressions along sampled roads instead of at arbitrary map intervals."""
+
+    enriched = points.copy()
+    enriched["route_elevation_dip_60m"] = 0.0
+    enriched["route_elevation_dip_rank_pct"] = 0.0
+    enriched["route_low_point_score"] = 0.0
+    required = {"source", "route_sample_distance_m", "elevation_m"}
+    if not required.issubset(enriched.columns):
+        return enriched
+
+    route_mask = enriched["source"].fillna("").astype(str).eq("route_interval_sample")
+    route = enriched[route_mask]
+    if route.empty:
+        return enriched
+
+    profile_keys = route.apply(_route_profile_key, axis=1)
+    sample_distances = pd.to_numeric(route["route_sample_distance_m"], errors="coerce")
+    elevations = pd.to_numeric(route["elevation_m"], errors="coerce")
+
+    for profile_key, profile_indices in profile_keys.groupby(profile_keys).groups.items():
+        finite_indices = [
+            index
+            for index in profile_indices
+            if pd.notna(sample_distances.loc[index]) and pd.notna(elevations.loc[index])
+        ]
+        if len(finite_indices) < 3:
+            continue
+        ordered = sorted(finite_indices, key=lambda index: float(sample_distances.loc[index]))
+        distances = np.asarray([float(sample_distances.loc[index]) for index in ordered])
+        profile_elevations = np.asarray([float(elevations.loc[index]) for index in ordered])
+        dips = _route_profile_dips(
+            distances,
+            profile_elevations,
+            window_m=ROUTE_PROFILE_DIP_WINDOW_M,
+            shoulder_m=ROUTE_PROFILE_DIP_SHOULDER_M,
+        )
+        dip_series = pd.Series(dips, index=ordered)
+        positive_dips = dip_series[dip_series > 0]
+        ranks = pd.Series(0.0, index=ordered)
+        if not positive_dips.empty:
+            ranks.loc[positive_dips.index] = positive_dips.rank(pct=True)
+        absolute_score = 1.0 - np.exp(-dip_series.clip(lower=0.0) / 0.75)
+        low_point_score = (
+            0.70 * absolute_score + 0.30 * ranks
+        ).where(dip_series >= 0.15, 0.0).clip(0, 1)
+
+        enriched.loc[ordered, "route_elevation_dip_60m"] = dip_series.to_numpy()
+        enriched.loc[ordered, "route_elevation_dip_rank_pct"] = ranks.to_numpy()
+        enriched.loc[ordered, "route_low_point_score"] = low_point_score.to_numpy()
+
+    return enriched
+
+
+def _route_profile_dips(
+    distances: np.ndarray,
+    elevations: np.ndarray,
+    window_m: float,
+    shoulder_m: float,
+) -> np.ndarray:
+    dips = np.zeros(len(distances), dtype=float)
+    for position, (distance, elevation) in enumerate(zip(distances, elevations)):
+        left_start = int(np.searchsorted(distances, distance - window_m, side="left"))
+        left_end = int(np.searchsorted(distances, distance - shoulder_m, side="right"))
+        right_start = int(np.searchsorted(distances, distance + shoulder_m, side="left"))
+        right_end = int(np.searchsorted(distances, distance + window_m, side="right"))
+        left = elevations[left_start:left_end]
+        right = elevations[right_start:right_end]
+        left = left[np.isfinite(left)]
+        right = right[np.isfinite(right)]
+        if not len(left) or not len(right) or not np.isfinite(elevation):
+            continue
+        shoulder_elevation = min(float(np.max(left)), float(np.max(right)))
+        dips[position] = max(0.0, shoulder_elevation - float(elevation))
+    return dips
 
 
 def add_approved_known_dem_similarity_features(
@@ -842,6 +1018,152 @@ def _candidate_route_tokens(row: pd.Series) -> set[str]:
     return tokens
 
 
+def _candidate_feedback_route_key(row: pd.Series) -> str:
+    tokens: set[str] = set()
+    for column in ("matched_route", "road_name"):
+        if column in row.index and pd.notna(row[column]):
+            tokens |= _route_tokens_from_value(row[column])
+    prefixed = sorted(token for token in tokens if re.search(r"[A-Z]", token))
+    if prefixed:
+        return prefixed[0]
+    return sorted(tokens)[0] if tokens else ""
+
+
+def _route_profile_key(row: pd.Series) -> str:
+    road_id = _clean_key_value(row.get("road_id", ""))
+    route_key = _candidate_feedback_route_key(row)
+    part = _clean_key_value(row.get("route_part_index", 0)) or "0"
+    offset = _clean_key_value(row.get("route_lateral_offset_m", 0)) or "0"
+    return f"{road_id or route_key}|part:{part}|offset:{offset}"
+
+
+def _clean_key_value(value) -> str:
+    if pd.isna(value):
+        return ""
+    text = str(value).strip()
+    if not text or text.lower() in {"nan", "none", "<na>"}:
+        return ""
+    return " ".join(text.split())
+
+
+def _field_feedback_rows(
+    points: gpd.GeoDataFrame | None,
+    positive: bool,
+) -> gpd.GeoDataFrame:
+    if points is None or points.empty:
+        return gpd.GeoDataFrame(geometry=[], crs=getattr(points, "crs", None))
+    feedback = points.copy()
+    if positive:
+        field_mask = pd.Series(False, index=feedback.index)
+        if "feedback_type" in feedback.columns:
+            field_mask |= (
+                feedback["feedback_type"]
+                .fillna("")
+                .astype(str)
+                .str.lower()
+                .isin({"abu", "cbu", "mvd"})
+            )
+        for column in ("observation_id", "field_culvert_id"):
+            if column in feedback.columns:
+                field_mask |= feedback[column].fillna("").astype(str).str.strip().ne("")
+        if "source_file" in feedback.columns:
+            field_mask |= (
+                feedback["source_file"]
+                .fillna("")
+                .astype(str)
+                .str.lower()
+                .str.contains("field_observations.geojson", regex=False)
+            )
+        feedback = feedback[field_mask]
+    return feedback.reset_index(drop=True)
+
+
+def _infer_feedback_route_assignments(
+    feedback: gpd.GeoDataFrame,
+    route_reference: gpd.GeoDataFrame,
+) -> gpd.GeoDataFrame:
+    if feedback.empty:
+        return gpd.GeoDataFrame(geometry=[], crs=route_reference.crs)
+
+    reference_columns = [
+        "_field_route_key",
+        "geometry",
+    ]
+    reference = route_reference[reference_columns].reset_index(drop=True)
+    points = feedback.copy().reset_index(drop=True)
+    points["_feedback_row_id"] = np.arange(len(points))
+    joined = gpd.sjoin_nearest(
+        points,
+        reference,
+        how="inner",
+        max_distance=FIELD_ROUTE_INFERENCE_MAX_DISTANCE_M,
+        distance_col="_field_route_distance_m",
+    )
+    if joined.empty:
+        return joined
+    return (
+        joined.sort_values(["_feedback_row_id", "_field_route_distance_m"])
+        .drop_duplicates("_feedback_row_id")
+        .reset_index(drop=True)
+    )
+
+
+def _weighted_feedback_counts(
+    assignments: gpd.GeoDataFrame,
+    positive: bool,
+) -> dict[str, float]:
+    if assignments.empty:
+        return {}
+    weights = _feedback_assignment_weights(assignments, positive=positive)
+    if not positive:
+        feedback_type = assignments.get(
+            "feedback_type",
+            pd.Series("", index=assignments.index),
+        ).fillna("").astype(str).str.lower()
+        weights = weights.where(~feedback_type.eq("mvd_origin"), 0.25)
+    return (
+        pd.DataFrame(
+            {
+                "route_key": assignments["_field_route_key"].astype(str),
+                "weight": weights,
+            }
+        )
+        .groupby("route_key")["weight"]
+        .sum()
+        .to_dict()
+    )
+
+
+def _feedback_distance_support(
+    candidate_geometry: gpd.GeoSeries,
+    assignments: gpd.GeoDataFrame,
+    positive: bool,
+) -> pd.Series:
+    support = pd.Series(0.0, index=candidate_geometry.index)
+    if assignments.empty:
+        return support
+    weights = _feedback_assignment_weights(assignments, positive=positive)
+    for (_, feedback), weight in zip(assignments.iterrows(), weights):
+        distance = candidate_geometry.distance(feedback.geometry)
+        contribution = np.exp(
+            -distance / FIELD_ROUTE_LOCAL_SUPPORT_DECAY_M
+        ).where(distance <= FIELD_ROUTE_LOCAL_SUPPORT_MAX_DISTANCE_M, 0.0)
+        support += contribution.fillna(0.0) * float(weight)
+    return support
+
+
+def _feedback_assignment_weights(
+    assignments: gpd.GeoDataFrame,
+    positive: bool,
+) -> pd.Series:
+    feedback_type = assignments.get(
+        "feedback_type",
+        pd.Series("", index=assignments.index),
+    ).fillna("").astype(str).str.lower()
+    emphasized = {"mvd"} if positive else {"mvd_origin"}
+    return feedback_type.isin(emphasized).map({True: 1.25, False: 1.0}).astype(float)
+
+
 def _known_route_tokens(row: pd.Series) -> set[str]:
     tokens: set[str] = set()
     for column in ("route", "road_name", "culvert_id", "field_culvert_id"):
@@ -950,8 +1272,7 @@ def _local_raster_stats(src, x: float, y: float, window_size: int = 3) -> dict[s
 
     center = float(filled[half, half])
     mean = float(np.mean(filled))
-    yres = abs(src.transform.e) or 1.0
-    xres = abs(src.transform.a) or 1.0
+    xres, yres = _raster_resolution_m(src, x, y)
     dz_dy, dz_dx = np.gradient(filled, yres, xres)
     rise_run = np.sqrt(dz_dx[half, half] ** 2 + dz_dy[half, half] ** 2)
     return {
@@ -962,6 +1283,38 @@ def _local_raster_stats(src, x: float, y: float, window_size: int = 3) -> dict[s
         "topographic_position": center - mean,
         "valley_depth": max(0.0, mean - center),
     }
+
+
+def _raster_resolution_m(src, x: float, y: float) -> tuple[float, float]:
+    xres = abs(float(src.transform.a))
+    yres = abs(float(src.transform.e))
+    if src.crs and src.crs.is_geographic:
+        latitude = np.radians(float(y))
+        meters_per_degree_latitude = (
+            111132.92
+            - 559.82 * np.cos(2 * latitude)
+            + 1.175 * np.cos(4 * latitude)
+        )
+        meters_per_degree_longitude = (
+            111412.84 * np.cos(latitude)
+            - 93.5 * np.cos(3 * latitude)
+        )
+        return (
+            max(xres * abs(float(meters_per_degree_longitude)), 1e-6),
+            max(yres * abs(float(meters_per_degree_latitude)), 1e-6),
+        )
+
+    unit_factor = 1.0
+    try:
+        linear_units_factor = src.crs.linear_units_factor
+        unit_factor = float(
+            linear_units_factor[1]
+            if isinstance(linear_units_factor, tuple)
+            else linear_units_factor
+        )
+    except (AttributeError, TypeError, ValueError):
+        pass
+    return max(xres * unit_factor, 1e-6), max(yres * unit_factor, 1e-6)
 
 
 def _empty_raster_stats() -> dict[str, float]:

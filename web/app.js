@@ -45,7 +45,7 @@ const ROUTE_TARGET_AUTO_MAP_LIMIT = 14;
 const ROUTE_TARGET_MANUAL_TOP_N = 35;
 const ROUTE_TARGET_MANUAL_MAP_LIMIT = 22;
 const ROUTE_TARGET_MAP_MIN_GAP_PX = 0;
-const ROUTE_TARGET_CLUSTER_RADIUS_M = 30;
+const ROUTE_TARGET_CLUSTER_RADIUS_M = 10;
 const ROUTE_TARGET_MANUAL_COOLDOWN_MS = 30000;
 const OSM_MAX_NATIVE_ZOOM = 19;
 const MAP_MAX_ZOOM = 20;
@@ -653,7 +653,7 @@ async function runRouteCount(options = {}) {
     const url = new URL(ROUTE_COUNT_URL, window.location.href);
     if (route) url.searchParams.set("route", route);
     if (bbox) url.searchParams.set("bbox", bbox);
-    url.searchParams.set("clusterRadiusM", "30");
+    url.searchParams.set("clusterRadiusM", String(ROUTE_TARGET_CLUSTER_RADIUS_M));
     url.searchParams.set("topN", String(topN));
     const report = await fetchRouteCount(url);
     if (requestId === state.routeCountRequestId) {

@@ -275,6 +275,36 @@ def test_route_samples_do_not_treat_flat_evidence_as_repeated_peaks():
     assert selected.empty
 
 
+def test_feedback_supported_dem_dip_survives_global_score_cutoff():
+    predictions = gpd.GeoDataFrame(
+        [
+            {
+                "candidate_id": f"route-{index}",
+                "source": "route_interval_sample",
+                "discovery_status": "undiscovered_candidate",
+                "road_id": "road-55",
+                "matched_route": "55",
+                "route_part_index": 0,
+                "route_sample_distance_m": float(index * 10),
+                "discovery_rank": index + 1,
+                "discovery_score": 24.0,
+                "geospatial_evidence_score": 22.0,
+                "field_route_feedback_reviews": 8.0,
+                "field_route_feedback_score": 0.70,
+                "route_low_point_score": low_point_score,
+                "geometry": Point(index * 10, 0),
+            }
+            for index, low_point_score in enumerate([0.1, 0.8, 0.8, 0.2])
+        ],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+
+    selected = _limit_for_web(predictions, limit=10)
+
+    assert selected["candidate_id"].tolist() == ["route-1"]
+
+
 def test_limit_for_web_filters_weak_scores_when_scores_exist():
     predictions = gpd.GeoDataFrame(
         [

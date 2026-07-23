@@ -390,6 +390,8 @@ fi
 
 DISCOVERY_ARGS=(
   --evidence-predictions data/processed/actual_ulster_unlabeled_predictions.gpkg
+  --evidence-weight "${DISCOVERY_EVIDENCE_WEIGHT:-0.85}"
+  --model-weight "${DISCOVERY_MODEL_WEIGHT:-0.15}"
   --output data/processed/actual_ulster_discovery_predictions.gpkg
   --csv-output data/processed/actual_ulster_discovery_predictions.csv
   --kml-output data/processed/actual_ulster_google_earth_review.kml
