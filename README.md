@@ -1,7 +1,5 @@
 # Culvert AI: Ulster County Pilot
 
-Last updated: 2026-06-24
-
 Culvert AI is a geospatial machine-learning workflow for ranking likely culvert
 locations in Ulster County, New York. It extracts coordinates from field reports,
 filters them with GIS quality checks, trains supervised models from valid points,
