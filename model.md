@@ -27,17 +27,18 @@ culvert. High scores mean "check here first."
 
 The current rebuilt model artifacts report:
 
-- Selected model: `soft_voting_ensemble`
-- Candidate rows: `112,811`
-- Positive labels: `144`
-- Negative labels: `112,667`
-- Training point rows: `145`
-- Feature count: `81`
-- Spatial holdout average precision: `0.837`
+- Selected model: `random_forest`
+- Candidate rows scored: `80,620`
+- Explicit positive labels: `244`
+- Explicit negative labels: `237`
+- Unreviewed rows excluded from training: `80,139`
+- Training point rows: `250`
+- Feature count: `34`
+- Spatial holdout average precision: `0.926`
 - Spatial holdout precision at 10: `1.000`
-- Spatial holdout precision at 25: `0.960`
-- Field success check before web declustering: `16 / 17` confirmed culverts
-  within `15 m`
+- Spatial holdout precision at 25: `1.000`
+- Candidate coverage before field-facing filtering: `102 / 122` confirmed
+  culverts have a candidate within `15 m`
 
 The source of truth for the latest run is `web/data/model_summary.json`.
 
@@ -51,13 +52,16 @@ Positive labels come from:
 - confirmed CBU/user-added observations pulled from Vercel,
 - confirmed field observations within the strict match radius.
 
-Negative labels come from:
+Negative labels come from explicit field decisions:
 
-- candidate points that are not within the positive match radius of a known
-  culvert,
 - field observations marked `no_culvert`,
 - missed-prediction labels when a confirmed field culvert proves that a specific
   predicted candidate was outside the hit radius.
+
+Unreviewed candidates are unlabeled, not negative. They are scored after training
+but excluded from model fitting and holdout metrics. This prevents tens of
+thousands of unchecked locations from overwhelming the comparatively small set
+of verified field decisions.
 
 The current strict match radius is `10 m`. A prediction 50 m from a confirmed
 field culvert is a miss, not a correct prediction.
@@ -132,11 +136,9 @@ The training code compares several model families:
 - `balanced_hist_gradient_boosting`
 - `soft_voting_ensemble`
 
-The actual Ulster pipeline defaults to `soft_voting_ensemble`, a weighted soft
-vote across regularized histogram gradient boosting, balanced histogram gradient
-boosting, and a lighter extra-trees member. Set `CULVERT_MODEL_FAMILY` to a
-specific family for a forced run, or to `auto` when you want the trainer to
-compare all candidate families.
+The actual Ulster pipeline defaults to `auto`, which compares all candidate
+families using the spatial holdout before fitting the final model. Set
+`CULVERT_MODEL_FAMILY` to a specific family only for a controlled experiment.
 
 Only numeric feature columns are used. The code excludes target, coordinate,
 label, rank, and already-computed score columns so the model does not train on

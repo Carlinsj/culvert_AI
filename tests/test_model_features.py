@@ -6,6 +6,7 @@ from culvert_ai.model import (
     _precision_floor_operating_point,
     predict_culvert_probability,
     select_feature_columns,
+    select_training_rows,
     train_model,
 )
 
@@ -42,6 +43,38 @@ def test_select_feature_columns_excludes_labels_and_coordinates():
         "stream_density_m_per_sqkm",
         "dem_culvert_terrain_score",
     ]
+
+
+def test_select_training_rows_excludes_unreviewed_candidates():
+    table = gpd.GeoDataFrame(
+        [
+            {"candidate_id": "positive-1", "is_culvert": 1, "field_denied": 0},
+            {"candidate_id": "positive-2", "is_culvert": 1, "field_denied": 0},
+            {"candidate_id": "denied-1", "is_culvert": 0, "field_denied": 1},
+            {"candidate_id": "denied-2", "is_culvert": 0, "field_denied": 1},
+            {"candidate_id": "unreviewed", "is_culvert": 0, "field_denied": 0},
+        ],
+        geometry=[Point(index, 0) for index in range(5)],
+        crs="EPSG:32618",
+    )
+
+    selected, summary = select_training_rows(table)
+
+    assert set(selected["candidate_id"]) == {
+        "positive-1",
+        "positive-2",
+        "denied-1",
+        "denied-2",
+    }
+    assert selected["is_culvert"].value_counts().to_dict() == {1: 2, 0: 2}
+    assert summary == {
+        "strategy": "explicit_confirmed_and_denied_field_labels",
+        "source_rows": 5,
+        "training_rows": 4,
+        "unreviewed_rows_excluded": 1,
+        "confirmed_rows": 2,
+        "denied_rows": 2,
+    }
 
 
 def test_precision_floor_operating_point_finds_60_percent_cutoff():

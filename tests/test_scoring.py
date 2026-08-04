@@ -236,6 +236,50 @@ def test_discovery_ranking_prioritizes_undiscovered_candidates():
     assert ranked.iloc[1]["discovery_status"] == "known_field_match"
 
 
+def test_discovery_ranking_applies_denied_radius_with_explicit_flags_present():
+    evidence = gpd.GeoDataFrame(
+        [
+            {
+                "candidate_id": "near-known",
+                "culvert_likelihood_score": 80.0,
+                "is_culvert": 0,
+                "dist_to_known_culvert_m": 20.0,
+                "field_denied": 0,
+                "dist_to_denied_culvert_m": 200.0,
+                "geometry": Point(0, 0),
+            },
+            {
+                "candidate_id": "near-denied",
+                "culvert_likelihood_score": 75.0,
+                "is_culvert": 0,
+                "dist_to_known_culvert_m": 200.0,
+                "field_denied": 0,
+                "dist_to_denied_culvert_m": 20.0,
+                "geometry": Point(100, 0),
+            },
+            {
+                "candidate_id": "unreviewed",
+                "culvert_likelihood_score": 70.0,
+                "is_culvert": 0,
+                "dist_to_known_culvert_m": 200.0,
+                "field_denied": 0,
+                "dist_to_denied_culvert_m": 200.0,
+                "geometry": Point(200, 0),
+            },
+        ],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+
+    ranked = build_discovery_ranking(evidence, known_radius_m=30).set_index("candidate_id")
+
+    assert ranked.loc["near-known", "discovery_status"] == "undiscovered_candidate"
+    assert ranked.loc["near-denied", "discovery_status"] == "field_denied"
+    assert ranked.loc["unreviewed", "discovery_status"] == "undiscovered_candidate"
+    assert ranked.loc["near-known", "discovery_score"] > 0
+    assert ranked.loc["near-denied", "discovery_score"] == 0
+
+
 def test_discovery_ranking_applies_bounded_field_recall_to_route_samples():
     evidence = gpd.GeoDataFrame(
         [

@@ -165,6 +165,50 @@ def select_feature_columns(
     ]
 
 
+def select_training_rows(
+    table: gpd.GeoDataFrame,
+    target_column: str = "is_culvert",
+) -> tuple[gpd.GeoDataFrame, dict]:
+    """Use explicit field decisions when they are available.
+
+    Candidate rows that have never been reviewed are not verified negatives. Treating the
+    entire candidate universe as class 0 overwhelms the comparatively small set of field
+    labels and makes both training and holdout precision misleading. A feature table without
+    ``field_denied`` retains the legacy behavior for demos and external callers.
+    """
+
+    if target_column not in table.columns:
+        raise ValueError(f"Target column not found: {target_column}")
+
+    source_rows = int(len(table))
+    fallback = {
+        "strategy": "provided_target_column",
+        "source_rows": source_rows,
+        "training_rows": source_rows,
+        "unreviewed_rows_excluded": 0,
+    }
+    if "field_denied" not in table.columns:
+        return table.copy(), fallback
+
+    positive = pd.to_numeric(table[target_column], errors="coerce").fillna(0).astype(int).eq(1)
+    denied = pd.to_numeric(table["field_denied"], errors="coerce").fillna(0).astype(int).eq(1)
+    explicit = positive | denied
+    if int(positive.sum()) < 2 or int(denied.sum()) < 2:
+        return table.copy(), fallback
+
+    selected = table.loc[explicit].copy()
+    selected[target_column] = positive.loc[explicit].astype(int)
+    selected.loc[denied.loc[explicit], target_column] = 0
+    return selected, {
+        "strategy": "explicit_confirmed_and_denied_field_labels",
+        "source_rows": source_rows,
+        "training_rows": int(len(selected)),
+        "unreviewed_rows_excluded": int(source_rows - len(selected)),
+        "confirmed_rows": int(positive.sum()),
+        "denied_rows": int(denied.sum()),
+    }
+
+
 def train_model(
     features: gpd.GeoDataFrame,
     model_output: str | Path,
@@ -182,6 +226,7 @@ def train_model(
     if target_column not in features.columns:
         raise ValueError(f"Target column not found: {target_column}")
 
+    features, label_selection = select_training_rows(features, target_column=target_column)
     y = features[target_column].astype(int)
     if y.nunique() < 2:
         raise ValueError("Training data needs at least one positive and one negative example.")
@@ -205,6 +250,7 @@ def train_model(
         "feature_columns": feature_columns,
         "missing_value_strategy": "training_feature_median",
         "rows": int(len(features)),
+        "label_selection": label_selection,
         "selection_metric": "spatial_holdout_average_precision_then_cross_validated_average_precision",
         "target_precision_floor": DEFAULT_TARGET_PRECISION,
     }
@@ -277,6 +323,7 @@ def train_model(
         "fill_values": fill_values,
         "random_state": random_state,
         "training_rows": int(len(features)),
+        "label_selection": label_selection,
         "class_counts": metrics["class_counts"],
         "sample_weight": metrics["sample_weight"],
         "operating_threshold": metrics.get("operating_threshold"),

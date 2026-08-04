@@ -376,7 +376,7 @@ PY
       --model-output models/actual_ulster_field_report_model.joblib \
       --metrics-output reports/actual_ulster_field_report_metrics.json \
       --importance-output reports/actual_ulster_field_report_feature_importance.csv \
-      --model-family "${CULVERT_MODEL_FAMILY:-soft_voting_ensemble}" \
+      --model-family "${CULVERT_MODEL_FAMILY:-auto}" \
       --spatial-block-size-m 2500
 
     scripts/python.sh -m culvert_ai.cli predict \
@@ -401,7 +401,7 @@ DISCOVERY_ARGS=(
 if [ -n "$SUPERVISED_PREDICTIONS_PATH" ]; then
   DISCOVERY_ARGS+=(--supervised-predictions "$SUPERVISED_PREDICTIONS_PATH")
 fi
-DISCOVERY_ARGS+=(--known-radius-m 10)
+DISCOVERY_ARGS+=(--known-radius-m "${DISCOVERY_REVIEWED_SITE_RADIUS_M:-30}")
 
 scripts/python.sh -m culvert_ai.cli build-discovery-ranking "${DISCOVERY_ARGS[@]}"
 

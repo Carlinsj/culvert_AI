@@ -51,11 +51,17 @@ def build_summary(
         }
 
     feature_columns = metrics.get("feature_columns") or []
+    label_selection = metrics.get("label_selection") or {}
     return {
         "available": True,
         "selected_model": metrics.get("selected_model"),
         "selection_metric": metrics.get("selection_metric"),
         "rows": metrics.get("rows"),
+        "label_strategy": label_selection.get("strategy"),
+        "source_candidate_rows": _int_or_none(label_selection.get("source_rows")),
+        "unreviewed_rows_excluded": _int_or_none(
+            label_selection.get("unreviewed_rows_excluded")
+        ),
         "positive_labels": _int_or_none(class_counts.get("1")),
         "negative_labels": _int_or_none(class_counts.get("0")),
         "training_points": training_point_rows,
