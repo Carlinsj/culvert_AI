@@ -34,3 +34,8 @@ data/ulster_demo/
 !models/.gitkeep
 !reports/.gitkeep
 !web/data/.gitkeep
+
+# Local tooling and generated artifacts
+.codex/
+outputs/
+tmp/
