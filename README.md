@@ -475,8 +475,7 @@ npm run retrain:from-vercel
 Project Markdown is intentionally kept small:
 
 - `README.md`: main project handbook.
-- `model.md`: model training, scoring, and prediction calculation details.
-- `track.md`: current status and handoff notes.
+- [`docs/model.md`](docs/model.md): model training, scoring, and prediction calculation details.
 - `docs/research_notes.md`: research framing and external communication notes.
 
 ## Accuracy Bottlenecks

@@ -39,3 +39,6 @@ data/ulster_demo/
 .codex/
 outputs/
 tmp/
+
+# Private development notes
+.local-notes/
