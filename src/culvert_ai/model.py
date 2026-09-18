@@ -34,6 +34,14 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
 from culvert_ai.io import ensure_parent_dir
+from culvert_ai.labels import (
+    TRAINING_LABEL_COLUMN,
+    UNLABELED_CANDIDATE,
+    VERIFIED_NEGATIVE,
+    VERIFIED_POSITIVE,
+    WEAK_NEGATIVE,
+    training_label_classes,
+)
 
 
 warnings.filterwarnings(
@@ -168,44 +176,45 @@ def select_feature_columns(
 def select_training_rows(
     table: gpd.GeoDataFrame,
     target_column: str = "is_culvert",
+    weak_negative_sample_size: int = 0,
+    random_state: int = 42,
 ) -> tuple[gpd.GeoDataFrame, dict]:
-    """Use explicit field decisions when they are available.
-
-    Candidate rows that have never been reviewed are not verified negatives. Treating the
-    entire candidate universe as class 0 overwhelms the comparatively small set of field
-    labels and makes both training and holdout precision misleading. A feature table without
-    ``field_denied`` retains the legacy behavior for demos and external callers.
-    """
+    """Select verified labels plus an explicit, bounded weak-negative sample."""
 
     if target_column not in table.columns:
         raise ValueError(f"Target column not found: {target_column}")
 
+    if weak_negative_sample_size < 0:
+        raise ValueError("weak_negative_sample_size must be zero or greater.")
+
     source_rows = int(len(table))
-    fallback = {
-        "strategy": "provided_target_column",
-        "source_rows": source_rows,
-        "training_rows": source_rows,
-        "unreviewed_rows_excluded": 0,
-    }
-    if "field_denied" not in table.columns:
-        return table.copy(), fallback
+    labels = training_label_classes(table, target_column=target_column)
+    verified_positive = labels.eq(VERIFIED_POSITIVE)
+    verified_negative = labels.eq(VERIFIED_NEGATIVE)
+    weak_negative = labels.eq(WEAK_NEGATIVE)
+    unlabeled = labels.eq(UNLABELED_CANDIDATE)
 
-    positive = pd.to_numeric(table[target_column], errors="coerce").fillna(0).astype(int).eq(1)
-    denied = pd.to_numeric(table["field_denied"], errors="coerce").fillna(0).astype(int).eq(1)
-    explicit = positive | denied
-    if int(positive.sum()) < 2 or int(denied.sum()) < 2:
-        return table.copy(), fallback
-
-    selected = table.loc[explicit].copy()
-    selected[target_column] = positive.loc[explicit].astype(int)
-    selected.loc[denied.loc[explicit], target_column] = 0
+    weak_pool = table.loc[weak_negative]
+    weak_sample_count = min(int(weak_negative_sample_size), int(len(weak_pool)))
+    weak_sample_indices = (
+        weak_pool.sample(n=weak_sample_count, random_state=random_state).index
+        if weak_sample_count
+        else weak_pool.index[:0]
+    )
+    selected_mask = verified_positive | verified_negative | table.index.isin(weak_sample_indices)
+    selected = table.loc[selected_mask].copy()
+    selected[TRAINING_LABEL_COLUMN] = labels.loc[selected.index]
+    selected[target_column] = selected[TRAINING_LABEL_COLUMN].eq(VERIFIED_POSITIVE).astype(int)
     return selected, {
-        "strategy": "explicit_confirmed_and_denied_field_labels",
+        "strategy": "explicit_training_label_classes",
         "source_rows": source_rows,
         "training_rows": int(len(selected)),
-        "unreviewed_rows_excluded": int(source_rows - len(selected)),
-        "confirmed_rows": int(positive.sum()),
-        "denied_rows": int(denied.sum()),
+        "verified_positive_rows": int(verified_positive.sum()),
+        "verified_negative_rows": int(verified_negative.sum()),
+        "weak_negative_rows_available": int(weak_negative.sum()),
+        "weak_negative_rows_sampled": weak_sample_count,
+        "weak_negative_rows_excluded": int(weak_negative.sum()) - weak_sample_count,
+        "unlabeled_candidate_rows_excluded": int(unlabeled.sum()),
     }
 
 
@@ -220,13 +229,19 @@ def train_model(
     model_family: str = "auto",
     spatial_cv: bool = True,
     spatial_block_size_m: float = 2_500.0,
+    weak_negative_sample_size: int = 0,
 ) -> dict:
     os.environ.setdefault("LOKY_MAX_CPU_COUNT", "4")
 
     if target_column not in features.columns:
         raise ValueError(f"Target column not found: {target_column}")
 
-    features, label_selection = select_training_rows(features, target_column=target_column)
+    features, label_selection = select_training_rows(
+        features,
+        target_column=target_column,
+        weak_negative_sample_size=weak_negative_sample_size,
+        random_state=random_state,
+    )
     y = features[target_column].astype(int)
     if y.nunique() < 2:
         raise ValueError("Training data needs at least one positive and one negative example.")
@@ -900,7 +915,9 @@ def _precision_floor_operating_point(
 
     passing = [row for row in rows if row["meets_precision_floor"]]
     if passing:
-        return max(passing, key=lambda row: (row["recall"], row["predicted_positive_count"], row["f1"]))
+        return max(
+            passing, key=lambda row: (row["recall"], row["predicted_positive_count"], row["f1"])
+        )
     return max(rows, key=lambda row: (row["precision"], row["recall"]))
 
 

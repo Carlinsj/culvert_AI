@@ -73,6 +73,8 @@ def test_merge_confirmed_observations_adds_confirmed_points(tmp_path):
     assert "nearest_map_candidate" in set(combined["layout_source"])
     assert "cand-2" not in set(combined["culvert_id"])
     assert denied.iloc[0]["label"] == "no_culvert"
+    assert confirmed.iloc[0]["training_label_class"] == "verified_positive"
+    assert denied.iloc[0]["training_label_class"] == "verified_negative"
     assert confirmed.iloc[0]["feedback_type"] == "abu"
     assert denied.iloc[0]["feedback_type"] == "inc"
     assert denied.iloc[0]["candidate_id"] == "cand-2"
@@ -177,6 +179,7 @@ def test_merge_observations_turns_far_confirmed_points_into_missed_prediction_la
     assert result["confirmed_added"] == 0
     assert result["denied_saved_for_review"] == 1
     assert denied.iloc[0]["label"] == "missed_prediction"
+    assert denied.iloc[0]["training_label_class"] == "weak_negative"
     assert denied.iloc[0]["feedback_type"] == "mvd_origin"
     assert denied.iloc[0]["candidate_id"] == "cand_000001"
     assert denied.iloc[0]["miss_distance_m"] == 100.0

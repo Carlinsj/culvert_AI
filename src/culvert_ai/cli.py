@@ -71,11 +71,15 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(required=True)
 
     demo_data = subparsers.add_parser("make-demo-data", help="Create synthetic demo GIS files.")
-    demo_data.add_argument("--output-dir", default="data/ulster_demo", help="Directory for demo files.")
+    demo_data.add_argument(
+        "--output-dir", default="data/ulster_demo", help="Directory for demo files."
+    )
     demo_data.set_defaults(func=_make_demo_data)
 
     run_demo = subparsers.add_parser("run-demo", help="Run the full synthetic demo pipeline.")
-    run_demo.add_argument("--output-dir", default="data/ulster_demo", help="Directory for demo outputs.")
+    run_demo.add_argument(
+        "--output-dir", default="data/ulster_demo", help="Directory for demo outputs."
+    )
     run_demo.set_defaults(func=_run_demo)
 
     download_osm = subparsers.add_parser(
@@ -223,7 +227,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--candidates",
         default="data/processed/actual_ulster_discovery_predictions.gpkg",
     )
-    analyze_points.add_argument("--boundary", help="Optional boundary used to accept/reject points.")
+    analyze_points.add_argument(
+        "--boundary", help="Optional boundary used to accept/reject points."
+    )
     analyze_points.add_argument(
         "--output-geojson",
         default="data/processed/extracted_points_analysis.geojson",
@@ -353,7 +359,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--boundary",
         help="Optional official county/project boundary file. If supplied, it overrides --region.",
     )
-    filter_region.add_argument("--no-clip", action="store_true", help="Filter only; do not clip geometry.")
+    filter_region.add_argument(
+        "--no-clip", action="store_true", help="Filter only; do not clip geometry."
+    )
     filter_region.set_defaults(func=_filter_region)
 
     candidates = subparsers.add_parser(
@@ -442,6 +450,12 @@ def build_parser() -> argparse.ArgumentParser:
     train.add_argument("--test-size", type=float, default=0.25)
     train.add_argument("--random-state", type=int, default=42)
     train.add_argument(
+        "--weak-negative-sample-size",
+        type=int,
+        default=0,
+        help="Explicit number of weak negatives to sample for fitting; default uses verified labels only.",
+    )
+    train.add_argument(
         "--model-family",
         default="auto",
         choices=[
@@ -522,7 +536,9 @@ def build_parser() -> argparse.ArgumentParser:
     predict.add_argument("--csv-output", help="Optional CSV export for field review.")
     predict.set_defaults(func=_predict)
 
-    evaluate = subparsers.add_parser("evaluate", help="Evaluate predictions against known culverts.")
+    evaluate = subparsers.add_parser(
+        "evaluate", help="Evaluate predictions against known culverts."
+    )
     evaluate.add_argument("--predictions", required=True, help="Prediction vector file.")
     evaluate.add_argument("--known-culverts", required=True, help="Known culvert point inventory.")
     evaluate.add_argument("--output", default="reports/prediction_eval.json")
@@ -535,7 +551,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Measure actual culverts with a prediction within a field distance tolerance.",
     )
     success_rate.add_argument("--predictions", required=True, help="Ranked prediction vector file.")
-    success_rate.add_argument("--actual-culverts", required=True, help="Actual/confirmed culvert points.")
+    success_rate.add_argument(
+        "--actual-culverts", required=True, help="Actual/confirmed culvert points."
+    )
     success_rate.add_argument("--output", default="reports/field_success_rate.json")
     success_rate.add_argument("--max-distance-m", type=float, default=15.0)
     success_rate.add_argument(
@@ -543,7 +561,9 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Count known/label rows as predictions. Default excludes them.",
     )
-    success_rate.add_argument("--rank-limit", type=int, help="Evaluate only predictions up to this rank.")
+    success_rate.add_argument(
+        "--rank-limit", type=int, help="Evaluate only predictions up to this rank."
+    )
     success_rate.set_defaults(func=_evaluate_success_rate)
 
     route_count = subparsers.add_parser(
@@ -582,7 +602,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="JSON report output.",
     )
     route_count.add_argument("--csv-output", help="Optional CSV of clustered predicted sites.")
-    route_count.add_argument("--geojson-output", help="Optional GeoJSON of clustered predicted sites.")
+    route_count.add_argument(
+        "--geojson-output", help="Optional GeoJSON of clustered predicted sites."
+    )
     route_count.set_defaults(func=_route_count_report)
 
     return parser
@@ -823,6 +845,7 @@ def _train(args) -> dict:
         model_family=args.model_family,
         spatial_cv=not args.no_spatial_cv,
         spatial_block_size_m=args.spatial_block_size_m,
+        weak_negative_sample_size=args.weak_negative_sample_size,
     )
     metrics["model"] = str(args.model_output)
     metrics["metrics"] = str(args.metrics_output)

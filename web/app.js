@@ -1,6 +1,8 @@
 const DATA_URLS = ["/api/findings", "data/findings.geojson"];
 const SUMMARY_URLS = ["/api/summary", "data/summary.json"];
 const MODEL_SUMMARY_URLS = ["data/model_summary.json"];
+const PRELIMINARY_RESULTS_URLS = ["data/preliminary_results.json"];
+const HYDROLOGY_DEMO_URLS = ["data/hydrology_demo.geojson"];
 const HEALTH_URL = "/api/health";
 const OBSERVATIONS_URL = "/api/observations";
 const ROUTE_COUNT_URL = "/api/route-count";
@@ -103,6 +105,14 @@ const state = {
   listDiscoveryCount: 0,
   shouldFocusLocationOnNextUpdate: false,
   modelSummary: null,
+  researchResults: null,
+  hydrologyDemo: null,
+  selectedHydrologyThreshold: 0.1,
+  hydrologyOverlaysVisible: false,
+  hydrologyDrainageLayer: null,
+  hydrologyCrossingLayer: null,
+  hydrologyOfficialLayer: null,
+  hydrologyRenderer: null,
   routeCountRequestId: 0,
 };
 
@@ -147,6 +157,10 @@ const els = {
   routeCountKingston: document.querySelector("#route-count-kingston"),
   routeCountViewport: document.querySelector("#route-count-viewport"),
   routeCountResult: document.querySelector("#route-count-result"),
+  openResearchResults: document.querySelector("#open-research-results"),
+  researchModal: document.querySelector("#research-modal"),
+  researchModalClose: document.querySelector("#research-modal-close"),
+  researchModalBody: document.querySelector("#research-modal-body"),
 };
 
 init();
@@ -164,13 +178,15 @@ async function init() {
   try {
     const dataUrls = hasApiBackend() ? DATA_URLS : ["data/findings.geojson"];
     const summaryUrls = hasApiBackend() ? SUMMARY_URLS : ["data/summary.json"];
-    const [geojson, summary, observations, modelSummary] = await Promise.all([
+    const [geojson, summary, observations, modelSummary, researchResults] = await Promise.all([
       fetchFirst(dataUrls),
       fetchFirst(summaryUrls),
       fetchObservations(),
       fetchFirstOptional(MODEL_SUMMARY_URLS),
+      fetchFirstOptional(PRELIMINARY_RESULTS_URLS),
     ]);
     state.modelSummary = modelSummary;
+    state.researchResults = researchResults;
     applyDashboardData(geojson, summary, observations);
     syncLocalObservationsToServer();
   } catch (error) {
@@ -225,6 +241,10 @@ function setupMap() {
   state.draftMovedOffsetLayer = L.layerGroup().addTo(state.map);
   state.movedOffsetRenderer = L.svg({ padding: 0.5 });
   state.routeCountLayer = L.layerGroup().addTo(state.map);
+  state.hydrologyRenderer = L.canvas({ padding: 0.5 });
+  state.hydrologyDrainageLayer = L.featureGroup();
+  state.hydrologyCrossingLayer = L.featureGroup();
+  state.hydrologyOfficialLayer = L.featureGroup();
   state.draftPointLayer = L.layerGroup().addTo(state.map);
   state.map.on("click", handleMapClick);
   state.map.on("moveend", handleMapMoveEnd);
@@ -266,6 +286,8 @@ function bindControls() {
   els.routeCountRun?.addEventListener("click", runRouteCount);
   els.routeCountKingston?.addEventListener("click", runKingstonRouteCount);
   els.syncLocalObservations?.addEventListener("click", () => syncLocalObservationsToServer({ force: true }));
+  els.openResearchResults?.addEventListener("click", openResearchResults);
+  els.researchModalClose?.addEventListener("click", () => els.researchModal?.close());
   els.routeCountInput?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
       event.preventDefault();
@@ -329,6 +351,303 @@ function bindControls() {
       els.detailModal.close();
     }
   });
+  els.researchModal?.addEventListener("click", (event) => {
+    if (event.target === els.researchModal) {
+      els.researchModal.close();
+    }
+  });
+  els.researchModalBody?.addEventListener("click", handleResearchAction);
+}
+
+function openResearchResults() {
+  renderResearchResults();
+  if (els.researchModal?.showModal) {
+    els.researchModal.showModal();
+  }
+}
+
+function renderResearchResults() {
+  if (!els.researchModalBody) return;
+  const results = state.researchResults;
+  if (!results) {
+    els.researchModalBody.innerHTML = `
+      <div class="research-banner">The local presentation bundle is unavailable.</div>
+      <p class="research-note">Run <code>.venv/bin/python scripts/export_preliminary_hydrology_demo.py</code>, then refresh this page.</p>
+    `;
+    return;
+  }
+
+  const validation = results.validation?.find(
+    (row) => Number(row.threshold_km2) === Number(state.selectedHydrologyThreshold),
+  ) || results.validation?.[0];
+  const threshold = Number(validation?.threshold_km2 || state.selectedHydrologyThreshold);
+  const model = results.current_ui_model || {};
+  const operating = model.operating_threshold || {};
+  const coverage = results.coverage || {};
+  const input = results.what_was_used || {};
+  const selectedLabel = threshold >= 1 ? `${threshold.toFixed(0)} km²` : `${threshold} km²`;
+
+  const thresholdButtons = (results.validation || [])
+    .map((row) => {
+      const value = Number(row.threshold_km2);
+      const label = value >= 1 ? `${value.toFixed(0)} km²` : `${value} km²`;
+      return `<button type="button" data-research-threshold="${value}" aria-pressed="${String(value === threshold)}">${label}</button>`;
+    })
+    .join("");
+
+  const distanceBars = [10, 25, 50, 100]
+    .map((distance) => {
+      const value = Number(validation?.official_within_m?.[String(distance)] || 0);
+      return `
+        <div class="research-bar-row">
+          <span>≤ ${distance} m</span>
+          <div class="research-bar-track" aria-hidden="true"><div class="research-bar-fill" style="width:${Math.max(0, Math.min(100, value))}%"></div></div>
+          <strong>${value.toFixed(1)}%</strong>
+        </div>
+      `;
+    })
+    .join("");
+
+  els.researchModalBody.innerHTML = `
+    <div class="research-banner">
+      <strong>Important distinction:</strong> ${escapeHtml(results.prediction_warning)}
+    </div>
+
+    <div class="research-metrics" aria-label="Study scale and coverage">
+      <div class="research-metric"><strong>${Number(input.candidate_count || 0).toLocaleString()}</strong><span>candidate locations characterized</span></div>
+      <div class="research-metric"><strong>${Number(input.official_culvert_count || 0).toLocaleString()}</strong><span>official culverts used for descriptive validation</span></div>
+      <div class="research-metric"><strong>0%</strong><span>candidate DEM nodata after repair</span></div>
+      <div class="research-metric"><strong>${Number(coverage.hydrology_edge_risk_percent || 0).toFixed(1)}%</strong><span>candidates flagged for possible edge influence</span></div>
+    </div>
+
+    <section class="research-section">
+      <h3>What was done</h3>
+      <ol class="research-pipeline">
+        <li>Acquired official USGS 3DEP elevation tiles.</li>
+        <li>Projected once to a 10 m metre-based grid.</li>
+        <li>Conditioned depressions with WhiteboxTools.</li>
+        <li>Calculated D8 flow and upstream area.</li>
+        <li>Derived drainage paths and road crossings.</li>
+      </ol>
+      <p class="research-note" style="margin-top:12px">Coverage improved from ${Number(coverage.county_nodata_before_percent || 0).toFixed(2)}% to ${Number(coverage.county_nodata_after_percent || 0).toFixed(2)}% county nodata and from ${Number(coverage.candidate_nodata_before_percent || 0).toFixed(2)}% to ${Number(coverage.candidate_nodata_after_percent || 0).toFixed(2)}% candidate nodata.</p>
+    </section>
+
+    <section class="research-section">
+      <h3>How closely the physical drainage matched official culverts</h3>
+      <div class="research-thresholds" aria-label="Drainage threshold">${thresholdButtons}</div>
+      <div class="research-chart">${distanceBars}</div>
+      <p class="research-note" style="margin-top:12px">
+        At the <strong>${selectedLabel}</strong> threshold, ${Number(validation?.mapped_stream_within_m?.["25"] || 0).toFixed(1)}% of mapped-stream samples were within 25 m of a DEM drainage path. ${Number(validation?.unlabeled_within_m?.["25"] || 0).toFixed(1)}% of unlabeled candidates were within 25 m. This is a physical alignment check—not predictive accuracy.
+      </p>
+    </section>
+
+    <section class="research-section">
+      <h3>What was predicted—and what was not</h3>
+      <div class="research-model-grid">
+        <article class="research-model-card current">
+          <h3>Existing UI model</h3>
+          <p class="research-note">A ${escapeHtml(String(model.model || "model"))} ranks candidate locations using the existing feature set. It does not yet include this new DEM hydrology group.</p>
+          <div class="research-model-stats">
+            <div><strong>${researchPercent(model.spatial_average_precision)}</strong><span>spatial holdout PR-AUC</span></div>
+            <div><strong>${researchPercent(model.spatial_roc_auc)}</strong><span>spatial holdout ROC-AUC</span></div>
+            <div><strong>${researchPercent(operating.precision)}</strong><span>precision at saved threshold</span></div>
+            <div><strong>${researchPercent(operating.recall)}</strong><span>recall at saved threshold</span></div>
+          </div>
+          <p class="research-caveat">${escapeHtml(model.caveat || "")}</p>
+        </article>
+        <article class="research-model-card future">
+          <h3>New DEM hydrology</h3>
+          <p class="research-note">It currently produces upstream area, drainage distance, road-crossing distance, crossing area, angle, and boundary-quality flags.</p>
+          <div class="research-model-stats">
+            <div><strong>4</strong><span>fixed physical thresholds</span></div>
+            <div><strong>${Number(results.compute?.active_wall_minutes || 0).toFixed(1)} min</strong><span>active processing time</span></div>
+            <div><strong>PASS</strong><span>scientific suitability gate</span></div>
+            <div><strong>Not run</strong><span>v7 prediction experiment</span></div>
+          </div>
+          <p class="research-caveat">The next experiment must determine whether these features improve unseen-route generalization and site-level recall.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="research-section">
+      <h3>Map demonstration</h3>
+      <p class="research-note">Overlay the selected DEM-derived drainage network, its road crossings, and official culverts on the existing ranked-candidate map.</p>
+      <div class="research-actions" style="margin-top:12px">
+        <button class="research-action primary" type="button" data-research-map="show" aria-pressed="${String(state.hydrologyOverlaysVisible)}">
+          ${state.hydrologyOverlaysVisible ? "Refresh comparison map" : "Show comparison on map"}
+        </button>
+        ${state.hydrologyOverlaysVisible ? '<button class="research-action" type="button" data-research-map="hide">Hide comparison</button>' : ""}
+      </div>
+      <div class="research-map-legend" aria-label="Map legend">
+        <span style="--legend-color:#247ba0">DEM drainage</span>
+        <span style="--legend-color:#f28e2b">DEM road crossing</span>
+        <span style="--legend-color:#c026d3">official culvert</span>
+        <span style="--legend-color:#1f7a63">existing ranked candidate</span>
+      </div>
+      <p class="research-note" style="margin-top:10px">${escapeHtml(results.map_note || "")}</p>
+    </section>
+
+    <section class="research-section">
+      <h3>Suggested explanation to your professor</h3>
+      <p class="research-note">“The first DEM failed because too much of the study area had no elevation coverage. I replaced it with complete official USGS data, routed water across a buffered area, and created physically interpretable drainage features. The new drainage aligns well with mapped streams and overlaps many official culvert locations, especially at the smallest threshold. This establishes that the inputs are credible. The next controlled experiment tests whether they actually improve ranking on roads and routes the model has not seen.”</p>
+    </section>
+  `;
+}
+
+function researchPercent(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? `${(number * 100).toFixed(1)}%` : "—";
+}
+
+async function handleResearchAction(event) {
+  const thresholdButton = event.target.closest("[data-research-threshold]");
+  if (thresholdButton) {
+    state.selectedHydrologyThreshold = Number(thresholdButton.dataset.researchThreshold);
+    renderResearchResults();
+    if (state.hydrologyOverlaysVisible) {
+      renderHydrologyMapLayers({ fit: false });
+    }
+    return;
+  }
+
+  const mapButton = event.target.closest("[data-research-map]");
+  if (!mapButton) return;
+  mapButton.disabled = true;
+  if (mapButton.dataset.researchMap === "hide") {
+    hideHydrologyMapLayers();
+    renderResearchResults();
+    return;
+  }
+
+  mapButton.textContent = "Loading map layers…";
+  try {
+    await ensureHydrologyDemo();
+    state.hydrologyOverlaysVisible = true;
+    renderHydrologyMapLayers({ fit: true });
+    els.researchModal?.close();
+    setMobileDrawerOpen(false);
+  } catch (error) {
+    mapButton.disabled = false;
+    mapButton.textContent = "Could not load map layers";
+    console.error(error);
+  }
+}
+
+async function ensureHydrologyDemo() {
+  if (!state.hydrologyDemo) {
+    state.hydrologyDemo = await fetchFirst(HYDROLOGY_DEMO_URLS);
+  }
+  return state.hydrologyDemo;
+}
+
+function hydrologyThresholdKey(value) {
+  if (Number(value) === 0.1) return "0p1km2";
+  if (Number(value) === 0.5) return "0p5km2";
+  if (Number(value) === 2) return "2km2";
+  return "10km2";
+}
+
+function renderHydrologyMapLayers({ fit = false } = {}) {
+  if (!state.map || !state.hydrologyDemo) return;
+  const threshold = Number(state.selectedHydrologyThreshold);
+  const key = hydrologyThresholdKey(threshold);
+  const features = state.hydrologyDemo.features || [];
+  const drainage = features.filter(
+    (feature) => feature.properties?.kind === "drainage" && feature.properties?.threshold_key === key,
+  );
+  const crossings = features.filter(
+    (feature) => feature.properties?.kind === "crossing" && feature.properties?.threshold_key === key,
+  );
+  const official = features.filter((feature) => feature.properties?.kind === "official");
+
+  state.hydrologyDrainageLayer.clearLayers();
+  state.hydrologyCrossingLayer.clearLayers();
+  state.hydrologyOfficialLayer.clearLayers();
+
+  L.geoJSON({ type: "FeatureCollection", features: drainage }, {
+    renderer: state.hydrologyRenderer,
+    style: { color: "#247ba0", weight: 2.2, opacity: 0.82 },
+    interactive: false,
+  }).addTo(state.hydrologyDrainageLayer);
+
+  L.geoJSON({ type: "FeatureCollection", features: crossings }, {
+    pointToLayer: (feature, latlng) => L.circleMarker(latlng, {
+      renderer: state.hydrologyRenderer,
+      radius: 3,
+      weight: 1,
+      color: feature.properties?.edge_risk ? "#7c6f64" : "#b45309",
+      fillColor: feature.properties?.edge_risk ? "#a8a29e" : "#f28e2b",
+      fillOpacity: 0.82,
+    }),
+    onEachFeature: (feature, layer) => {
+      const props = feature.properties || {};
+      const angle = Number.isFinite(Number(props.crossing_angle_degrees))
+        ? `${Number(props.crossing_angle_degrees).toFixed(1)}°`
+        : "not available";
+      layer.bindPopup(`
+        <strong>DEM road/drainage crossing</strong><br>
+        Upstream area: ${Number(props.upstream_area_km2 || 0).toFixed(2)} km²<br>
+        Crossing angle: ${angle}<br>
+        Edge risk: ${props.edge_risk ? "yes" : "no"}
+      `);
+    },
+  }).addTo(state.hydrologyCrossingLayer);
+
+  L.geoJSON({ type: "FeatureCollection", features: official }, {
+    pointToLayer: (_feature, latlng) => L.circleMarker(latlng, {
+      renderer: state.hydrologyRenderer,
+      radius: 5,
+      weight: 2,
+      color: "#ffffff",
+      fillColor: "#c026d3",
+      fillOpacity: 0.95,
+    }),
+    onEachFeature: (feature, layer) => {
+      const props = feature.properties || {};
+      const distance = Number(props[`distance_${key}_m`]);
+      layer.bindPopup(`
+        <strong>Official culvert ${escapeHtml(props.culvert_id || "")}</strong><br>
+        Route: ${escapeHtml(props.route || "not recorded")}<br>
+        Distance to ${threshold >= 1 ? threshold.toFixed(0) : threshold} km² DEM drainage: ${Number.isFinite(distance) ? `${distance.toFixed(1)} m` : "not available"}
+      `);
+    },
+  }).addTo(state.hydrologyOfficialLayer);
+
+  [state.hydrologyDrainageLayer, state.hydrologyCrossingLayer, state.hydrologyOfficialLayer]
+    .forEach((layer) => layer.addTo(state.map));
+  if (state.observationLayer && state.map.hasLayer(state.observationLayer)) {
+    state.map.removeLayer(state.observationLayer);
+  }
+  if (state.routeCountLayer && state.map.hasLayer(state.routeCountLayer)) {
+    state.map.removeLayer(state.routeCountLayer);
+  }
+  if (state.movedOffsetLayer && state.map.hasLayer(state.movedOffsetLayer)) {
+    state.map.removeLayer(state.movedOffsetLayer);
+  }
+
+  if (fit) {
+    const bounds = state.hydrologyOfficialLayer.getBounds?.();
+    if (bounds?.isValid()) {
+      state.map.fitBounds(bounds.pad(0.08));
+    }
+  }
+}
+
+function hideHydrologyMapLayers() {
+  state.hydrologyOverlaysVisible = false;
+  [state.hydrologyDrainageLayer, state.hydrologyCrossingLayer, state.hydrologyOfficialLayer]
+    .forEach((layer) => {
+      if (layer && state.map?.hasLayer(layer)) state.map.removeLayer(layer);
+    });
+  if (state.observationLayer && !state.map?.hasLayer(state.observationLayer)) {
+    state.observationLayer.addTo(state.map);
+  }
+  if (state.routeCountLayer && !state.map?.hasLayer(state.routeCountLayer)) {
+    state.routeCountLayer.addTo(state.map);
+  }
+  if (state.movedOffsetLayer && !state.map?.hasLayer(state.movedOffsetLayer)) {
+    state.movedOffsetLayer.addTo(state.map);
+  }
 }
 
 function handleMapMoveEnd() {

@@ -42,3 +42,6 @@ tmp/
 
 # Private development notes
 .local-notes/
+
+data/incoming_nysdot/
+data/processed/nysdot/

@@ -7,6 +7,12 @@ import pandas as pd
 from shapely.geometry import Point
 
 from culvert_ai.io import read_vector, write_vector
+from culvert_ai.labels import (
+    TRAINING_LABEL_COLUMN,
+    VERIFIED_NEGATIVE,
+    VERIFIED_POSITIVE,
+    WEAK_NEGATIVE,
+)
 
 
 def merge_confirmed_observations(
@@ -42,6 +48,7 @@ def merge_confirmed_observations(
                 "culvert_id",
                 "source_file",
                 "label",
+                TRAINING_LABEL_COLUMN,
                 "label_confidence",
                 "observation_id",
                 "field_culvert_id",
@@ -57,7 +64,9 @@ def merge_confirmed_observations(
     else:
         crs = layers[0].crs
         aligned = [layer.to_crs(crs) if layer.crs != crs else layer for layer in layers]
-        combined = gpd.GeoDataFrame(pd.concat(aligned, ignore_index=True), geometry="geometry", crs=crs)
+        combined = gpd.GeoDataFrame(
+            pd.concat(aligned, ignore_index=True), geometry="geometry", crs=crs
+        )
 
     write_vector(combined, output_path)
     if csv_output:
@@ -112,6 +121,7 @@ def _confirmed_observations_as_known(
             "culvert_id": confirmed.apply(_observation_culvert_id, axis=1),
             "source_file": "field_observations.geojson",
             "label": "confirmed_field_observation",
+            TRAINING_LABEL_COLUMN: VERIFIED_POSITIVE,
             "label_confidence": 1.0,
             "observation_id": _string_series(confirmed, "observation_id"),
             "field_culvert_id": _string_series(confirmed, "field_culvert_id"),
@@ -162,6 +172,7 @@ def _denied_observations_as_negative(observations: gpd.GeoDataFrame) -> gpd.GeoD
             "culvert_id": denied.apply(_observation_culvert_id, axis=1),
             "source_file": "field_observations.geojson",
             "label": "no_culvert",
+            TRAINING_LABEL_COLUMN: VERIFIED_NEGATIVE,
             "label_confidence": 1.0,
             "observation_id": _string_series(denied, "observation_id"),
             "field_culvert_id": _string_series(denied, "field_culvert_id"),
@@ -224,6 +235,7 @@ def _missed_predictions_as_negative(
             "culvert_id": _string_series(missed, "miss_candidate_id"),
             "source_file": "field_observations.geojson",
             "label": "missed_prediction",
+            TRAINING_LABEL_COLUMN: WEAK_NEGATIVE,
             "label_confidence": 1.0,
             "observation_id": _string_series(missed, "observation_id"),
             "field_culvert_id": _string_series(missed, "field_culvert_id"),
@@ -247,6 +259,7 @@ def _empty_observation_labels(crs) -> gpd.GeoDataFrame:
             "culvert_id",
             "source_file",
             "label",
+            TRAINING_LABEL_COLUMN,
             "label_confidence",
             "observation_id",
             "field_culvert_id",

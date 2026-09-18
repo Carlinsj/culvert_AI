@@ -10,7 +10,7 @@
       integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
       crossorigin="anonymous"
     />
-    <link rel="stylesheet" href="styles.css?v=20260713-bulk-sync" />
+    <link rel="stylesheet" href="styles.css?v=20260917-preliminary-results" />
   </head>
   <body>
     <main class="app-shell">
@@ -46,6 +46,9 @@
             </div>
           </div>
           <p id="model-quality" class="model-quality">Model quality pending</p>
+          <button id="open-research-results" class="research-results-button" type="button">
+            Preliminary results
+          </button>
         </section>
 
         <section class="list-section" aria-label="Ranked candidates">
@@ -180,6 +183,19 @@
       <div id="detail-modal-body" class="detail-modal-body"></div>
     </dialog>
 
+    <dialog id="research-modal" class="research-modal" aria-labelledby="research-modal-title">
+      <header class="research-modal-header">
+        <div>
+          <p class="eyebrow">Professor demo · preliminary</p>
+          <h2 id="research-modal-title">DEM hydrology study</h2>
+        </div>
+        <button id="research-modal-close" type="button" aria-label="Close preliminary results">Close</button>
+      </header>
+      <div id="research-modal-body" class="research-modal-body">
+        <p class="research-loading">Loading preliminary results…</p>
+      </div>
+    </dialog>
+
     <template id="candidate-template">
       <li>
         <button type="button" class="candidate-button">
@@ -198,6 +214,6 @@
       integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
       crossorigin="anonymous"
     ></script>
-    <script src="app.js?v=20260722-device-login"></script>
+    <script src="app.js?v=20260917-preliminary-results"></script>
   </body>
 </html>

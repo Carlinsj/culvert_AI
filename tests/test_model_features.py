@@ -2,6 +2,7 @@ import geopandas as gpd
 import pandas as pd
 from shapely.geometry import Point
 
+from culvert_ai.labels import UNLABELED_CANDIDATE, VERIFIED_NEGATIVE, VERIFIED_POSITIVE
 from culvert_ai.model import (
     _precision_floor_operating_point,
     predict_culvert_probability,
@@ -48,11 +49,31 @@ def test_select_feature_columns_excludes_labels_and_coordinates():
 def test_select_training_rows_excludes_unreviewed_candidates():
     table = gpd.GeoDataFrame(
         [
-            {"candidate_id": "positive-1", "is_culvert": 1, "field_denied": 0},
-            {"candidate_id": "positive-2", "is_culvert": 1, "field_denied": 0},
-            {"candidate_id": "denied-1", "is_culvert": 0, "field_denied": 1},
-            {"candidate_id": "denied-2", "is_culvert": 0, "field_denied": 1},
-            {"candidate_id": "unreviewed", "is_culvert": 0, "field_denied": 0},
+            {
+                "candidate_id": "positive-1",
+                "is_culvert": 1,
+                "training_label_class": VERIFIED_POSITIVE,
+            },
+            {
+                "candidate_id": "positive-2",
+                "is_culvert": 1,
+                "training_label_class": VERIFIED_POSITIVE,
+            },
+            {
+                "candidate_id": "denied-1",
+                "is_culvert": 0,
+                "training_label_class": VERIFIED_NEGATIVE,
+            },
+            {
+                "candidate_id": "denied-2",
+                "is_culvert": 0,
+                "training_label_class": VERIFIED_NEGATIVE,
+            },
+            {
+                "candidate_id": "unreviewed",
+                "is_culvert": 0,
+                "training_label_class": UNLABELED_CANDIDATE,
+            },
         ],
         geometry=[Point(index, 0) for index in range(5)],
         crs="EPSG:32618",
@@ -68,12 +89,15 @@ def test_select_training_rows_excludes_unreviewed_candidates():
     }
     assert selected["is_culvert"].value_counts().to_dict() == {1: 2, 0: 2}
     assert summary == {
-        "strategy": "explicit_confirmed_and_denied_field_labels",
+        "strategy": "explicit_training_label_classes",
         "source_rows": 5,
         "training_rows": 4,
-        "unreviewed_rows_excluded": 1,
-        "confirmed_rows": 2,
-        "denied_rows": 2,
+        "verified_positive_rows": 2,
+        "verified_negative_rows": 2,
+        "weak_negative_rows_available": 0,
+        "weak_negative_rows_sampled": 0,
+        "weak_negative_rows_excluded": 0,
+        "unlabeled_candidate_rows_excluded": 1,
     }
 
 
@@ -98,6 +122,7 @@ def test_train_model_supports_soft_voting_ensemble(tmp_path):
             {
                 "candidate_id": f"cand-{index}",
                 "is_culvert": is_culvert,
+                "training_label_class": VERIFIED_POSITIVE if is_culvert else VERIFIED_NEGATIVE,
                 "road_stream_distance_m": 2.0 if is_culvert else 60.0 + index,
                 "stream_density_m_per_sqkm": 90.0 if is_culvert else 10.0 + index,
                 "dem_culvert_terrain_score": 0.85 if is_culvert else 0.15,

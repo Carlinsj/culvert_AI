@@ -10,6 +10,14 @@ import pandas as pd
 from rasterio.windows import Window
 
 from culvert_ai.io import add_wgs84_coordinates, clean_geometry, project_layers_to_metric
+from culvert_ai.labels import (
+    TRAINING_LABEL_COLUMN,
+    UNLABELED_CANDIDATE,
+    VERIFIED_NEGATIVE,
+    VERIFIED_POSITIVE,
+    WEAK_NEGATIVE,
+    training_label_classes,
+)
 
 
 KNOWN_PATTERN_RADII_M = (250.0, 500.0, 1000.0)
@@ -47,6 +55,9 @@ def build_feature_table(
 ) -> gpd.GeoDataFrame:
     (features,), metric_crs = project_layers_to_metric(clean_geometry(candidates))
     features = features.copy()
+    features[TRAINING_LABEL_COLUMN] = UNLABELED_CANDIDATE
+    features["is_culvert"] = 0
+    features["field_denied"] = 0
     features["x_m"] = features.geometry.x
     features["y_m"] = features.geometry.y
     features = add_candidate_derived_features(features)
@@ -176,6 +187,8 @@ def add_known_culvert_labels(
     positive_radius_m: float,
 ) -> gpd.GeoDataFrame:
     labeled = candidates.copy()
+    if TRAINING_LABEL_COLUMN not in labeled.columns:
+        labeled[TRAINING_LABEL_COLUMN] = UNLABELED_CANDIDATE
     if known_culverts.empty:
         labeled["dist_to_known_culvert_m"] = np.nan
         labeled["is_culvert"] = 0
@@ -193,6 +206,7 @@ def add_known_culvert_labels(
             continue
         selected_index = _best_training_match(labeled.loc[nearby.index], nearby)
         labeled.at[selected_index, "is_culvert"] = 1
+        labeled.at[selected_index, TRAINING_LABEL_COLUMN] = VERIFIED_POSITIVE
     labeled = add_nearest_known_culvert_metadata(labeled, known_culverts)
     return labeled
 
@@ -341,14 +355,12 @@ def add_known_culvert_pattern_features(
         count_500 = int((distances <= 500.0).sum())
         count_1000 = int((distances <= 1000.0).sum())
         density_signal = min(
-            (0.50 * min(count_500, 2) / 2.0)
-            + (0.50 * min(count_1000, 4) / 4.0),
+            (0.50 * min(count_500, 2) / 2.0) + (0.50 * min(count_1000, 4) / 4.0),
             1.0,
         )
         route_signal = distance_decay if route_match else 0.0
         corridor_score = (
-            source_score
-            * (0.55 * distance_decay + 0.25 * density_signal + 0.20 * route_signal)
+            source_score * (0.55 * distance_decay + 0.25 * density_signal + 0.20 * route_signal)
             if outside_known_match
             else 0.0
         )
@@ -435,12 +447,8 @@ def add_field_route_feedback_features(
     candidate_groups = route_keys[route_keys.ne("")].groupby(route_keys).groups
 
     for route_key, candidate_indices in candidate_groups.items():
-        positive_rows = positive_assignments[
-            positive_assignments["_field_route_key"].eq(route_key)
-        ]
-        negative_rows = negative_assignments[
-            negative_assignments["_field_route_key"].eq(route_key)
-        ]
+        positive_rows = positive_assignments[positive_assignments["_field_route_key"].eq(route_key)]
+        negative_rows = negative_assignments[negative_assignments["_field_route_key"].eq(route_key)]
         positive_count = float(positive_counts.get(route_key, 0.0))
         negative_count = float(negative_counts.get(route_key, 0.0))
         review_count = positive_count + negative_count
@@ -460,9 +468,7 @@ def add_field_route_feedback_features(
             positive=False,
         )
         support_total = positive_support + negative_support
-        local_precision = (
-            positive_support + 2.0 * route_precision
-        ) / (support_total + 2.0)
+        local_precision = (positive_support + 2.0 * route_precision) / (support_total + 2.0)
         feedback_score = (0.65 * route_precision + 0.35 * local_precision).clip(0, 1)
 
         enriched.loc[indices, "field_route_positive_reviews"] = positive_count
@@ -483,6 +489,8 @@ def add_negative_culvert_labels(
 ) -> gpd.GeoDataFrame:
     labeled = candidates.copy()
     labeled["field_denied"] = 0
+    if TRAINING_LABEL_COLUMN not in labeled.columns:
+        labeled[TRAINING_LABEL_COLUMN] = UNLABELED_CANDIDATE
     labeled["dist_to_denied_culvert_m"] = np.nan
     labeled["nearest_denied_observation_id"] = ""
     labeled["nearest_denied_notes"] = ""
@@ -534,7 +542,8 @@ def add_negative_culvert_labels(
             "" if pd.isna(nearest_observation_value) else str(nearest_observation_value)
         )
         has_direct_feedback_row = nearest_observation_id in direct_feedback_observation_ids
-        if exact_negative is not None:
+        exact_match = exact_negative is not None
+        if exact_match:
             nearest = exact_negative
             miss_distance_m = _optional_float(nearest.get("miss_distance_m"))
             if miss_distance_m is not None:
@@ -548,14 +557,43 @@ def add_negative_culvert_labels(
             )
 
         if mark_negative:
-            _mark_negative_label(labeled, row_index, nearest)
+            label_class = _negative_training_label_class(
+                candidate_source=candidate_source,
+                negative=nearest,
+                exact_match=exact_match,
+            )
+            _mark_negative_label(labeled, row_index, nearest, label_class)
 
     return labeled
 
 
-def _mark_negative_label(labeled: gpd.GeoDataFrame, row_index, nearest: pd.Series) -> None:
+def _negative_training_label_class(
+    candidate_source: str,
+    negative: pd.Series,
+    exact_match: bool,
+) -> str:
+    explicit_class = str(negative.get(TRAINING_LABEL_COLUMN, "") or "").strip()
+    if explicit_class == WEAK_NEGATIVE:
+        return WEAK_NEGATIVE
+
+    label = str(negative.get("label", "") or "").strip()
+    verified_field_match = candidate_source == "field_observed_non_culvert" or exact_match
+    if verified_field_match and (explicit_class == VERIFIED_NEGATIVE or label == "no_culvert"):
+        return VERIFIED_NEGATIVE
+    return WEAK_NEGATIVE
+
+
+def _mark_negative_label(
+    labeled: gpd.GeoDataFrame,
+    row_index,
+    nearest: pd.Series,
+    label_class: str,
+) -> None:
+    if labeled.at[row_index, TRAINING_LABEL_COLUMN] == VERIFIED_POSITIVE:
+        return
     labeled.at[row_index, "field_denied"] = 1
     labeled.at[row_index, "is_culvert"] = 0
+    labeled.at[row_index, TRAINING_LABEL_COLUMN] = label_class
     if "observation_id" in nearest.index and pd.notna(nearest["observation_id"]):
         labeled.at[row_index, "nearest_denied_observation_id"] = str(nearest["observation_id"])
     if "notes" in nearest.index and pd.notna(nearest["notes"]):
@@ -709,8 +747,7 @@ def add_dem_culvert_terrain_features(points: gpd.GeoDataFrame) -> gpd.GeoDataFra
     enriched["dem_valley_position_score"] = _mean_numeric_pieces(enriched, valley_scores)
     enriched["dem_terrain_break_score"] = _mean_numeric_pieces(enriched, terrain_scores)
     enriched["dem_culvert_terrain_score"] = (
-        0.65 * enriched["dem_valley_position_score"]
-        + 0.35 * enriched["dem_terrain_break_score"]
+        0.65 * enriched["dem_valley_position_score"] + 0.35 * enriched["dem_terrain_break_score"]
     ).clip(0, 1)
     return enriched
 
@@ -759,8 +796,8 @@ def add_route_profile_dem_features(points: gpd.GeoDataFrame) -> gpd.GeoDataFrame
             ranks.loc[positive_dips.index] = positive_dips.rank(pct=True)
         absolute_score = 1.0 - np.exp(-dip_series.clip(lower=0.0) / 0.75)
         low_point_score = (
-            0.70 * absolute_score + 0.30 * ranks
-        ).where(dip_series >= 0.15, 0.0).clip(0, 1)
+            (0.70 * absolute_score + 0.30 * ranks).where(dip_series >= 0.15, 0.0).clip(0, 1)
+        )
 
         enriched.loc[ordered, "route_elevation_dip_60m"] = dip_series.to_numpy()
         enriched.loc[ordered, "route_elevation_dip_rank_pct"] = ranks.to_numpy()
@@ -828,8 +865,8 @@ def add_approved_known_dem_similarity_features(
         return enriched
 
     profile = known_values.median(axis=0)
-    candidate_values = enriched[pattern_columns].apply(pd.to_numeric, errors="coerce").fillna(
-        profile
+    candidate_values = (
+        enriched[pattern_columns].apply(pd.to_numeric, errors="coerce").fillna(profile)
     )
     difference = (candidate_values - profile).abs().mean(axis=1)
     similarity = (1.0 - difference).clip(0, 1).fillna(0.0)
@@ -860,8 +897,10 @@ def add_training_sample_weights(points: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     weighted = points.copy()
     weights = pd.Series(0.05, index=weighted.index, dtype=float)
 
-    is_positive = _numeric_flag(weighted, "is_culvert")
-    is_denied = _numeric_flag(weighted, "field_denied")
+    label_class = training_label_classes(weighted)
+    is_positive = label_class.eq(VERIFIED_POSITIVE) | _numeric_flag(weighted, "is_culvert")
+    is_denied = label_class.eq(VERIFIED_NEGATIVE)
+    is_weak_negative = label_class.eq(WEAK_NEGATIVE)
     is_feedback_positive = is_positive & _field_observation_match(weighted)
     is_field_positive = is_positive & ~is_feedback_positive
     is_abu_positive = is_feedback_positive & _feedback_type_match(weighted, "abu")
@@ -878,7 +917,8 @@ def add_training_sample_weights(points: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     weights.loc[is_cbu_positive] = 20.0
     weights.loc[is_mvd_positive] = 32.0
     weights.loc[is_denied] = 24.0
-    weights.loc[is_missed_negative] = 32.0
+    weights.loc[is_weak_negative] = 1.0
+    weights.loc[is_missed_negative & is_denied] = 32.0
 
     weighted["training_sample_weight"] = weights
     return weighted
@@ -1116,10 +1156,15 @@ def _weighted_feedback_counts(
         return {}
     weights = _feedback_assignment_weights(assignments, positive=positive)
     if not positive:
-        feedback_type = assignments.get(
-            "feedback_type",
-            pd.Series("", index=assignments.index),
-        ).fillna("").astype(str).str.lower()
+        feedback_type = (
+            assignments.get(
+                "feedback_type",
+                pd.Series("", index=assignments.index),
+            )
+            .fillna("")
+            .astype(str)
+            .str.lower()
+        )
         weights = weights.where(~feedback_type.eq("mvd_origin"), 0.25)
     return (
         pd.DataFrame(
@@ -1145,9 +1190,9 @@ def _feedback_distance_support(
     weights = _feedback_assignment_weights(assignments, positive=positive)
     for (_, feedback), weight in zip(assignments.iterrows(), weights):
         distance = candidate_geometry.distance(feedback.geometry)
-        contribution = np.exp(
-            -distance / FIELD_ROUTE_LOCAL_SUPPORT_DECAY_M
-        ).where(distance <= FIELD_ROUTE_LOCAL_SUPPORT_MAX_DISTANCE_M, 0.0)
+        contribution = np.exp(-distance / FIELD_ROUTE_LOCAL_SUPPORT_DECAY_M).where(
+            distance <= FIELD_ROUTE_LOCAL_SUPPORT_MAX_DISTANCE_M, 0.0
+        )
         support += contribution.fillna(0.0) * float(weight)
     return support
 
@@ -1156,10 +1201,15 @@ def _feedback_assignment_weights(
     assignments: gpd.GeoDataFrame,
     positive: bool,
 ) -> pd.Series:
-    feedback_type = assignments.get(
-        "feedback_type",
-        pd.Series("", index=assignments.index),
-    ).fillna("").astype(str).str.lower()
+    feedback_type = (
+        assignments.get(
+            "feedback_type",
+            pd.Series("", index=assignments.index),
+        )
+        .fillna("")
+        .astype(str)
+        .str.lower()
+    )
     emphasized = {"mvd"} if positive else {"mvd_origin"}
     return feedback_type.isin(emphasized).map({True: 1.25, False: 1.0}).astype(float)
 
@@ -1209,9 +1259,7 @@ def _normalized_route_text(value) -> str:
 
 def _known_source_score(row: pd.Series) -> float:
     confidence = (
-        _optional_float(row.get("label_confidence"))
-        if "label_confidence" in row.index
-        else None
+        _optional_float(row.get("label_confidence")) if "label_confidence" in row.index else None
     )
     if _known_source_is_abu(row):
         return 1.0
@@ -1291,14 +1339,9 @@ def _raster_resolution_m(src, x: float, y: float) -> tuple[float, float]:
     if src.crs and src.crs.is_geographic:
         latitude = np.radians(float(y))
         meters_per_degree_latitude = (
-            111132.92
-            - 559.82 * np.cos(2 * latitude)
-            + 1.175 * np.cos(4 * latitude)
+            111132.92 - 559.82 * np.cos(2 * latitude) + 1.175 * np.cos(4 * latitude)
         )
-        meters_per_degree_longitude = (
-            111412.84 * np.cos(latitude)
-            - 93.5 * np.cos(3 * latitude)
-        )
+        meters_per_degree_longitude = 111412.84 * np.cos(latitude) - 93.5 * np.cos(3 * latitude)
         return (
             max(xres * abs(float(meters_per_degree_longitude)), 1e-6),
             max(yres * abs(float(meters_per_degree_latitude)), 1e-6),
