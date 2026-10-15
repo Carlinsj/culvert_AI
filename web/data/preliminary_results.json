@@ -1,0 +1,152 @@
+{
+  "title": "Preliminary DEM hydrology results",
+  "experiment_id": "nysdot_ulster_dem_hydrology_groundwork_v2_20260917",
+  "status": "Groundwork passed; v7 predictive experiment not yet run",
+  "prediction_warning": "The new DEM hydrology products have not produced a culvert prediction yet. They passed physical and coverage checks and are ready to be tested in v7.",
+  "what_was_used": {
+    "dem": "Official USGS 3DEP seamless 1/3 arc-second DEM",
+    "resolution": "10 m projected grid",
+    "processing_extent": "Ulster County plus a 30 km external buffer",
+    "conditioning": "WhiteboxTools least-cost breaching, then filling remaining depressions",
+    "routing": "D8 flow direction and contributing area",
+    "candidate_count": 80620,
+    "official_culvert_count": 714,
+    "thresholds_km2": [
+      0.1,
+      0.5,
+      2.0,
+      10.0
+    ]
+  },
+  "coverage": {
+    "county_nodata_before_percent": 29.59,
+    "county_nodata_after_percent": 0.0,
+    "candidate_nodata_before_percent": 24.68,
+    "candidate_nodata_after_percent": 0.0,
+    "hydrology_edge_risk_percent": 15.1873
+  },
+  "validation": [
+    {
+      "threshold_km2": 0.1,
+      "official_count": 714,
+      "unlabeled_candidate_count": 79716,
+      "mapped_stream_sample_count": 67214,
+      "official_within_m": {
+        "10": 10.92436974789916,
+        "25": 21.568627450980394,
+        "50": 38.095238095238095,
+        "100": 59.10364145658264
+      },
+      "unlabeled_within_m": {
+        "10": 6.210798334086006,
+        "25": 18.076672186261227,
+        "50": 33.180290029605096,
+        "100": 53.9552912840584
+      },
+      "mapped_stream_within_m": {
+        "10": 71.60115452137947,
+        "25": 88.93236528104264,
+        "50": 95.3953045496474,
+        "100": 98.51519028773768
+      }
+    },
+    {
+      "threshold_km2": 0.5,
+      "official_count": 714,
+      "unlabeled_candidate_count": 79716,
+      "mapped_stream_sample_count": 67214,
+      "official_within_m": {
+        "10": 3.081232492997199,
+        "25": 9.663865546218489,
+        "50": 22.12885154061625,
+        "100": 38.655462184873954
+      },
+      "unlabeled_within_m": {
+        "10": 3.2239450047669225,
+        "25": 9.615384615384617,
+        "50": 19.239550403933965,
+        "100": 33.44121631792865
+      },
+      "mapped_stream_within_m": {
+        "10": 68.67021751420836,
+        "25": 85.32448597018478,
+        "50": 91.77105960067844,
+        "100": 95.48754723718274
+      }
+    },
+    {
+      "threshold_km2": 2.0,
+      "official_count": 714,
+      "unlabeled_candidate_count": 79716,
+      "mapped_stream_sample_count": 67214,
+      "official_within_m": {
+        "10": 0.9803921568627452,
+        "25": 5.46218487394958,
+        "50": 15.546218487394958,
+        "100": 28.991596638655466
+      },
+      "unlabeled_within_m": {
+        "10": 1.6960208741030658,
+        "25": 5.282502885242611,
+        "50": 11.67017913593256,
+        "100": 21.113703647950224
+      },
+      "mapped_stream_within_m": {
+        "10": 60.16008569643228,
+        "25": 74.29404588329812,
+        "50": 79.77207129467075,
+        "100": 83.25348885648823
+      }
+    },
+    {
+      "threshold_km2": 10.0,
+      "official_count": 714,
+      "unlabeled_candidate_count": 79716,
+      "mapped_stream_sample_count": 67214,
+      "official_within_m": {
+        "10": 0.1400560224089636,
+        "25": 3.92156862745098,
+        "50": 11.904761904761903,
+        "100": 22.689075630252105
+      },
+      "unlabeled_within_m": {
+        "10": 0.7765065984244066,
+        "25": 2.855135731848061,
+        "50": 7.314717246224095,
+        "100": 13.196848813287168
+      },
+      "mapped_stream_within_m": {
+        "10": 37.609724164608565,
+        "25": 45.091796351950485,
+        "50": 47.6924450263338,
+        "100": 49.91965959472729
+      }
+    }
+  ],
+  "current_ui_model": {
+    "label": "Existing field-review model; does not include the new hydrology group",
+    "model": "random_forest",
+    "labeled_rows": 481,
+    "positive_labels": 244,
+    "negative_labels": 237,
+    "spatial_average_precision": 0.9261143351101102,
+    "spatial_roc_auc": 0.842436974789916,
+    "operating_threshold": {
+      "target_precision": 0.6,
+      "meets_precision_floor": true,
+      "threshold": 0.1433100961910972,
+      "precision": 0.6181818181818182,
+      "recall": 1.0,
+      "f1": 0.7640449438202247,
+      "predicted_positive_count": 110,
+      "hits": 68,
+      "source": "spatial_holdout"
+    },
+    "caveat": "These are existing-model holdout metrics, not v7 results. Prior work found that whole-route generalization and site-level ranking remain the bottleneck."
+  },
+  "map_note": "The map overlay is presentation-only. Lines are simplified to 25 m for browser performance; the analytical rasters and vectors remain unchanged.",
+  "compute": {
+    "active_wall_minutes": 32.5,
+    "processed_output_gb": 6.47
+  }
+}

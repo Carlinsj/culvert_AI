@@ -9,6 +9,8 @@ const requiredFiles = [
   "web/index.html",
   "web/styles.css",
   "web/app.js",
+  "web/product-core.js",
+  "web/data/supported-areas.json",
   "web/data/findings.geojson",
   "web/data/route_count_source.geojson.gz",
   "web/data/summary.json",

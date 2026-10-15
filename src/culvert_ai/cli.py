@@ -27,6 +27,7 @@ from culvert_ai.field_reports import append_field_report_candidates, import_fiel
 from culvert_ai.io import read_vector, write_vector
 from culvert_ai.llm_review import import_llm_reviewed_labels, write_llm_label_review_queue
 from culvert_ai.model import predict_culvert_probability, train_model
+from culvert_ai.inference import RouteZConfig, predict_culverts
 from culvert_ai.observations import merge_confirmed_observations
 from culvert_ai.osm import (
     DEFAULT_CENSUS_COUNTY_URL,
@@ -71,11 +72,15 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(required=True)
 
     demo_data = subparsers.add_parser("make-demo-data", help="Create synthetic demo GIS files.")
-    demo_data.add_argument("--output-dir", default="data/ulster_demo", help="Directory for demo files.")
+    demo_data.add_argument(
+        "--output-dir", default="data/ulster_demo", help="Directory for demo files."
+    )
     demo_data.set_defaults(func=_make_demo_data)
 
     run_demo = subparsers.add_parser("run-demo", help="Run the full synthetic demo pipeline.")
-    run_demo.add_argument("--output-dir", default="data/ulster_demo", help="Directory for demo outputs.")
+    run_demo.add_argument(
+        "--output-dir", default="data/ulster_demo", help="Directory for demo outputs."
+    )
     run_demo.set_defaults(func=_run_demo)
 
     download_osm = subparsers.add_parser(
@@ -223,7 +228,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--candidates",
         default="data/processed/actual_ulster_discovery_predictions.gpkg",
     )
-    analyze_points.add_argument("--boundary", help="Optional boundary used to accept/reject points.")
+    analyze_points.add_argument(
+        "--boundary", help="Optional boundary used to accept/reject points."
+    )
     analyze_points.add_argument(
         "--output-geojson",
         default="data/processed/extracted_points_analysis.geojson",
@@ -353,7 +360,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--boundary",
         help="Optional official county/project boundary file. If supplied, it overrides --region.",
     )
-    filter_region.add_argument("--no-clip", action="store_true", help="Filter only; do not clip geometry.")
+    filter_region.add_argument(
+        "--no-clip", action="store_true", help="Filter only; do not clip geometry."
+    )
     filter_region.set_defaults(func=_filter_region)
 
     candidates = subparsers.add_parser(
@@ -442,6 +451,12 @@ def build_parser() -> argparse.ArgumentParser:
     train.add_argument("--test-size", type=float, default=0.25)
     train.add_argument("--random-state", type=int, default=42)
     train.add_argument(
+        "--weak-negative-sample-size",
+        type=int,
+        default=0,
+        help="Explicit number of weak negatives to sample for fitting; default uses verified labels only.",
+    )
+    train.add_argument(
         "--model-family",
         default="auto",
         choices=[
@@ -522,7 +537,42 @@ def build_parser() -> argparse.ArgumentParser:
     predict.add_argument("--csv-output", help="Optional CSV export for field review.")
     predict.set_defaults(func=_predict)
 
-    evaluate = subparsers.add_parser("evaluate", help="Evaluate predictions against known culverts.")
+    route_general = subparsers.add_parser(
+        "predict-route-general",
+        help="Run frozen FLOW-C plus dynamic ROUTE-Z on any supplied road network.",
+    )
+    route_general.add_argument("--roads", required=True, help="Road centerline vector file.")
+    route_general.add_argument("--streams", required=True, help="Mapped water/stream vector file.")
+    route_general.add_argument("--dem", required=True, help="DEM raster used for terrain features.")
+    route_general.add_argument("--model", required=True, help="Frozen audited FLOW-C joblib bundle.")
+    route_general.add_argument("--output", required=True, help="Full globally ranked vector output.")
+    route_general.add_argument("--csv-output", help="Optional field-ready CSV output.")
+    route_general.add_argument(
+        "--route-id-column",
+        help="Opaque road/route grouping column; never used as a predictive model feature.",
+    )
+    route_general.add_argument("--flow-accumulation")
+    route_general.add_argument("--drainage-area")
+    route_general.add_argument("--landcover")
+    route_general.add_argument("--dem-crossings-0p1km2")
+    route_general.add_argument("--dem-crossings-0p5km2")
+    route_general.add_argument("--dem-crossings-2km2")
+    route_general.add_argument("--dem-crossings-10km2")
+    route_general.add_argument(
+        "--global-route-z-center",
+        type=float,
+        help="Optional frozen global FLOW-C center for statistically unstable short roads.",
+    )
+    route_general.add_argument(
+        "--global-route-z-scale",
+        type=float,
+        help="Optional frozen global FLOW-C scale for statistically unstable short roads.",
+    )
+    route_general.set_defaults(func=_predict_route_general)
+
+    evaluate = subparsers.add_parser(
+        "evaluate", help="Evaluate predictions against known culverts."
+    )
     evaluate.add_argument("--predictions", required=True, help="Prediction vector file.")
     evaluate.add_argument("--known-culverts", required=True, help="Known culvert point inventory.")
     evaluate.add_argument("--output", default="reports/prediction_eval.json")
@@ -535,7 +585,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Measure actual culverts with a prediction within a field distance tolerance.",
     )
     success_rate.add_argument("--predictions", required=True, help="Ranked prediction vector file.")
-    success_rate.add_argument("--actual-culverts", required=True, help="Actual/confirmed culvert points.")
+    success_rate.add_argument(
+        "--actual-culverts", required=True, help="Actual/confirmed culvert points."
+    )
     success_rate.add_argument("--output", default="reports/field_success_rate.json")
     success_rate.add_argument("--max-distance-m", type=float, default=15.0)
     success_rate.add_argument(
@@ -543,7 +595,9 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Count known/label rows as predictions. Default excludes them.",
     )
-    success_rate.add_argument("--rank-limit", type=int, help="Evaluate only predictions up to this rank.")
+    success_rate.add_argument(
+        "--rank-limit", type=int, help="Evaluate only predictions up to this rank."
+    )
     success_rate.set_defaults(func=_evaluate_success_rate)
 
     route_count = subparsers.add_parser(
@@ -582,7 +636,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="JSON report output.",
     )
     route_count.add_argument("--csv-output", help="Optional CSV of clustered predicted sites.")
-    route_count.add_argument("--geojson-output", help="Optional GeoJSON of clustered predicted sites.")
+    route_count.add_argument(
+        "--geojson-output", help="Optional GeoJSON of clustered predicted sites."
+    )
     route_count.set_defaults(func=_route_count_report)
 
     return parser
@@ -823,6 +879,7 @@ def _train(args) -> dict:
         model_family=args.model_family,
         spatial_cv=not args.no_spatial_cv,
         spatial_block_size_m=args.spatial_block_size_m,
+        weak_negative_sample_size=args.weak_negative_sample_size,
     )
     metrics["model"] = str(args.model_output)
     metrics["metrics"] = str(args.metrics_output)
@@ -835,6 +892,54 @@ def _predict(args) -> dict:
     predictions = predict_culvert_probability(features, args.model)
     write_vector(predictions, args.output)
     result = {"predictions": Path(args.output), "rows": len(predictions)}
+    if args.csv_output:
+        write_vector(predictions, args.csv_output)
+        result["predictions_csv"] = Path(args.csv_output)
+    return result
+
+
+def _predict_route_general(args) -> dict:
+    roads = read_vector(args.roads)
+    streams = read_vector(args.streams)
+    crossing_paths = {
+        "0p1km2": args.dem_crossings_0p1km2,
+        "0p5km2": args.dem_crossings_0p5km2,
+        "2km2": args.dem_crossings_2km2,
+        "10km2": args.dem_crossings_10km2,
+    }
+    crossings = {
+        threshold: read_vector(path)
+        for threshold, path in crossing_paths.items()
+        if path
+    }
+    config = None
+    if args.global_route_z_center is not None or args.global_route_z_scale is not None:
+        if args.global_route_z_center is None or args.global_route_z_scale is None:
+            raise ValueError("Both global ROUTE-Z center and scale must be supplied together.")
+        config = RouteZConfig(
+            global_center=args.global_route_z_center,
+            global_scale=args.global_route_z_scale,
+        )
+    predictions = predict_culverts(
+        roads,
+        streams=streams,
+        dem_path=args.dem,
+        flow_c_model=args.model,
+        route_id_column=args.route_id_column,
+        flow_accumulation_path=args.flow_accumulation,
+        drainage_area_path=args.drainage_area,
+        landcover_path=args.landcover,
+        dem_crossings=crossings,
+        route_z_config=config,
+    )
+    write_vector(predictions, args.output)
+    result = {
+        "predictions": Path(args.output),
+        "physical_sites": len(predictions),
+        "routes": int(predictions["route_id"].nunique()),
+        "model_retrained": False,
+        "site_radius_m": 20.0,
+    }
     if args.csv_output:
         write_vector(predictions, args.csv_output)
         result["predictions_csv"] = Path(args.csv_output)

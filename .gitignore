@@ -38,7 +38,12 @@ data/ulster_demo/
 # Local tooling and generated artifacts
 .codex/
 outputs/
+dist/
 tmp/
 
 # Private development notes
 .local-notes/
+/handoff.md
+
+data/incoming_nysdot/
+data/processed/nysdot/

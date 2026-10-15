@@ -1,5 +1,10 @@
 # Culvert Prediction Model
 
+> Historical training/export pipeline documentation (July 2026), not the frozen
+> application's current model or validation. See [README](../README.md) for the
+> October 2026 RF baseline, experimental hydrology path and known limitations.
+> Values and probability terminology below describe that older workflow only.
+
 Last updated: 2026-07-06
 
 This file explains how the culvert prediction model is built, how field labels

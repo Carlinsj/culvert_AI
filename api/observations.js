@@ -8,7 +8,6 @@ import {
 } from "./_lib/feedback.js";
 import { requireFeedbackWriteAuth } from "./_lib/auth.js";
 import { readJsonBody, requireMethod, sendError, sendJson } from "./_lib/http.js";
-import { maybeTriggerRetrain } from "./_lib/retrain.js";
 
 export default async function handler(request, response) {
   if (!requireMethod(request, response, ["GET", "POST", "DELETE"])) return;
@@ -28,11 +27,6 @@ export default async function handler(request, response) {
       const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
       const deleted = await deleteObservation(url.searchParams.get("id"));
       const { findings, summary } = await refreshPublishedData(deleted.observations);
-      const retraining = await maybeTriggerRetrain({
-        observations: deleted.observations,
-        reason: "field_observation_deleted",
-      });
-
       sendJson(response, {
         status: "deleted",
         observation_id: deleted.observation_id,
@@ -40,7 +34,7 @@ export default async function handler(request, response) {
         findings,
         summary,
         storage: deleted.storage,
-        retraining,
+        model_update: "Field observations are stored separately and do not alter the frozen model.",
         warning: deleted.warning,
       });
       return;
@@ -52,11 +46,6 @@ export default async function handler(request, response) {
     const bulkPayload = Array.isArray(payload?.features) ? payload.features : Array.isArray(payload) ? payload : null;
     const saved = bulkPayload ? await saveObservations(bulkPayload) : await saveObservation(payload);
     const { findings, summary } = await refreshPublishedData(saved.observations);
-    const retraining = await maybeTriggerRetrain({
-      observations: saved.observations,
-      reason: bulkPayload ? "field_observations_bulk_saved" : "field_observation_saved",
-    });
-
     sendJson(response, {
       status: "saved",
       feature: saved.feature || saved.features?.[saved.features.length - 1] || null,
@@ -67,15 +56,7 @@ export default async function handler(request, response) {
       summary,
       storage: saved.storage,
       warning: saved.warning,
-      retraining,
-      training: {
-        mode: "deployed_feedback_ranking",
-        status: "applied",
-        fullRetrain:
-          retraining.status === "queued"
-            ? "Automatic retraining was queued on the configured worker."
-            : "Run npm run retrain:from-vercel locally, or configure CULVERT_RETRAIN_WEBHOOK_URL/GITHUB_RETRAIN_TOKEN for automatic retraining.",
-      },
+      model_update: "Field observations are stored separately and do not alter the frozen model.",
     }, 201);
   } catch (error) {
     const message = error.message || "Invalid observation.";

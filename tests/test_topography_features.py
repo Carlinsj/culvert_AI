@@ -211,7 +211,7 @@ def test_build_feature_table_applies_negative_observations_at_10m():
         crs="EPSG:32618",
     )
     known = gpd.GeoDataFrame(
-        [{"culvert_id": "known-1", "geometry": Point(0, 0)}],
+        [{"culvert_id": "known-1", "geometry": Point(100, 0)}],
         geometry="geometry",
         crs="EPSG:32618",
     )
@@ -231,6 +231,7 @@ def test_build_feature_table_applies_negative_observations_at_10m():
 
     assert features.loc["denied", "field_denied"] == 1
     assert features.loc["denied", "is_culvert"] == 0
+    assert features.loc["denied", "training_label_class"] == "weak_negative"
     assert features.loc["denied", "nearest_denied_observation_id"] == "obs-denied"
     assert features.loc["positive", "field_denied"] == 0
 
@@ -630,9 +631,10 @@ def test_known_culvert_pattern_features_use_approved_abu_and_doc_points():
     assert features.loc["near-abu-route", "nearest_known_route_match"] == 1
     assert features.loc["near-abu-route", "nearest_known_source_abu"] == 1
     assert features.loc["near-doc-route", "nearest_known_source_doc"] == 1
-    assert features.loc["near-abu-route", "approved_known_culvert_pattern_score"] > features.loc[
-        "far-route", "approved_known_culvert_pattern_score"
-    ]
+    assert (
+        features.loc["near-abu-route", "approved_known_culvert_pattern_score"]
+        > features.loc["far-route", "approved_known_culvert_pattern_score"]
+    )
 
 
 def test_training_sample_weights_prioritize_abu_inputs():
@@ -642,17 +644,20 @@ def test_training_sample_weights_prioritize_abu_inputs():
                 "candidate_id": "weak-unlabeled",
                 "is_culvert": 0,
                 "field_denied": 0,
+                "training_label_class": "unlabeled_candidate",
                 "geometry": Point(0, 0),
             },
             {
                 "candidate_id": "report-positive",
                 "is_culvert": 1,
+                "training_label_class": "verified_positive",
                 "nearest_field_report_source_file": "team_report.pdf",
                 "geometry": Point(1, 0),
             },
             {
                 "candidate_id": "abu-positive",
                 "is_culvert": 1,
+                "training_label_class": "verified_positive",
                 "nearest_field_report_source_file": "field_observations.geojson",
                 "nearest_field_feedback_type": "abu",
                 "geometry": Point(2, 0),
@@ -660,6 +665,7 @@ def test_training_sample_weights_prioritize_abu_inputs():
             {
                 "candidate_id": "mvd-positive",
                 "is_culvert": 1,
+                "training_label_class": "verified_positive",
                 "nearest_field_report_source_file": "field_observations.geojson",
                 "nearest_field_feedback_type": "mvd",
                 "geometry": Point(2.5, 0),
@@ -668,6 +674,7 @@ def test_training_sample_weights_prioritize_abu_inputs():
                 "candidate_id": "abu-denied",
                 "is_culvert": 0,
                 "field_denied": 1,
+                "training_label_class": "verified_negative",
                 "nearest_denied_feedback_type": "inc",
                 "nearest_denied_notes": "no crossing found",
                 "geometry": Point(3, 0),
@@ -676,6 +683,7 @@ def test_training_sample_weights_prioritize_abu_inputs():
                 "candidate_id": "abu-missed",
                 "is_culvert": 0,
                 "field_denied": 1,
+                "training_label_class": "weak_negative",
                 "nearest_denied_feedback_type": "mvd_origin",
                 "nearest_denied_notes": "confirmed culvert was 100.0 m from this prediction",
                 "geometry": Point(4, 0),
@@ -692,4 +700,4 @@ def test_training_sample_weights_prioritize_abu_inputs():
     assert weighted.loc["abu-positive", "training_sample_weight"] == 24.0
     assert weighted.loc["mvd-positive", "training_sample_weight"] == 32.0
     assert weighted.loc["abu-denied", "training_sample_weight"] == 24.0
-    assert weighted.loc["abu-missed", "training_sample_weight"] == 32.0
+    assert weighted.loc["abu-missed", "training_sample_weight"] == 1.0
