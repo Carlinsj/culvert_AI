@@ -22,6 +22,7 @@ const DEMO_DIR = process.env.CULVERT_DEMO_DIR || "data/ulster_demo";
 const DATA_DIR = path.join(WEB_DIR, "data");
 const OBSERVATIONS_PATH = path.join(ROOT, "data", "processed", "field_observations.geojson");
 const OBSERVATION_STATUSES = new Set(["confirmed_culvert", "no_culvert", "uncertain"]);
+const PRODUCT_BODY_LIMIT = 35_000_000;
 const MIME_TYPES = new Map([
   [".html", "text/html; charset=utf-8"],
   [".css", "text/css; charset=utf-8"],
@@ -35,6 +36,15 @@ const MIME_TYPES = new Map([
 ]);
 
 let activeTask = null;
+const startupModelStatus = runProductCommand("status").catch((error) => {
+  console.error(`Frozen model startup validation failed: ${error.message}`);
+  return {
+    ok: false,
+    code: "model_unavailable",
+    error: "Culvert AI could not verify the prediction model. Analysis has been disabled.",
+    technical: error.message,
+  };
+});
 
 async function handleRequest(request, response) {
   try {
@@ -42,6 +52,33 @@ async function handleRequest(request, response) {
 
     if (url.pathname === "/api/health" && request.method === "GET") {
       await sendJson(response, await healthPayload());
+      return;
+    }
+
+    if (url.pathname === "/api/model-status" && request.method === "GET") {
+      const result = await startupModelStatus;
+      await sendJson(response, result.ok ? result.data : result, result.ok ? 200 : 503);
+      return;
+    }
+
+    if (url.pathname === "/api/analysis/inspect" && request.method === "POST") {
+      const payload = await readJsonBody(request, PRODUCT_BODY_LIMIT);
+      const result = await runProductCommand("inspect", payload);
+      await sendJson(response, result.ok ? result.data : result, result.ok ? 200 : productStatus(result));
+      return;
+    }
+
+    if (url.pathname === "/api/analysis" && request.method === "POST") {
+      const payload = await readJsonBody(request, PRODUCT_BODY_LIMIT);
+      const result = await runProductCommand("analyze", payload);
+      await sendJson(response, result.ok ? result.data : result, result.ok ? 200 : productStatus(result));
+      return;
+    }
+
+    if (url.pathname === "/api/analysis/nearby" && request.method === "POST") {
+      const payload = await readJsonBody(request);
+      const result = await runProductCommand("nearby", payload);
+      await sendJson(response, result.ok ? result.data : result, result.ok ? 200 : productStatus(result));
       return;
     }
 
@@ -183,7 +220,7 @@ function listenWithFallback(port, attempt = 0) {
     server.off("error", onError);
     console.log(`Culvert AI dev server running at http://${HOST}:${port}`);
     console.log("Frontend: /");
-    console.log("Backend:  /api/health, /api/findings, /api/summary, /api/route-count, /api/run-actual");
+    console.log("Backend:  /api/model-status, /api/analysis/nearby, /api/observations");
   });
 }
 
@@ -233,6 +270,7 @@ function isLoopbackAddress(address) {
 }
 
 async function healthPayload() {
+  const model = await startupModelStatus;
   return {
     status: "ok",
     activeTask,
@@ -240,6 +278,7 @@ async function healthPayload() {
       bin: path.relative(ROOT, PYTHON_BIN),
       ready: await canRead(PYTHON_BIN),
     },
+    model: model.ok ? model.data : { ready: false, message: model.error },
     data: {
       findings: await fileInfo(path.join(DATA_DIR, "findings.geojson")),
       summary: await fileInfo(path.join(DATA_DIR, "summary.json")),
@@ -363,10 +402,16 @@ function observationFeature(payload) {
       observed_at: observedAt,
       status,
       candidate_id: safeString(payload.candidate_id, 120),
+      physical_site_id: safeString(payload.physical_site_id, 120),
       road_name: safeString(payload.road_name, 180),
       stream_name: safeString(payload.stream_name, 180),
       notes: safeString(payload.notes, 2000),
       source: safeString(payload.source, 80) || "field_review",
+      inspector_name: safeString(payload.inspector_name, 180),
+      inspection_date: safeString(payload.inspection_date, 32),
+      drainage_visible: safeString(payload.drainage_visible, 20),
+      crossing_confirmed: safeString(payload.crossing_confirmed, 20),
+      photo_reference: safeString(payload.photo_reference, 500),
       prediction_score: numberOrNull(payload.prediction_score),
       priority_rank: numberOrNull(payload.priority_rank),
       priority_bucket: safeString(payload.priority_bucket, 40),
@@ -390,16 +435,53 @@ function observationFeature(payload) {
   };
 }
 
-async function readJsonBody(request) {
+async function readJsonBody(request, limit = 1_000_000) {
   let body = "";
   for await (const chunk of request) {
     body += chunk;
-    if (body.length > 1_000_000) {
-      throw new Error("Observation payload is too large.");
+    if (body.length > limit) {
+      throw new Error("The uploaded file is too large.");
     }
   }
 
   return body ? JSON.parse(body) : {};
+}
+
+function productStatus(result) {
+  if (result.code === "model_unavailable") return 503;
+  if (result.code === "internal") return 500;
+  return 400;
+}
+
+function runProductCommand(operation, payload = null) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(PYTHON_BIN, ["-m", "culvert_ai.product_service", operation], {
+      cwd: ROOT,
+      env: {
+        ...process.env,
+        PATH: `${path.join(ROOT, ".venv", "bin")}:${process.env.PATH || ""}`,
+        PYTHONPATH: path.join(ROOT, "src"),
+      },
+      shell: false,
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
+    child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
+    child.on("error", reject);
+    child.on("close", () => {
+      try {
+        const parsed = JSON.parse(stdout.trim());
+        if (!parsed.ok && parsed.technical) console.error(parsed.technical);
+        if (stderr.trim()) console.error(stderr.trim());
+        resolve(parsed);
+      } catch (error) {
+        reject(new Error(`Analysis service returned an invalid response: ${stderr || error.message}`));
+      }
+    });
+    if (payload) child.stdin.write(JSON.stringify(payload));
+    child.stdin.end();
+  });
 }
 
 function safeString(value, maxLength) {

@@ -46,6 +46,51 @@ def test_build_road_route_candidates_can_sample_all_numbered_roads():
     assert set(candidates["matched_route"]) == {"9W"}
 
 
+def test_build_road_route_candidates_can_sample_arbitrary_roads_with_opaque_ids():
+    roads = gpd.GeoDataFrame(
+        [
+            {
+                "corridor_id": "local-west",
+                "FULLNAME": "Local Road",
+                "geometry": LineString([(0, 0), (120, 0)]),
+            },
+            {
+                "corridor_id": "forest-spur",
+                "FULLNAME": "Forest Spur",
+                "geometry": LineString([(0, 100), (120, 100)]),
+            },
+        ],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+
+    candidates = generate_road_route_candidates(
+        roads,
+        interval_m=40,
+        include_all_roads=True,
+        route_id_column="corridor_id",
+    )
+
+    assert len(candidates) == 6
+    assert set(candidates["matched_route"]) == {"local-west", "forest-spur"}
+    assert set(candidates["road_name"]) == {"Local Road", "Forest Spur"}
+
+
+def test_arbitrary_road_mode_rejects_a_missing_route_id_column():
+    roads = gpd.GeoDataFrame(
+        [{"geometry": LineString([(0, 0), (120, 0)])}],
+        geometry="geometry",
+        crs="EPSG:32618",
+    )
+
+    with pytest.raises(ValueError, match="Route identifier column is missing"):
+        generate_road_route_candidates(
+            roads,
+            include_all_roads=True,
+            route_id_column="not_present",
+        )
+
+
 def test_build_road_route_candidates_can_add_lateral_offsets():
     roads = gpd.GeoDataFrame(
         [

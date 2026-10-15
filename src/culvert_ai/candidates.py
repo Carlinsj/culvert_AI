@@ -124,14 +124,26 @@ def generate_road_route_candidates(
     interval_m: float = 75.0,
     include_numbered_roads: bool = False,
     lateral_offsets_m: tuple[float, ...] = (0.0,),
+    include_all_roads: bool = False,
+    route_id_column: str | None = None,
 ) -> gpd.GeoDataFrame:
+    """Sample the frozen interval candidate pattern along selected or arbitrary roads.
+
+    ``include_all_roads`` only broadens which supplied road geometries receive the
+    existing interval sampling procedure.  It does not change the interval,
+    offsets, point placement, or candidate scoring behavior used by existing
+    callers.  ``route_id_column`` is an opaque grouping/output identifier; it is
+    never a predictive feature.
+    """
     roads = clean_geometry(roads)
     if interval_m <= 0:
         raise ValueError("interval_m must be positive.")
+    if include_all_roads and route_id_column and route_id_column not in roads.columns:
+        raise ValueError(f"Route identifier column is missing: {route_id_column}")
     lateral_offsets = _normalized_offsets(lateral_offsets_m)
 
     route_tokens = {_route_token(route) for route in routes or [] if _route_token(route)}
-    if not route_tokens and not include_numbered_roads:
+    if not route_tokens and not include_numbered_roads and not include_all_roads:
         raise ValueError("At least one usable route is required.")
 
     (roads_m,), metric_crs = project_layers_to_metric(roads)
@@ -140,6 +152,11 @@ def generate_road_route_candidates(
         road_name = _optional_name(road) or ""
         road_tokens = _road_route_tokens(road)
         matched = sorted(route_tokens & road_tokens)
+        if include_all_roads:
+            route_id = _row_identifier(road, road_pos, route_id_column, "road")
+            if pd.isna(route_id) or not str(route_id).strip():
+                route_id = _row_identifier(road, road_pos, None, "road")
+            matched = [str(route_id)]
         if include_numbered_roads and road_tokens and _auto_sample_numbered_road(row=road):
             matched = sorted(set(matched) or road_tokens)
         if not matched:

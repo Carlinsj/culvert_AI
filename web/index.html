@@ -1,219 +1,72 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Culvert AI Field Review</title>
-    <link
-      rel="stylesheet"
-      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
-      crossorigin="anonymous"
-    />
-    <link rel="stylesheet" href="styles.css?v=20260917-preliminary-results" />
-  </head>
-  <body>
-    <main class="app-shell">
-      <aside id="mobile-sidebar" class="sidebar" aria-label="Culvert candidates">
-        <section class="brand">
-          <button id="mobile-sidebar-close" class="mobile-sidebar-close" type="button" aria-label="Close list and filters">
-            Close
-          </button>
-          <p class="eyebrow">Ulster County Pilot</p>
-          <h1>Culvert AI Field Review</h1>
-          <div class="backend-row">
-            <p id="backend-status" class="backend-status">Checking backend</p>
-            <button id="sync-local-observations" type="button" class="sync-local-button" hidden>
-              Sync now
-            </button>
-          </div>
-          <div class="summary-grid" aria-label="Summary statistics">
-            <div>
-              <span id="total-count">0</span>
-              <label>candidates</label>
-            </div>
-            <div>
-              <span id="visible-count">0</span>
-              <label>matching</label>
-            </div>
-            <div>
-              <span id="max-score">0</span>
-              <label>top estimate</label>
-            </div>
-            <div>
-              <span id="field-label-count">0</span>
-              <label>QC labels</label>
-            </div>
-          </div>
-          <p id="model-quality" class="model-quality">Model quality pending</p>
-          <button id="open-research-results" class="research-results-button" type="button">
-            Preliminary results
-          </button>
-        </section>
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="description" content="Find and inspect potential culvert locations near you.">
+  <title>Culvert AI</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#nearbyPanel">Skip to nearby sites</a>
+  <div id="map" aria-label="Map of potential culvert locations"></div>
 
-        <section class="list-section" aria-label="Ranked candidates">
-          <div class="section-title">
-            <div class="section-heading">
-              <h2 id="list-heading">Ranked locations</h2>
-              <div class="list-tabs" role="tablist" aria-label="Location list views">
-                <button id="ranked-tab" type="button" data-list-view="ranked" aria-selected="true">
-                  Targets
-                </button>
-                <button id="incorrect-tab" type="button" data-list-view="incorrect" aria-selected="false">
-                  Incorrect
-                </button>
-                <button id="cbu-tab" type="button" data-list-view="cbu" aria-selected="false">
-                  CBU
-                </button>
-                <button id="mvd-tab" type="button" data-list-view="mvd" aria-selected="false">
-                  MVD
-                </button>
-                <button id="abu-tab" type="button" data-list-view="abu" aria-selected="false">
-                  ABU
-                </button>
-              </div>
-            </div>
-            <div class="section-actions">
-              <button id="place-point" type="button" aria-pressed="false">Add culvert</button>
-              <button
-                id="toggle-filters"
-                type="button"
-                aria-expanded="false"
-                aria-controls="filter-panel"
-              >
-                Filters
-              </button>
-              <button id="fit-visible" type="button">Fit map</button>
-            </div>
-          </div>
+  <header class="map-header">
+    <button class="brand" id="homeButton" aria-label="Return to Culvert AI map"><span class="brand-mark">CA</span><span><strong>Culvert AI</strong><small>Field inspection map</small></span></button>
+    <div class="coordinate-search">
+      <label class="sr-only" for="coordinateInput">Search latitude and longitude</label>
+      <input id="coordinateInput" placeholder="Search coordinates: 41.75, -74.10" inputmode="decimal">
+      <button id="coordinateSearch" aria-label="Search coordinates">Search</button>
+    </div>
+    <nav aria-label="Application"><button class="header-link active" data-view="map" title="Find and explore potential sites">Map</button><button class="header-link" data-view="field" title="Record what you find during an inspection">Field checks</button><button class="header-link" data-view="about">About</button></nav>
+    <div id="modelPill" class="model-pill checking">Checking model…</div>
+  </header>
 
-          <section id="filter-panel" class="controls" aria-label="Map filters" hidden>
-            <label class="control-label" for="search-input">Search</label>
-            <input id="search-input" type="search" placeholder="Road, stream, evidence" />
+  <main>
+    <aside id="nearbyPanel" class="nearby-panel" aria-live="polite">
+      <div class="panel-grip" aria-hidden="true"></div>
+      <div class="panel-heading"><div><p class="eyebrow">NEARBY INSPECTION SITES</p><h1>Potential culverts near you</h1></div><button id="collapsePanel" class="icon-button" aria-label="Collapse nearby sites">×</button></div>
 
-            <label class="control-label" for="score-range">Minimum estimate</label>
-            <div class="range-row">
-              <input id="score-range" type="range" min="0" max="100" value="0" />
-              <output id="score-output" for="score-range">0</output>
-            </div>
-
-            <div class="bucket-row" aria-label="Priority buckets">
-              <label><input type="checkbox" name="bucket" value="very_high" checked /> Very high</label>
-              <label><input type="checkbox" name="bucket" value="high" checked /> High</label>
-              <label><input type="checkbox" name="bucket" value="medium" checked /> Medium</label>
-              <label><input type="checkbox" name="bucket" value="low" checked /> Low</label>
-            </div>
-
-            <label class="toggle-row">
-              <input id="show-known" type="checkbox" />
-              <span>Include known culverts in list</span>
-            </label>
-
-            <div class="route-count-panel" aria-label="Route count prediction">
-              <label class="control-label" for="route-count-input">Route count</label>
-              <div class="route-count-row">
-                <input id="route-count-input" type="search" placeholder="Optional route; blank counts all" />
-                <button id="route-count-run" type="button">Count</button>
-              </div>
-              <div class="route-count-actions">
-                <button id="route-count-kingston" type="button">Kingston</button>
-              </div>
-              <label class="toggle-row route-count-toggle">
-                <input id="route-count-viewport" type="checkbox" checked />
-                <span>Count current map view</span>
-              </label>
-              <div id="route-count-result" class="route-count-result" role="status" aria-live="polite">
-                Leave route blank to count all visible routes.
-              </div>
-            </div>
-          </section>
-
-          <ol id="candidate-list" class="candidate-list"></ol>
-        </section>
-      </aside>
-      <div id="drawer-backdrop" class="drawer-backdrop" hidden></div>
-
-      <section class="map-area" aria-label="Candidate map">
-        <div class="mobile-map-bar" aria-label="Map controls">
-          <button
-            id="mobile-menu-toggle"
-            class="mobile-menu-toggle"
-            type="button"
-            aria-label="Open list and filters"
-            aria-expanded="false"
-            aria-controls="mobile-sidebar"
-          >
-            <span></span>
-            <span></span>
-            <span></span>
-          </button>
-          <button id="mobile-add-point" class="mobile-add-point" type="button" aria-pressed="false">
-            Add
-          </button>
-          <button id="mobile-route-count" class="mobile-route-count" type="button">
-            Targets
-          </button>
-          <button id="locate-me" class="locate-me" type="button" aria-pressed="false">
-            Locate
-          </button>
-          <button
-            id="recenter-location"
-            class="recenter-location"
-            type="button"
-            aria-label="Recenter map on my location"
-            hidden
-            disabled
-          >
-            <span class="recenter-icon" aria-hidden="true"></span>
-          </button>
-        </div>
-        <p id="location-status" class="location-status" role="status" aria-live="polite"></p>
-        <div id="map"></div>
-        <article id="detail-panel" class="detail-panel" aria-live="polite" hidden>
-          <div class="empty-state">Select a ranked location.</div>
-        </article>
+      <section id="welcomeState" class="welcome-state">
+        <div class="location-symbol" aria-hidden="true">◎</div>
+        <h2>Start with your location</h2>
+        <p>See ranked potential culvert locations on roads nearby. Your location is used only to select the area to analyze.</p>
+        <button id="useLocation" class="primary-action"><span aria-hidden="true">⌖</span> Use my location</button>
+        <button id="chooseOnMap" class="text-action">Or choose a point on the map</button>
+        <button id="browseSupportedAreas" class="text-action">Explore supported areas</button>
       </section>
-    </main>
 
-    <dialog id="detail-modal" class="detail-modal" aria-labelledby="detail-modal-title">
-      <form method="dialog" class="detail-modal-header">
-        <h2 id="detail-modal-title">Location details</h2>
-        <button id="detail-modal-close" type="submit" aria-label="Close details">Close</button>
-      </form>
-      <div id="detail-modal-body" class="detail-modal-body"></div>
-    </dialog>
+      <section id="loadingState" class="loading-state hidden">
+        <div class="spinner" aria-hidden="true"></div><div><strong>Finding nearby potential culverts</strong><p>Analyzing roads, terrain, and drainage around this location.</p></div>
+        <ol><li>Preparing nearby roads</li><li>Analyzing terrain and drainage</li><li>Ranking inspection sites</li></ol>
+      </section>
 
-    <dialog id="research-modal" class="research-modal" aria-labelledby="research-modal-title">
-      <header class="research-modal-header">
-        <div>
-          <p class="eyebrow">Professor demo · preliminary</p>
-          <h2 id="research-modal-title">DEM hydrology study</h2>
-        </div>
-        <button id="research-modal-close" type="button" aria-label="Close preliminary results">Close</button>
-      </header>
-      <div id="research-modal-body" class="research-modal-body">
-        <p class="research-loading">Loading preliminary results…</p>
-      </div>
-    </dialog>
+      <section id="resultsState" class="results-state hidden">
+        <p class="result-count" role="note">Recommendations require field verification.</p>
+        <div class="area-summary"><div><strong id="areaTitle">Current area</strong><span id="areaMeta"></span></div><button id="recenterButton" class="quiet-button">Recenter</button></div>
+        <label class="radius-control">Search radius<select id="radiusSelect"><option value="1600">1 mile</option><option value="4800" selected>3 miles</option><option value="8000">5 miles</option><option value="16000">10 miles</option></select></label>
+        <div class="result-toolbar"><div id="limitTabs" class="limit-tabs"><button class="active" data-limit="25">Top 25</button><button data-limit="50">Top 50</button><button data-limit="all">All</button></div><button id="exportMenu" class="quiet-button">Export</button></div>
+        <p id="resultCount" class="result-count"></p>
+        <div id="siteList" class="site-list"></div>
+      </section>
 
-    <template id="candidate-template">
-      <li>
-        <button type="button" class="candidate-button">
-          <span class="rank"></span>
-          <span class="candidate-main">
-            <strong class="candidate-title"></strong>
-            <span class="candidate-subtitle"></span>
-          </span>
-          <span class="score-pill"></span>
-        </button>
-      </li>
-    </template>
+      <section id="errorState" class="error-state hidden" role="alert"><strong id="errorTitle"></strong><p id="errorText"></p><button id="showSupportedAreas" class="primary-action hidden">Show supported areas</button><button id="retryLocation" class="text-action">Try my location again</button><details id="errorDetails" class="hidden"><summary>Technical details</summary><pre></pre></details></section>
+      <section id="supportedState" class="welcome-state hidden"><h2>Explore a supported area</h2><p id="supportedMessage">Choose a road area covered by our current road and terrain data.</p><div id="supportedAreaList"></div><button id="supportedLocation" class="text-action">Return to my location</button></section>
+    </aside>
 
-    <script
-      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-      crossorigin="anonymous"
-    ></script>
-    <script src="app.js?v=20260917-preliminary-results"></script>
-  </body>
+    <button id="openPanel" class="open-panel hidden">Nearby sites <span id="openPanelCount"></span></button>
+    <button id="locationButton" class="map-action location-action"><span aria-hidden="true">⌖</span><span>Use my location</span></button>
+    <button id="analyzeHere" class="map-action analyze-here hidden">Analyze this area</button>
+    <div class="map-legend"><strong>Priority</strong><span><i class="high"></i>High</span><span><i class="medium"></i>Medium</span><span><i class="lower"></i>Lower</span><span><i class="located"></i>Your location</span></div>
+  </main>
+
+  <aside id="detailSheet" class="detail-sheet hidden" aria-live="polite"><button id="closeDetails" class="icon-button" aria-label="Close site details">×</button><div id="detailContent"></div></aside>
+
+  <section id="fieldView" class="overlay-view hidden" aria-labelledby="fieldTitle"><div class="overlay-card field-card"><button class="icon-button close-overlay" aria-label="Close Field view">×</button><p class="eyebrow">FIELD MODE</p><h1 id="fieldTitle">Record a field check</h1><p class="intro">Select a nearby site and save what you observe. Field results remain separate from the frozen model.</p><label class="site-picker">Inspection site<select id="fieldSiteSelect"></select></label><div id="fieldSiteSummary" class="field-site-summary"></div><form id="fieldForm"><fieldset><legend>Culvert found?</legend><div class="choice-row"><label><input type="radio" name="status" value="confirmed_culvert" required><span>Yes</span></label><label><input type="radio" name="status" value="no_culvert"><span>No</span></label><label><input type="radio" name="status" value="uncertain"><span>Uncertain</span></label></div></fieldset><div class="form-grid"><label>Inspector name<input name="inspector_name" autocomplete="name"></label><label>Inspection date<input name="inspection_date" type="date"></label><label>Actual latitude<input name="latitude" type="number" step="any"></label><label>Actual longitude<input name="longitude" type="number" step="any"></label><label>Drainage visible<select name="drainage_visible"><option value="">Not recorded</option><option>Yes</option><option>No</option><option>Uncertain</option></select></label><label>Road crossing confirmed<select name="crossing_confirmed"><option value="">Not recorded</option><option>Yes</option><option>No</option><option>Uncertain</option></select></label><label class="wide">Photo/file reference<input name="photo_reference"></label><label class="wide">Notes<textarea name="notes" rows="3"></textarea></label></div><div id="fieldMessage" aria-live="polite"></div><button class="primary-action" type="submit">Save field result</button></form></div></section>
+
+  <section id="aboutView" class="overlay-view hidden" aria-labelledby="aboutTitle"><div class="overlay-card about-card"><button class="icon-button close-overlay" aria-label="Close About view">×</button><p class="eyebrow">ABOUT CULVERT AI</p><h1 id="aboutTitle">A map for planning field inspections</h1><p>Find potential culvert locations and choose where to inspect first.</p><p><strong>Map</strong> lets you explore nearby sites. <strong>Field checks</strong> lets you record whether you found a culvert, add notes, and save your inspection.</p><div class="about-callout"><span>Recommendations require field verification.</span></div></div></section>
+
+  <div id="exportPopover" class="export-popover hidden"><button id="exportCsv">Download CSV</button><button id="exportGeoJson">Download GeoJSON</button></div>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script><script type="module" src="/app.js"></script>
+</body>
 </html>

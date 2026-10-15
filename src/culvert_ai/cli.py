@@ -27,6 +27,7 @@ from culvert_ai.field_reports import append_field_report_candidates, import_fiel
 from culvert_ai.io import read_vector, write_vector
 from culvert_ai.llm_review import import_llm_reviewed_labels, write_llm_label_review_queue
 from culvert_ai.model import predict_culvert_probability, train_model
+from culvert_ai.inference import RouteZConfig, predict_culverts
 from culvert_ai.observations import merge_confirmed_observations
 from culvert_ai.osm import (
     DEFAULT_CENSUS_COUNTY_URL,
@@ -536,6 +537,39 @@ def build_parser() -> argparse.ArgumentParser:
     predict.add_argument("--csv-output", help="Optional CSV export for field review.")
     predict.set_defaults(func=_predict)
 
+    route_general = subparsers.add_parser(
+        "predict-route-general",
+        help="Run frozen FLOW-C plus dynamic ROUTE-Z on any supplied road network.",
+    )
+    route_general.add_argument("--roads", required=True, help="Road centerline vector file.")
+    route_general.add_argument("--streams", required=True, help="Mapped water/stream vector file.")
+    route_general.add_argument("--dem", required=True, help="DEM raster used for terrain features.")
+    route_general.add_argument("--model", required=True, help="Frozen audited FLOW-C joblib bundle.")
+    route_general.add_argument("--output", required=True, help="Full globally ranked vector output.")
+    route_general.add_argument("--csv-output", help="Optional field-ready CSV output.")
+    route_general.add_argument(
+        "--route-id-column",
+        help="Opaque road/route grouping column; never used as a predictive model feature.",
+    )
+    route_general.add_argument("--flow-accumulation")
+    route_general.add_argument("--drainage-area")
+    route_general.add_argument("--landcover")
+    route_general.add_argument("--dem-crossings-0p1km2")
+    route_general.add_argument("--dem-crossings-0p5km2")
+    route_general.add_argument("--dem-crossings-2km2")
+    route_general.add_argument("--dem-crossings-10km2")
+    route_general.add_argument(
+        "--global-route-z-center",
+        type=float,
+        help="Optional frozen global FLOW-C center for statistically unstable short roads.",
+    )
+    route_general.add_argument(
+        "--global-route-z-scale",
+        type=float,
+        help="Optional frozen global FLOW-C scale for statistically unstable short roads.",
+    )
+    route_general.set_defaults(func=_predict_route_general)
+
     evaluate = subparsers.add_parser(
         "evaluate", help="Evaluate predictions against known culverts."
     )
@@ -858,6 +892,54 @@ def _predict(args) -> dict:
     predictions = predict_culvert_probability(features, args.model)
     write_vector(predictions, args.output)
     result = {"predictions": Path(args.output), "rows": len(predictions)}
+    if args.csv_output:
+        write_vector(predictions, args.csv_output)
+        result["predictions_csv"] = Path(args.csv_output)
+    return result
+
+
+def _predict_route_general(args) -> dict:
+    roads = read_vector(args.roads)
+    streams = read_vector(args.streams)
+    crossing_paths = {
+        "0p1km2": args.dem_crossings_0p1km2,
+        "0p5km2": args.dem_crossings_0p5km2,
+        "2km2": args.dem_crossings_2km2,
+        "10km2": args.dem_crossings_10km2,
+    }
+    crossings = {
+        threshold: read_vector(path)
+        for threshold, path in crossing_paths.items()
+        if path
+    }
+    config = None
+    if args.global_route_z_center is not None or args.global_route_z_scale is not None:
+        if args.global_route_z_center is None or args.global_route_z_scale is None:
+            raise ValueError("Both global ROUTE-Z center and scale must be supplied together.")
+        config = RouteZConfig(
+            global_center=args.global_route_z_center,
+            global_scale=args.global_route_z_scale,
+        )
+    predictions = predict_culverts(
+        roads,
+        streams=streams,
+        dem_path=args.dem,
+        flow_c_model=args.model,
+        route_id_column=args.route_id_column,
+        flow_accumulation_path=args.flow_accumulation,
+        drainage_area_path=args.drainage_area,
+        landcover_path=args.landcover,
+        dem_crossings=crossings,
+        route_z_config=config,
+    )
+    write_vector(predictions, args.output)
+    result = {
+        "predictions": Path(args.output),
+        "physical_sites": len(predictions),
+        "routes": int(predictions["route_id"].nunique()),
+        "model_retrained": False,
+        "site_radius_m": 20.0,
+    }
     if args.csv_output:
         write_vector(predictions, args.csv_output)
         result["predictions_csv"] = Path(args.csv_output)

@@ -1,0 +1,23 @@
+{
+  "description": "Explore roads within the currently loaded road and terrain coverage.",
+  "areas": [
+    {
+      "name": "Rock Ledge Ln",
+      "latitude": 41.88051899999999,
+      "longitude": -74.110507,
+      "radius_m": 4800
+    },
+    {
+      "name": "Beech Hill Rd",
+      "latitude": 42.02063900000001,
+      "longitude": -74.765347,
+      "radius_m": 4800
+    },
+    {
+      "name": "Braden Rd",
+      "latitude": 41.71952300000001,
+      "longitude": -74.519277,
+      "radius_m": 4800
+    }
+  ]
+}
