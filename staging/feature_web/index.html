@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Culvert AI · Research workspace</title><link rel="icon" href="data:,">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/comparison.css">
+</head>
+<body>
+<header>
+  <div class="brand"><span class="monogram">CA</span><div><strong>Culvert AI</strong><small>RESEARCH WORKSPACE</small></div></div>
+  <nav class="workspace-nav" aria-label="Research workspace views">
+    <button data-workspace="predictions" aria-pressed="true">Predictions</button>
+    <button data-workspace="comparison" aria-pressed="false">Actual vs Predicted</button>
+    <button data-workspace="performance" aria-pressed="false">Model Performance</button>
+  </nav>
+  <div class="toolbar"><button id="locate">Use my location</button><button id="measure" aria-pressed="false">Measure distance</button></div>
+</header>
+<main>
+  <aside id="sidebar">
+    <section id="predictionSearch" class="search-section prediction-workspace">
+      <p class="eyebrow">ULSTER COUNTY, NEW YORK</p><h1>Explore nearby sites.</h1>
+      <p>Choose a road area or use your location.</p>
+      <div class="search-grid">
+        <label>Road area<select id="areaSelect"><option value="beaver">Beaver Kill area</option><option value="rock">Rock Ledge Ln</option><option value="beech">Beech Hill Rd</option><option value="braden">Braden Rd</option><option value="custom">Custom location</option></select></label>
+        <label>Radius<select id="radius"><option value="1000">1 km</option><option value="1500" selected>1.5 km</option><option value="2500">2.5 km</option></select></label>
+      </div>
+      <button id="analyze" class="primary">Show sites</button>
+      <button id="supported" class="text-button">Explore other road areas →</button>
+      <p id="status" role="status">Loading nearby sites…</p>
+    </section>
+    <details id="advanced" class="advanced prediction-workspace">
+      <summary>Advanced</summary>
+      <div class="advanced-content">
+        <details><summary>Search coordinates</summary><div class="coordinate-grid"><label>Latitude<input id="latitude" type="number" step="any" value="42.07647"></label><label>Longitude<input id="longitude" type="number" step="any" value="-74.207172"></label></div><p>Change coordinates, then select Show sites.</p></details>
+        <details><summary>Analysis settings</summary>
+          <label>Discovery mode<select id="mode"><option value="feature">Feature-driven sites — Experimental baseline</option><option value="physical_discovery">Small drainage + adaptive sites — Research comparison</option><option value="high_recall">High-recall ranking — Comparison</option></select></label>
+          <label>Fixed ranking policy<select id="policy"><option value="dynamic_route_z">Dynamic ROUTE-Z</option><option value="raw_rf">Raw RF score</option></select></label>
+          <label>Grouping policy<select id="grouping"><option value="legacy20">Existing road-aware 20 m — Baseline</option><option value="identity20">Preserve distinct evidence — Experimental</option></select></label>
+          <p>Apply changes with Show sites. Small-drainage mode uses identity-based physical grouping regardless of the baseline grouping selector. Grouping is a research hypothesis, not proof of a culvert.</p>
+        </details>
+        <details><summary>Map layers &amp; diagnostics</summary>
+          <label>Primary map representation<select id="representation"><option value="grouped">One marker per recommended group</option><option value="raw">Raw candidates — Diagnostic only</option></select></label>
+          <div id="layers">
+            <label><input type="checkbox" data-layer="anchors"> Raw road-sampling anchors <small>Computational samples, not detections</small></label>
+            <label><input type="checkbox" data-layer="mapped_crossings"> Mapped stream-road crossings</label>
+            <label><input type="checkbox" data-layer="dem_crossings"> DEM-derived drainage crossings</label>
+            <label><input type="checkbox" data-layer="proposals"> Feature-driven experimental proposals</label>
+            <label><input type="checkbox" data-layer="consolidated"> Consolidated potential physical sites</label>
+            <label><input type="checkbox" data-layer="recommendations" checked> Ranked inspection recommendations</label>
+            <label><input type="checkbox" data-layer="hydrology"> DEM / mapped drainage networks</label>
+            <label><input type="checkbox" id="inventoryLayer"> Summer 2026 actual locations <small>Retrospective diagnostic, not independent validation</small></label>
+          </div>
+          <label><input id="spacing" type="checkbox"> Show candidate spacing</label>
+          <label>Spacing source<select id="spacingSource"><option value="anchors">Raw sampling anchors</option><option value="proposals">Feature-driven proposals</option></select></label>
+          <p>Same-road chainage, not distance between confirmed culverts. Optional layers can show multiple representations. No visual-only clustering is applied.</p><p id="diagnostics"></p>
+        </details>
+        <details><summary>Model information</summary><p>Research use only. Field deployment is planned for summer 2027, subject to validation. Frozen RF disabled: 35/48 fields differ from its training representation. Only the compatible experimental v2 RF is used. Scores are not probabilities. No independent accuracy claim.</p></details>
+      </div>
+    </details>
+    <details id="performancePanel" class="performance prediction-workspace" hidden>
+      <summary>Actual vs predicted performance</summary>
+      <div id="performanceMetrics" aria-live="polite"><p>Choose an area to calculate active-map matches.</p></div>
+      <p class="metric-note">Unmatched predictions are unverified, not false positives. The 847-record benchmark is retrospective and development-exposed.</p>
+    </details>
+    <section id="predictionSites" class="site-section prediction-workspace">
+      <div class="section-heading"><h2 id="listTitle">Potential sites</h2><button id="export" class="small-button" disabled>Export</button></div>
+      <div id="siteFilters" class="filter-grid"><label>Road<select id="roadFilter"><option value="">All roads</option></select></label><label>Show<select id="budget"><option>25</option><option>50</option><option>100</option><option selected>250</option><option>500</option><option>1000</option><option value="all">Full list — diagnostic</option></select></label></div>
+      <p id="listHint" class="muted">Select a site to see details.</p><div id="results"></div>
+    </section>
+    <section id="comparisonWorkspace" class="comparison-workspace" hidden>
+      <p class="eyebrow">RECORDED CULVERT COMPARISON</p><h1>Actual vs Predicted</h1>
+      <p>Choose a populated area, model, and inspection budget. Recorded culverts load automatically.</p>
+      <label>Location<select id="comparisonLocation"><option value="rock">Rock Ledge</option><option value="beaver">Beaver Kill</option><option value="surveyed">Complete surveyed NY214 + NY28 intervals</option><option value="region6">Region 6</option><option value="region8">Region 8</option><option value="route">Route selection</option><option value="coordinates">Search by coordinates</option><option value="all">All supported inventory locations</option></select></label>
+      <div id="comparisonRouteFields" hidden><label>Route<select id="comparisonRoute"></select></label></div>
+      <div id="comparisonCoordinateFields" hidden><div class="coordinate-grid"><label>Latitude<input id="comparisonLatitude" type="number" step="any" value="41.880519"></label><label>Longitude<input id="comparisonLongitude" type="number" step="any" value="-74.110507"></label></div><label>Radius<select id="comparisonRadius"><option value="1500">1.5 km</option><option value="2500" selected>2.5 km</option><option value="5000">5 km</option><option value="10000">10 km</option></select></label></div>
+      <label>Prediction model<select id="comparisonModel"><option value="baseline_rf">Original RF · 13,065 sites</option><option value="v3">Experimental v3 RF · 68,302 hypotheses</option></select></label>
+      <div class="comparison-grid"><label>Inspection budget<select id="comparisonBudget"><option>25</option><option>50</option><option>75</option><option>100</option><option>117</option><option>119</option><option>125</option><option>142</option><option>150</option><option>200</option><option>250</option><option>500</option><option selected>1000</option><option>5000</option><option>10000</option><option>13065</option></select></label><label>Match tolerance<select id="comparisonTolerance"><option>5</option><option>10</option><option>15</option><option selected>20</option><option>25</option><option>50</option></select></label></div>
+      <div class="comparison-toggles"><label><input id="showRecorded" type="checkbox" checked> Show recorded culverts</label><label><input id="showComparisonPredictions" type="checkbox" checked> Show predictions</label></div>
+      <div class="comparison-actions"><button id="fitRecorded">Fit map to recorded culverts</button><button id="nextMissed">Next missed culvert</button></div>
+      <p id="comparisonStatus" role="status">Loading comparison options…</p>
+      <dl id="comparisonMetrics" class="metric-grid"></dl>
+      <p id="comparisonNotice" class="metric-note"></p>
+      <div id="missedList" class="missed-list"></div>
+    </section>
+    <section id="modelPerformanceWorkspace" class="performance-workspace" hidden>
+      <p class="eyebrow">RETROSPECTIVE BENCHMARK</p><h1>Model Performance</h1>
+      <p>Same 847 searchable records, maximum-cardinality one-to-one matching within 20 m. The additional 112 workbook records are outside successful fixed-cell searches.</p>
+      <div id="performanceTable"></div>
+      <p>These data are development-exposed and are not independent accuracy or precision estimates. Unmatched predictions remain unverified.</p>
+    </section>
+  </aside>
+  <div class="map-wrap">
+    <div id="map" aria-label="Interactive geographic research map"></div><div id="mapSummary" class="map-summary">Potential inspection sites · field verification required</div>
+    <details id="mapLegend" class="map-legend" open><summary>Map legend</summary><div class="legend-items">
+      <span><i class="legend-circle actual-match"></i>Matched actual</span><span><i class="legend-circle actual-miss"></i>Missed actual</span>
+      <span><i class="legend-pin predicted"></i>Prediction</span><span><i class="legend-pin predicted matched"></i>Matched prediction</span>
+      <span><i class="legend-pin unmatched"></i>Unmatched / unverified</span><span><i class="legend-line match"></i>Match ≤20 m</span>
+      <span><i class="legend-line dem"></i>DEM drainage</span><span><i class="legend-line stream"></i>Mapped stream</span><span><i class="legend-line road"></i>Road</span>
+    </div><p>Predictions are experimental ranked inspection recommendations, not confirmed culverts. “Unmatched” means not paired to this retrospective inventory within 20 m; it does not mean false.</p></details>
+    <div class="map-tools"><button id="measureMap" aria-pressed="false" aria-controls="rulerPanel">↔ Measure A → B</button></div>
+    <article id="detail" hidden aria-labelledby="detailTitle"></article>
+    <section id="rulerPanel" class="ruler-panel" hidden tabindex="-1" aria-label="Geographic distance ruler">
+      <div class="ruler-heading"><h2>Distance</h2><select id="rulerUnits" aria-label="Measurement units"><option value="m">Meters</option><option value="ft">Feet</option></select></div>
+      <output id="distance" aria-live="polite">Place both pins</output><p id="rulerHint">Place Pin A, then Pin B.</p>
+      <div class="ruler-placement"><button id="placePinA" aria-pressed="true">1 · Place marker A</button><button id="placePinB" aria-pressed="false">2 · Place marker B</button></div>
+      <details id="rulerAdvanced"><summary>Coordinates &amp; snapping</summary>
+        <label><input id="rulerSnap" type="checkbox" checked> Snap to visible sites within 14 pixels</label>
+        <div class="endpoint"><strong>Pin A</strong><input id="pinALat" aria-label="Pin A latitude" type="number" step="any"><input id="pinALng" aria-label="Pin A longitude" type="number" step="any"><button id="setPinA">Set A</button><small id="pinASnap">Free geographic endpoint</small></div>
+        <div class="endpoint"><strong>Pin B</strong><input id="pinBLat" aria-label="Pin B latitude" type="number" step="any"><input id="pinBLng" aria-label="Pin B longitude" type="number" step="any"><button id="setPinB">Set B</button><small id="pinBSnap">Free geographic endpoint</small></div>
+      </details>
+      <div class="ruler-actions"><button id="rulerReset">Reset</button><button id="rulerClear">Clear</button><button id="rulerExit">Exit</button></div>
+      <small>Straight-line distance, not road travel. Drag either pin. Escape pauses; arrow keys move 1 m, Shift+arrow 10 m.</small>
+    </section>
+  </div>
+</main>
+<footer>Recommendations require field verification.</footer>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script><script type="module" src="/app.js"></script>
+</body></html>

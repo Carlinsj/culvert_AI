@@ -1,7 +1,49 @@
-# Experimental staging
+# Historical research comparisons
 
-Two separate opt-in paths live here. Neither changes the main application or
-automatically promotes a model. Recommendations require field verification.
+For current work, use `npm run dev` or `npm start` from the repository root.
+Both open the same research workspace; there is no separate staging route to
+launch. See the [main README](../README.md) and [workspace controls](FEATURE_README.md).
+Field deployment is planned for summer 2027, subject to validation.
+
+The older entry points below are retained only to reproduce historical studies;
+they are not required for normal use and do not automatically promote a model.
+Recommendations require field verification.
+
+## v7 surveyed-route physical crossings
+
+The current **Actual vs Predicted** workspace includes the v7 physical-crossing
+queue for the complete documented NY214 and NY28 intervals. Selecting v7 loads
+the 31-record surveyed inventory and defaults to the first frozen-RF budget that
+reaches the retrospective development target: 119 sites, 22 matches, 71.0%
+recall at 20 m. The full conservative queue contains 142 distinct sites and
+matches 26/31.
+
+Candidate generation is sealed before inventory is loaded. D8 links and internal
+terrain-profile measurements are available as evidence overlays; the 10 m probes
+are not emitted as recommendations. The routes were exposed during development,
+so this is not an independent validation claim. See the
+[v7 report](../reports/experiments/v7_physical_crossings_final_20261020/REPORT.md).
+
+## High-recall hybrid site discovery
+
+```sh
+scripts/python.sh scripts/serve_hybrid_staging.py --port 8095
+```
+
+`hybrid_sites.py`, `hybrid_service.py` and `hybrid_web/` retain dense corridor
+fallbacks alongside mapped approaches and actual drainage crossings. Fixed
+raw RF and dynamic ROUTE-Z use the same candidates; evidence classes never boost
+priority. Intermediate points remain optional diagnostics, not confirmed culverts.
+
+On the same 121 road segments, hybrid raw coverage is 700/705 eligible inventory
+records, versus 63/705 crossing-only; 20 m representatives retain 653 score-free
+or 657 score-ordered one-to-one matches. Ranking does not improve: hybrid ROUTE-Z
+has 13 matches in three Top-100 budgets and 31 in three Top-250 budgets, versus
+13/34 historical and 29/59 crossing-only. This is not a field-ready replacement.
+
+Frozen RF feature parity fails. This path loads only the prior experimental v2 RF;
+evaluation reuses its existing held-out copies without new fits. See the
+[hybrid report](../reports/experiments/high_recall_hybrid_20261015/REPORT.md).
 
 ## Hydrology-driven sites v2
 
@@ -116,3 +158,24 @@ scripts/python.sh scripts/stage_ranking_policy.py --features reports/staging/new
 
 See the [validation report](../reports/staging/ranking_policy_correction_20261015/REPORT.md)
 for results, concentration, limitations and the deployment recommendation.
+
+## Complete surveyed-route supervision
+
+The fail-closed supervised experiment uses only the four exact marker intervals
+documented as complete in `configs/surveyed_route_segments.csv`. It seals physical
+crossing candidates and features before loading inventory coordinates, then creates
+positive, hard-negative, and uncertain labels. Entire NY214 and NY28 route groups
+are held out in turn for experimental RF/HGB evaluation; production and the frozen
+RF remain unchanged.
+
+```sh
+scripts/python.sh scripts/train_surveyed_route_models.py \
+  --output reports/experiments/surveyed_route_supervision_replay \
+  --model-dir models/experiments/surveyed_route_supervision_replay
+```
+
+The completed v4 report is at
+`reports/experiments/surveyed_route_supervision_v4_20261020/REPORT.md`. The combined
+candidate-generation ceiling is 20/31 (64.5%), so the available physical sites
+cannot support a 70% held-out-recall claim. Do not expand negative coverage beyond
+the manifest without explicit surveyed endpoints and completeness evidence.

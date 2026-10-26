@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd web
-python3 -m http.server 8080 --bind 127.0.0.1
+RESEARCH_SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+export PYTHONDONTWRITEBYTECODE=1
+exec "$RESEARCH_SCRIPT_DIR/python.sh" "$RESEARCH_SCRIPT_DIR/serve_research.py" "$@"
