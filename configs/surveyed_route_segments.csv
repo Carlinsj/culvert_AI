@@ -1,0 +1,5 @@
+segment_id,route,route_id,start_marker,end_marker,coverage_status,source_document,source_date,evidence_note
+ny28_276_286,NY28,100241011," 28 86012276"," 28 86012286",confirmed_complete,CS_CJ - Small Culvert Inventory Daily Field Report 06-08-2026.pdf,2026-06-08,"Exact marker interval; report states no culverts were found in this first mile."
+ny28_296_306,NY28,100241011," 28 86012296"," 28 86012306",confirmed_complete,CS_CJ - Small Culvert Inventory Daily Field Report 06-08-2026.pdf,2026-06-08,"Exact marker interval; report states nine culverts were found and the next-day report records completion work."
+ny28_316_326,NY28,100241011," 28 86012316"," 28 86012326",confirmed_complete,CS_CJ - Small Culvert Inventory Daily Field Report 06-09-2026.docx,2026-06-09,"Exact marker interval; report states five culverts were found and the next-day report records completion work."
+ny214_018_038,NY214,100163011,"214 86011018","214 86011038",confirmed_complete,CS_CJ - Small Culvert Inventory Daily Field Report 06-11-2026.docx,2026-06-11,"Exact combined-team marker interval; report records completion/discovery work by three teams."

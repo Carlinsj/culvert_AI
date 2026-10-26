@@ -1,0 +1,2 @@
+segment_id,route,start_marker,end_marker,status,source_document,reason
+ny28_336_338,NY28," 28 86012336"," 28 86012338",conflicted_inventory_vs_report,CS_CJ - Small Culvert Inventory Daily Field Report 06-10-2026.docx,"The report states no culverts were found, but the official inventory contains later records at markers 336 and 338; do not create negatives until the coverage chronology is reconciled."
